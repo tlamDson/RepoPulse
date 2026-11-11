@@ -460,13 +460,18 @@ def run(args: argparse.Namespace) -> int:
                 elif not r.stalled and is_stalled(
                     r.last_output, now, args.stall_minutes * 60, r.last_rate
                 ):
-                    log(f"{tid}: {args.stall_minutes} phút không có output, coi là treo, dừng")
+                    log(f"{tid}: {args.stall_minutes:g} phút không có output, coi là treo, dừng")
                     r.stalled = True
                     r.proc.terminate()
                 continue
             r.reader.join(timeout=10)
             d = decide_after_exit(
-                r.proc.returncode, r.last_rate, r.result_text, int(now), args.max_wait_hours * 3600
+                r.proc.returncode,
+                r.last_rate,
+                r.result_text,
+                int(now),
+                args.max_wait_hours * 3600,
+                stalled=f"treo {args.stall_minutes:g} phút không có output" if r.stalled else None,
             )
             del runs[tid]
             log(f"{tid}: {d.kind} {d.reason}")
@@ -477,8 +482,6 @@ def run(args: argparse.Namespace) -> int:
                 stop_all = d.reason
                 final[tid] = d
             elif d.kind == "failed":
-                if r.stalled:
-                    d = Decision("failed", f"treo {args.stall_minutes} phút không có output")
                 failures[tid] = failures.get(tid, 0) + 1
                 last_failure[tid] = f"Lý do: {d.reason}\n{failure_context(attempt_lines(r))}"
                 if failures[tid] >= MAX_FAILURES:
@@ -534,6 +537,8 @@ def run(args: argparse.Namespace) -> int:
             ready = [t for t in ready if t.id in keep]
         if args.dry_run:
             print(render_progress(tasks, done, set(runs), blocked, skipped))
+            if develop_red:
+                print("CI trên develop đang đỏ: chạy thật sẽ KHÔNG mở việc nào dưới đây.")
             for t in ready:
                 print(f"SẼ CHẠY {t.id}: cwd={worktree_path(t)}")
                 print("  " + " ".join(build_command(ROOT, "<prompt>", None)))

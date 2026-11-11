@@ -17,9 +17,12 @@ python scripts/orchestrate.py run --auto-approve-harness             # chạy, r
 - Script đọc `scripts/prs.toml`, chạy tối đa 5 phiên `claude -p` song song (`--parallel N` để đổi),
   mỗi việc một worktree `.claude/worktrees/pr-<id>`. Số phiên thật bị giới hạn bởi độ rộng DAG.
   Không phiên nào chờ người: lệnh cần hỏi bị từ chối và ghi log.
-- CI trên `develop` đỏ (sau một lần merge): không mở việc mới, không release, tới khi xanh lại.
+- CI trên `develop` đỏ (sau một lần merge): không mở việc mới, không release. Chỉ lượt CI xanh mới
+  gỡ cờ (`gh` lỗi hay lượt bị huỷ thì giữ nguyên). Nếu lúc đó không còn phiên nào chạy, script dừng
+  và ghi `develop-ci` vào "Việc cần Lam"; sửa xong thì chạy lại.
 - Phiên im lặng quá 30 phút (`--stall-minutes`, trừ lúc chờ quota reset) bị coi là treo và dừng.
-  Việc thất bại được thử lại tối đa 2 lần; lần sau nhận kèm lý do và phần cuối log lần trước.
+  Việc thất bại được thử lại 1 lần (tổng 2 lần chạy); lần thử lại nhận kèm lý do và phần cuối log
+  lần trước.
 - `--auto-approve-harness`: nếu S0.4 merge xanh và log không có lệnh bị từ chối ngoài dự kiến, coi
   như harness đã duyệt và chạy tiếp từ PR B. Bỏ cờ này nếu muốn tự xem `docs/harness-check.md` trước.
 - Thiếu secret cloud: làm hết việc không cần cloud (S0.4, B, 2, 3, 4, 5, 6, 12) rồi dừng ở `probe`.

@@ -251,10 +251,14 @@ def decide_after_exit(
     result_text: str,
     now: int,
     max_wait_s: int,
+    stalled: str | None = None,
 ) -> Decision:
+    """``stalled`` = reason when the loop killed a silent session; it beats a stale quota event."""
     result = parse_result(result_text)
     if result and result[0] == "merged":
         return Decision("merged", result[1])
+    if stalled:
+        return Decision("failed", stalled)
     action, detail = rate_limit_action(last_rate_event)
     if action == "stop":
         return Decision("stop", str(detail))
@@ -307,12 +311,12 @@ def develop_ci_state(runs: list[dict]) -> str:
 
 
 def develop_ci_blocks(state: str, previously_blocked: bool) -> bool:
-    """Red develop holds new work; a pending run keeps the last verdict."""
+    """Red develop holds new work; only green releases it (pending/unknown keep the verdict)."""
     if state == "red":
         return True
-    if state == "pending":
-        return previously_blocked
-    return False
+    if state == "green":
+        return False
+    return previously_blocked
 
 
 def is_stalled(last_output: float, now: float, limit_s: float, last_rate: dict | None) -> bool:
