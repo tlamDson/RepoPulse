@@ -39,10 +39,20 @@ Không commit: `.env`/credentials/tokens, `.venv/`, `transform/target/`, `*.duck
 
 Mỗi PR làm đúng **một** việc, để review, revert và đo được từng việc riêng.
 
-- Một việc = một task trong `scripts/prs.toml`, hoặc một cải tiến/sửa lỗi cụ thể. Kiểm nhanh: title và câu đầu của `## Summary` nói hết PR mà không cần "và", "+", hay danh sách nhiều mục độc lập.
-- **Thuộc cùng việc** (được ở chung PR): test của việc đó; cập nhật `CLAUDE.md`, `.claude/rules/*`, `docs/` mà chính việc đó làm thay đổi; sửa các finding review của chính PR đó.
-- **Không thuộc** (PR riêng hoặc Nợ kỹ thuật): bug tìm thấy ngoài phạm vi, refactor không cần cho việc này, gợi ý review về code khác, sửa CI/tooling mà việc này không bắt buộc. Nếu việc chính *bắt buộc* phải sửa thứ khác mới xanh được, ghi rõ lý do trong `## Giả định`.
-- Nhiều cải tiến được duyệt cùng lúc: mỗi cái một PR, kể cả khi sửa cùng file (rẽ nhánh sau khi PR trước merge để tránh conflict).
+- **Một việc là gì:**
+  - Một task trong `scripts/prs.toml` luôn là **một** việc, đúng phạm vi tiêu đề và mục của nó trong `docs/plan.md`, kể cả khi tiêu đề có "và" (ví dụ PR 7). Phạm vi task do chủ repo định; reviewer không tách task.
+  - Việc ngoài `prs.toml` (cải tiến harness, sửa lỗi, tài liệu): title và câu đầu `## Summary` nói hết PR mà không cần "và", "+", hay danh sách nhiều mục độc lập.
+- **Thuộc cùng việc** (được ở chung PR):
+  - test của việc đó;
+  - cập nhật `CLAUDE.md`, `.claude/rules/*`, `docs/` mà chính việc đó làm thay đổi;
+  - sửa các finding review của chính PR đó;
+  - bug ngoài phạm vi theo mục "Nợ kỹ thuật" của `workflow.md`: test `# [BUG]` khẳng định hành vi hiện tại + mục ghi vào `tech-defaults.md` (không sửa bug).
+- **Không thuộc** (không gộp): sửa bug ngoài phạm vi, refactor không cần cho việc này, gợi ý review về code khác, sửa CI/tooling mà việc này không bắt buộc.
+  - Phiên tay: mở PR riêng.
+  - Phiên headless (một phiên = một PR, không mở PR thứ hai được): ghi vào Nợ kỹ thuật (bug) hoặc một dòng trong `## Giả định` (việc nên làm sau).
+  - Nếu việc chính *bắt buộc* phải sửa thứ khác mới xanh được, được làm trong PR này nhưng ghi rõ lý do trong `## Giả định`.
+- Nhiều cải tiến được duyệt cùng lúc: mỗi cái một PR, kể cả khi sửa cùng file. Rẽ nhánh sau khi PR trước merge, hoặc `gh pr update-branch <số>` khi nhánh tụt sau `develop`.
+- Không áp dụng cho PR release `develop → main` và PR của Dependabot.
 - `code-reviewer` coi PR làm hơn một việc là finding `[chặn]`.
 
 Feature target `develop`; chỉ PR release target `main`. Title `<type>: <short description>` (< 72 ký tự): `feat:`, `fix:`, `test:`, `docs:`, `chore:`, `refactor:`, `release:`. Mô tả theo `.github/pull_request_template.md`, thêm mục `## Giả định` khi chạy headless:

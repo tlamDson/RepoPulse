@@ -16,6 +16,7 @@
 5. **TDD bắt buộc**, commit đầu chỉ có test, thấy đỏ thật. Chi tiết: `.claude/rules/tdd.md`.
 6. **Số đo chỉ lấy từ `runs.csv`; dữ liệu mô phỏng ghi rõ "simulated".**
 7. **Cập nhật `CLAUDE.md` + `.claude/rules/*`** khi task làm thay đổi convention, tooling hay quy trình.
+8. **Một PR một việc.** Một task trong `scripts/prs.toml` hoặc một cải tiến/sửa lỗi; việc khác gặp trong lúc làm thì tách (headless: ghi Nợ kỹ thuật hoặc `## Giả định`). Chi tiết: mục "Một PR một việc" của `.claude/rules/developer-guide.md`.
 
 ## Chạy headless (`scripts/orchestrate.py`)
 
