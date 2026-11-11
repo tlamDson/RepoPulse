@@ -3,8 +3,10 @@ version: 2
 models:
   - name: stg_gharchive_events
     description: >
-      GH Archive events with the exact columns of silver/gharchive_events (docs/spark-jobs.md):
-      one row per event_id (silver already dedupes). Source chosen by the var
+      GH Archive events with the exact columns of silver/gharchive_events (docs/spark-jobs.md)
+      plus the load marker loaded_at: one row per event_id. Incremental, accumulated across
+      pipeline runs and never rebuilt by --full-refresh (full_refresh: false): a run inserts the
+      event ids not staged yet, the copy already staged wins. Source chosen by the var
       silver_gharchive_parquet: set -> read_parquet('<glob>'); not set -> the CI seed
       fixture_silver_gharchive_events (fixture, not a measurement).
     columns:
@@ -25,5 +27,9 @@ models:
         data_tests:
           - not_null
       - name: repo_name
+        data_tests:
+          - not_null
+      - name: loaded_at
+        description: Start of the dbt run that inserted the row (run_started_at, UTC).
         data_tests:
           - not_null
