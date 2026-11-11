@@ -131,7 +131,7 @@ id = "D1"
 title = "Databricks serverless bronze/silver"
 branch = "feature/databricks-bronze-silver"
 deps = ["14"]  # plan v2 xây trên kết quả giai đoạn 1
-needs = ["databricks"]
+needs = ["cloud"]
 agent = "spark-engineer"
 
 [[task]]
@@ -139,7 +139,7 @@ id = "D2"
 title = "Target dbt databricks trên SQL warehouse"
 branch = "feature/dbt-databricks-target"
 deps = ["D1"]
-needs = ["databricks"]
+needs = ["cloud"]
 agent = "analytics-engineer"
 
 [[task]]
@@ -147,7 +147,7 @@ id = "D3"
 title = "So sánh hai đường end-to-end (runner+MotherDuck vs Databricks)"
 branch = "feature/pipeline-path-comparison"
 deps = ["D2"]
-needs = ["databricks"]
+needs = ["cloud"]
 agent = "pipeline-ops"
 
 [[task]]
@@ -163,7 +163,7 @@ id = "E1"
 title = "Ma trận engine Q1-Q6 (DuckDB, Spark, Databricks, MotherDuck, Snowflake)"
 branch = "feature/engine-matrix"
 deps = ["D2"]
-needs = ["databricks"]
+needs = ["cloud"]
 agent = "analytics-engineer"
 
 [[task]]
