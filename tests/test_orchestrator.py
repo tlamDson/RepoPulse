@@ -670,3 +670,144 @@ def test_cli_defaults_to_five_parallel_and_thirty_minute_stall():
     args = _load_cli().build_parser().parse_args(["run"])
     assert args.parallel == 5
     assert args.stall_minutes == 30
+
+
+# ---------- independent review session (#2) ----------
+
+
+def test_build_prompt_stops_at_ready_and_never_reviews_or_merges(tasks):
+    p = build_prompt(tasks[2])
+    assert "RESULT: ready <số PR>" in p
+    assert "gh pr merge" not in p
+    assert "code-reviewer" not in p  # review is a separate, fresh session
+
+
+def test_parse_result_accepts_ready():
+    assert parse_result("CI xanh\nRESULT: ready 31") == ("ready", "31")
+
+
+def test_decide_after_exit_ready_carries_pr_number():
+    d = decide_after_exit(0, None, "RESULT: ready 31", now=0, max_wait_s=0)
+    assert d.kind == "ready"
+    assert d.reason == "31"
+
+
+def test_decide_after_exit_ready_keeps_only_the_digits():
+    for text in ("RESULT: ready #31", "RESULT: ready 31 (CI xanh)", "RESULT: ready PR #31"):
+        d = decide_after_exit(0, None, text, now=0, max_wait_s=0)
+        assert (d.kind, d.reason) == ("ready", "31"), text
+
+
+def test_decide_after_exit_ready_prefers_the_hash_number():
+    # Review PR 25 (round 2): "ready PR 2 #31" must read the PR number, not the task id
+    d = decide_after_exit(0, None, "RESULT: ready PR 2 #31", now=0, max_wait_s=0)
+    assert (d.kind, d.reason) == ("ready", "31")
+
+
+def test_cli_has_daily_command_and_daily_hour():
+    parser = _load_cli().build_parser()
+    assert parser.parse_args(["run"]).daily_hour == 22
+    args = parser.parse_args(["daily", "--date", "2026-11-11", "--no-send"])
+    assert args.cmd == "daily" and args.date == "2026-11-11" and args.no_send is True
+    assert parser.parse_args(["daily"]).force is False
+
+
+def test_decide_after_exit_ready_without_pr_number_is_a_counted_failure():
+    # Review PR 25: "ready" with no number put "" in pending_review, the next start was a build
+    # session again (falsy review_pr) and the loop never ended.
+    d = decide_after_exit(0, None, "RESULT: ready", now=0, max_wait_s=0)
+    assert d.kind == "failed"
+    assert "số PR" in d.reason
+
+
+def test_decide_after_exit_ready_beats_a_stale_rate_event():
+    stale = {"type": "rate_limit_event", "rate_limit_info": {"status": "rejected", "resetsAt": 9}}
+    d = decide_after_exit(0, stale, "RESULT: ready 31", now=0, max_wait_s=3600)
+    assert (d.kind, d.reason) == ("ready", "31")
+
+
+def test_build_review_command_runs_code_reviewer_agent_headless(tmp_path: Path):
+    from repopulse.orchestrator import build_review_command
+
+    cmd = build_review_command(tmp_path, "REVIEW IT", resume=None)
+    assert cmd[:3] == ["claude", "-p", "REVIEW IT"]
+    joined = " ".join(cmd)
+    assert "--agent code-reviewer" in joined
+    assert "--model opus" in joined and "--effort medium" in joined
+    assert "--permission-mode auto" in joined and "--permission-prompts none" in joined
+    assert "--output-format stream-json" in joined
+    assert "--resume" not in cmd
+    assert build_review_command(tmp_path, "R", resume="s1")[-2:] == ["--resume", "s1"]
+
+
+def test_build_review_prompt_names_pr_and_verdict_contract(tasks):
+    from repopulse.orchestrator import build_review_prompt
+
+    p = build_review_prompt(tasks[2], "31")
+    assert "#31" in p and "feature/event-spec" in p
+    assert "gh pr comment 31" in p
+    assert "REVIEW: PASS" in p and "REVIEW: FAIL" in p
+    assert "không merge" in p.lower()
+
+
+def test_parse_review_takes_last_verdict_line():
+    from repopulse.orchestrator import parse_review
+
+    assert parse_review("REVIEW: FAIL a\n...\nREVIEW: PASS") == ("PASS", "")
+    assert parse_review("REVIEW: FAIL thiếu test cho dedup") == ("FAIL", "thiếu test cho dedup")
+    assert parse_review("không có gì") is None
+
+
+def test_parse_review_trusts_only_review_lines():
+    # Review PR 25: the agent's template "Kết luận: PASS | FAIL" must never read as a PASS;
+    # merging hangs on this, so only an explicit REVIEW: line counts.
+    from repopulse.orchestrator import parse_review
+
+    assert parse_review("## Kết luận: PASS | FAIL") is None
+    assert parse_review("## Kết luận: PASS") is None
+    assert parse_review("## Kết luận: PASS\n\nREVIEW: FAIL thiếu test") == ("FAIL", "thiếu test")
+
+
+def test_decide_after_review_maps_verdict_quota_and_missing_line():
+    from repopulse.orchestrator import decide_after_review
+
+    assert decide_after_review(0, None, "REVIEW: PASS", now=0, max_wait_s=0).kind == "pass"
+    d = decide_after_review(0, None, "REVIEW: FAIL mutation sống", now=0, max_wait_s=0)
+    assert (d.kind, d.reason) == ("fail", "mutation sống")
+    limit = {
+        "type": "rate_limit_event",
+        "rate_limit_info": {"status": "rejected", "resetsAt": 100},
+    }
+    assert decide_after_review(1, limit, "", now=50, max_wait_s=3600).kind == "resume_at"
+    assert decide_after_review(1, None, "", now=0, max_wait_s=0).kind == "failed"
+    d = decide_after_review(1, limit, "", now=50, max_wait_s=3600, stalled="treo")
+    assert (d.kind, d.reason) == ("failed", "treo")
+
+
+def test_merge_ready_needs_all_three_required_checks_passing():
+    from repopulse.orchestrator import merge_ready
+
+    ok = [
+        {"name": "Lint", "bucket": "pass"},
+        {"name": "Unit Tests", "bucket": "pass"},
+        {"name": "dbt build (DuckDB)", "bucket": "pass"},
+        {"name": "GitGuardian Security Checks", "bucket": "pass"},
+    ]
+    assert merge_ready(ok) == (True, "")
+    red = [dict(c, bucket="fail") if c["name"] == "Unit Tests" else c for c in ok]
+    assert merge_ready(red) == (False, "Unit Tests: fail")
+    missing = [c for c in ok if c["name"] != "Lint"]
+    assert merge_ready(missing) == (False, "Lint: thiếu")
+    # Review PR 25: a check still running (or skipped) is not a pass
+    for bucket in ("pending", "skipping", "cancel"):
+        running = [dict(c, bucket=bucket) if c["name"] == "Unit Tests" else c for c in ok]
+        assert merge_ready(running) == (False, f"Unit Tests: {bucket}")
+
+
+def test_review_next_merges_on_pass_fixes_once_then_gives_up():
+    from repopulse.orchestrator import Decision, review_next
+
+    assert review_next(Decision("pass"), failed_rounds=0, max_rounds=2) == "merge"
+    assert review_next(Decision("pass"), failed_rounds=1, max_rounds=2) == "merge"
+    assert review_next(Decision("fail", "x"), failed_rounds=0, max_rounds=2) == "fix"
+    assert review_next(Decision("fail", "x"), failed_rounds=1, max_rounds=2) == "give_up"

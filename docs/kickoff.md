@@ -17,6 +17,9 @@ python scripts/orchestrate.py run --auto-approve-harness             # chạy, r
 - Script đọc `scripts/prs.toml`, chạy tối đa 5 phiên `claude -p` song song (`--parallel N` để đổi),
   mỗi việc một worktree `.claude/worktrees/pr-<id>`. Số phiên thật bị giới hạn bởi độ rộng DAG.
   Không phiên nào chờ người: lệnh cần hỏi bị từ chối và ghi log.
+- Mỗi PR có hai loại phiên: phiên PR (Fable) viết code tới khi CI xanh rồi báo `ready`; sau đó một
+  phiên review mới (`--agent code-reviewer`, Opus) review độc lập. PASS thì script tự kiểm 3 check
+  bắt buộc và merge; FAIL thì phiên PR chạy lại kèm kết luận review, tối đa 2 vòng review.
 - CI trên `develop` đỏ (sau một lần merge): không mở việc mới, không release. Chỉ lượt CI xanh mới
   gỡ cờ (`gh` lỗi hay lượt bị huỷ thì giữ nguyên). Nếu lúc đó không còn phiên nào chạy, script dừng
   và ghi `develop-ci` vào "Việc cần Lam"; sửa xong thì chạy lại.
@@ -35,7 +38,22 @@ python scripts/orchestrate.py run --auto-approve-harness             # chạy, r
 **Sáng ra xem:** `logs/run-<ngày>.md` (việc cần Lam, kết quả từng việc, tiến độ, danh sách lệnh bị
 hỏi/bị từ chối). Log chi tiết từng việc: `logs/pr-<id>.jsonl`.
 
+**Báo cáo ngày qua email:** mỗi phiên kết thúc ghi một dòng (lượt, phút, USD, lệnh bị từ chối,
+subagent) vào `logs/orchestrator-metrics.csv`. Lúc 22h (`--daily-hour`), nếu orchestrator đang chạy,
+nó viết `logs/daily-<ngày>.md` cho **24 giờ tính tới lúc gửi** (phiên xong sau 22h vào mail hôm sau;
+`daily --date` thì lấy đúng ngày lịch), gồm: PR đã merge, thất bại/review FAIL kèm lý do, chi phí theo việc, đề
+xuất luật từ lệnh bị từ chối lặp lại, việc cần Lam. Rồi gửi mail, mỗi ngày một lần; chỉ đánh dấu
+"đã gửi" khi mail đi thật, nên đặt biến SMTP muộn trong tối thì `daily` vẫn gửi được.
+
+- Bật mail: tạo Gmail App password, rồi đặt biến môi trường của Windows (mở terminal mới sau đó):
+  `setx REPOPULSE_SMTP_USER "<gmail>"`, `setx REPOPULSE_SMTP_APP_PASSWORD "<app password>"`,
+  tuỳ chọn `setx REPOPULSE_REPORT_TO "<người nhận>"`. Thiếu thì chỉ ghi file.
+- Khi orchestrator không chạy lúc 22h, đặt Task Scheduler gọi lệnh `daily` (không gửi trùng):
+  `schtasks /Create /SC DAILY /ST 22:05 /TN RepoPulseDaily /TR "python D:\Desktop\RepoPulse\scripts\orchestrate.py daily"`
+- Đề xuất luật chỉ là đề xuất: Lam duyệt rồi tự thêm vào `.claude/rules/` (đường dẫn được bảo vệ).
+
 ```
+python scripts/orchestrate.py daily [--date 2026-11-11] [--no-send] [--force]
 python scripts/orchestrate.py report         # tiến độ theo PR đã merge
 python scripts/orchestrate.py quota          # quota gần nhất
 python scripts/orchestrate.py clean --dry-run

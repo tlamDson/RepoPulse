@@ -20,6 +20,7 @@ import json
 import subprocess
 import sys
 import time
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -67,20 +68,37 @@ def _peak_rss_mb() -> float | None:
     return round(kb / 1024, 1)
 
 
-def input_files(data_dir: Path) -> list[Path]:
-    files = sorted(Path(data_dir).glob("*.json.gz"))
+Source = str | Path | Sequence[str | Path]
+
+
+def input_files(data: Source) -> list[Path]:
+    """``*.json.gz`` of a directory, or an explicit list of files (all must exist)."""
+    if isinstance(data, str | Path):
+        files = sorted(Path(data).glob("*.json.gz"))
+        if not files:
+            raise FileNotFoundError(f"no *.json.gz files in {data}")
+        return files
+    files = [Path(p) for p in data]
     if not files:
-        raise FileNotFoundError(f"no *.json.gz files in {data_dir}")
+        raise FileNotFoundError("empty file list")
+    absent = [str(p) for p in files if not p.is_file()]
+    if absent:
+        raise FileNotFoundError(f"missing input file(s): {', '.join(absent)}")
     return files
 
 
-def load(con: duckdb.DuckDBPyConnection, data_dir: Path, seed_path: Path) -> int:
+def _source_sql(data: Source) -> str:
+    if isinstance(data, str | Path):
+        return _sql_str((Path(data) / "*.json.gz").as_posix())
+    return "[" + ", ".join(_sql_str(Path(p).as_posix()) for p in data) + "]"
+
+
+def load(con: duckdb.DuckDBPyConnection, data: Source, seed_path: Path) -> int:
     """Full refresh of ``raw_events`` and ``repos``; return the raw row count."""
-    pattern = (Path(data_dir) / "*.json.gz").as_posix()
     con.execute("DROP TABLE IF EXISTS raw_events")
     con.execute(
         "CREATE TABLE raw_events AS SELECT * FROM read_json("
-        f"{_sql_str(pattern)}, format = 'newline_delimited', compression = 'gzip', "
+        f"{_source_sql(data)}, format = 'newline_delimited', compression = 'gzip', "
         f"columns = {RAW_COLUMNS})"
     )
     con.execute("DROP TABLE IF EXISTS repos")
@@ -93,18 +111,29 @@ def load(con: duckdb.DuckDBPyConnection, data_dir: Path, seed_path: Path) -> int
 
 
 def run_once(
-    data_dir: str | Path, seed_path: str | Path = DEFAULT_SEED, *, collect: bool = False
+    data: Source,
+    seed_path: str | Path = DEFAULT_SEED,
+    *,
+    collect: bool = False,
+    temp_directory: str | Path | None = None,
 ) -> dict:
-    """Load + Q1..Q6 once in this process; timings in seconds."""
-    data_dir = Path(data_dir)
-    files = input_files(data_dir)
+    """Load + Q1..Q6 once in this process; timings in seconds.
+
+    ``data`` is a directory (every ``*.json.gz``) or a list of files. ``temp_directory`` lets
+    DuckDB spill to disk instead of failing when the data does not fit in memory.
+    """
+    files = input_files(data)
+    source = data if isinstance(data, str | Path) else files
     result: dict = {"bytes_read": sum(p.stat().st_size for p in files)}
     if collect:
         result["results"] = {}
     con = duckdb.connect(":memory:")
     try:
+        if temp_directory is not None:
+            Path(temp_directory).mkdir(parents=True, exist_ok=True)
+            con.execute(f"SET temp_directory = {_sql_str(Path(temp_directory).as_posix())}")
         start = time.perf_counter()
-        result["row_count"] = load(con, data_dir, Path(seed_path))
+        result["row_count"] = load(con, source, Path(seed_path))
         result["load_seconds"] = round(time.perf_counter() - start, 6)
         for q in QUERIES:
             sql = (QUERY_DIR / f"{q}.sql").read_text(encoding="utf-8")

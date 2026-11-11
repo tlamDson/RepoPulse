@@ -227,7 +227,8 @@ def hold_until(event: dict | None) -> int | None:
     return max(resets) if resets else None
 
 
-_RESULT_RE = re.compile(r"RESULT:\s*(merged|failed|blocked)\b[ \t]*(.*)")
+# "merged" stays for sessions started before the independent review (they merged themselves)
+_RESULT_RE = re.compile(r"RESULT:\s*(ready|merged|failed|blocked)\b[ \t]*(.*)")
 
 
 def parse_result(text: str) -> tuple[str, str] | None:
@@ -240,9 +241,25 @@ def parse_result(text: str) -> tuple[str, str] | None:
 
 @dataclass(frozen=True)
 class Decision:
-    kind: str  # merged | failed | blocked | resume_at | stop
+    # build session: ready | merged | failed | blocked | resume_at | stop
+    # review session: pass | fail | failed | resume_at | stop
+    kind: str
     reason: str = ""
     at: int | None = None
+
+
+def _quota_decision(last_rate_event: dict | None, now: int, max_wait_s: int) -> Decision | None:
+    action, detail = rate_limit_action(last_rate_event)
+    if action == "stop":
+        return Decision("stop", str(detail))
+    if action == "wait":
+        if not isinstance(detail, int):
+            return Decision("stop", "usage limit without reset time")
+        at = detail + RESUME_GRACE_S
+        if at - now > max_wait_s:
+            return Decision("stop", f"usage limit resets at {detail}, beyond max wait")
+        return Decision("resume_at", "usage limit", at=at)
+    return None
 
 
 def decide_after_exit(
@@ -255,23 +272,78 @@ def decide_after_exit(
 ) -> Decision:
     """``stalled`` = reason when the loop killed a silent session; it beats a stale quota event."""
     result = parse_result(result_text)
+    if result and result[0] == "ready":
+        # "#31" wins over a bare number ("ready PR 2 #31" is PR 31, not task 2)
+        number = _PR_HASH_RE.search(result[1]) or _PR_NUMBER_RE.search(result[1])
+        if not number:
+            return Decision("failed", f"RESULT: ready thiếu số PR ({result[1] or 'trống'})")
+        return Decision("ready", number.group(1))
     if result and result[0] == "merged":
-        return Decision("merged", result[1])
+        return Decision(result[0], result[1])
     if stalled:
         return Decision("failed", stalled)
-    action, detail = rate_limit_action(last_rate_event)
-    if action == "stop":
-        return Decision("stop", str(detail))
-    if action == "wait":
-        if not isinstance(detail, int):
-            return Decision("stop", "usage limit without reset time")
-        at = detail + RESUME_GRACE_S
-        if at - now > max_wait_s:
-            return Decision("stop", f"usage limit resets at {detail}, beyond max wait")
-        return Decision("resume_at", "usage limit", at=at)
+    quota = _quota_decision(last_rate_event, now, max_wait_s)
+    if quota:
+        return quota
     if result:
         return Decision(result[0], result[1])
     return Decision("failed", f"exit {returncode}, no RESULT line")
+
+
+# ---------- independent review session ----------
+
+REQUIRED_CHECKS = ("Lint", "Unit Tests", "dbt build (DuckDB)")
+MAX_REVIEW_ROUNDS = 2
+
+_REVIEW_RE = re.compile(r"REVIEW:\s*(PASS|FAIL)\b[ \t]*(.*)")
+_PR_HASH_RE = re.compile(r"#(\d+)")
+_PR_NUMBER_RE = re.compile(r"(\d+)")
+
+
+def parse_review(text: str) -> tuple[str, str] | None:
+    """Last explicit ``REVIEW: PASS|FAIL <why>`` line. Merging hangs on it, so nothing else
+    (e.g. the agent's ``Kết luận: PASS | FAIL`` template heading) counts as a verdict."""
+    found = _REVIEW_RE.findall(text or "")
+    if not found:
+        return None
+    verdict, reason = found[-1]
+    return verdict, reason.strip()
+
+
+def decide_after_review(
+    returncode: int,
+    last_rate_event: dict | None,
+    result_text: str,
+    now: int,
+    max_wait_s: int,
+    stalled: str | None = None,
+) -> Decision:
+    verdict = parse_review(result_text)
+    if verdict:
+        return Decision("pass" if verdict[0] == "PASS" else "fail", verdict[1])
+    if stalled:
+        return Decision("failed", stalled)
+    quota = _quota_decision(last_rate_event, now, max_wait_s)
+    if quota:
+        return quota
+    return Decision("failed", f"review exit {returncode}, no REVIEW line")
+
+
+def merge_ready(checks: list[dict]) -> tuple[bool, str]:
+    """All required checks pass, from ``gh pr checks <n> --json name,bucket``."""
+    buckets = {c.get("name"): c.get("bucket") for c in checks}
+    for name in REQUIRED_CHECKS:
+        bucket = buckets.get(name)
+        if bucket != "pass":
+            return False, f"{name}: {bucket or 'thiếu'}"
+    return True, ""
+
+
+def review_next(d: Decision, failed_rounds: int, max_rounds: int = MAX_REVIEW_ROUNDS) -> str:
+    """merge | fix | give_up after a review verdict (``failed_rounds`` = FAILs before this one)."""
+    if d.kind == "pass":
+        return "merge"
+    return "fix" if failed_rounds + 1 < max_rounds else "give_up"
 
 
 # ---------- retry context, develop CI, stalls ----------
@@ -332,14 +404,22 @@ def is_stalled(last_output: float, now: float, limit_s: float, last_rate: dict |
 
 
 def build_command(repo_root: Path, prompt: str, resume: str | None) -> list[str]:
+    """PR (build) session: Fable, high."""
+    return _headless(repo_root, prompt, resume, ["--model", "fable", "--effort", "high"])
+
+
+def build_review_command(repo_root: Path, prompt: str, resume: str | None) -> list[str]:
+    """Independent review session: a fresh ``code-reviewer`` agent session, Opus, medium."""
+    extra = ["--agent", "code-reviewer", "--model", "opus", "--effort", "medium"]
+    return _headless(repo_root, prompt, resume, extra)
+
+
+def _headless(repo_root: Path, prompt: str, resume: str | None, extra: list[str]) -> list[str]:
     cmd = [
         "claude",
         "-p",
         prompt,
-        "--model",
-        "fable",
-        "--effort",
-        "high",
+        *extra,
         "--permission-mode",
         "auto",
         "--permission-prompts",
@@ -379,17 +459,35 @@ Quy trình:
 3. Push, mở PR vào `develop` theo .github/pull_request_template.md (có ## RED và ## Giả định).
 4. Chờ CI: `gh pr checks <số> --watch --interval 30` (foreground), lặp tới khi xong.
    CI đỏ thì sửa và push lại.
-5. Giao agent `code-reviewer` review có bằng chứng. FAIL thì sửa rồi review lại (tối đa 2 vòng).
-6. CI xanh cả 3 job và review PASS: `gh pr merge <số> --squash --delete-branch`.
+5. CI xanh cả 3 job thì DỪNG, trả `RESULT: ready <số PR>`. Không tự review, không merge:
+   orchestrator chạy một phiên review độc lập với ngữ cảnh mới, rồi tự merge khi PASS.
+   Nếu ở trên có kết luận review FAIL, sửa đúng các finding đó, push, chờ CI xanh rồi mới ready.
 
 Luật: không hỏi người dùng; mọi giả định ghi vào mục ## Giả định của PR. Không sửa gì trong
 .claude/ ngoài worktrees/. Không đọc .env, không chạy gh secret. Bị từ chối quyền thì đổi cách
 theo command-style; vẫn không được thì dừng.
 
 Dòng cuối cùng của câu trả lời PHẢI là một trong:
-RESULT: merged <số PR>
+RESULT: ready <số PR>
 RESULT: failed <lý do ngắn>
 RESULT: blocked <việc cần chủ repo làm>
+"""
+
+
+def build_review_prompt(task: Task, pr: str) -> str:
+    label = f"PR {task.id}" if task.id[0].isdigit() else f"việc {task.id}"
+    return f"""Review độc lập PR #{pr} ({label} của RepoPulse, nhánh `{task.branch}` → `develop`).
+Bạn KHÔNG phải phiên đã viết code này và không thấy ngữ cảnh của nó: chỉ tin vào code, test và
+output bạn tự chạy. Thư mục hiện tại là worktree của PR, đang ở HEAD của nhánh.
+
+Làm đúng theo hướng dẫn agent code-reviewer của bạn: chạy lại test, kiểm commit đầu chỉ có test,
+thử mutation (hoàn tác, kiểm `git status --porcelain` sạch), kiểm luật dữ liệu, convention, bảo mật.
+Đăng kết luận lên PR bằng `gh pr comment {pr} --body-file <file trong scratchpad>`.
+Không merge, không push, không sửa code của PR. Không hỏi người dùng.
+
+Dòng cuối cùng của câu trả lời PHẢI là một trong:
+REVIEW: PASS
+REVIEW: FAIL <các finding [chặn] tóm tắt trên một dòng>
 """
 
 
