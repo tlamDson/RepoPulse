@@ -1,0 +1,124 @@
+# DAG of work for scripts/orchestrate.py. Order matters: earlier tasks are started first.
+# needs: "harness" (docs/harness-check.md approved), "cloud" (Databricks or MotherDuck
+# secrets), "snowflake" (SNOWFLAKE_* secrets). optional = skip instead of block.
+# release_after = open and merge a develop -> main release once this task is merged.
+
+[[task]]
+id = "S0.4"
+title = "PR mẫu kiểm harness: module ghi runs.csv"
+branch = "feature/runs-log"
+agent = "pipeline-ops"
+
+[[task]]
+id = "B"
+title = "Baseline ngây thơ DuckDB, bộ query Q1-Q6, benchmark.yml"
+branch = "feature/baseline-naive"
+deps = ["S0.4"]
+needs = ["harness"]
+agent = "analytics-engineer"
+release_after = true
+
+[[task]]
+id = "2"
+title = "eventspec: catalog event YAML -> JSON Schema"
+branch = "feature/event-spec"
+deps = ["B"]
+agent = "event-schema-engineer"
+
+[[task]]
+id = "4"
+title = "Ingest GH Archive theo giờ, idempotent"
+branch = "feature/ingest-gharchive"
+deps = ["B"]
+agent = "pipeline-ops"
+
+[[task]]
+id = "3"
+title = "simkit: sinh dữ liệu mô phỏng có seed, chèn 6 loại lỗi"
+branch = "feature/simkit-generator"
+deps = ["2"]
+agent = "event-schema-engineer"
+
+[[task]]
+id = "5"
+title = "PySpark + Delta bronze/silver"
+branch = "feature/bronze-silver-spark"
+deps = ["2", "4"]
+agent = "spark-engineer"
+
+[[task]]
+id = "6"
+title = "dbt star schema và các mart Q1-Q6"
+branch = "feature/dbt-star-schema"
+deps = ["5"]
+agent = "analytics-engineer"
+
+[[task]]
+id = "12"
+title = "Benchmark Spark và DuckDB ở 1, 7, 30 ngày"
+branch = "feature/spark-vs-duckdb-benchmark"
+deps = ["5"]
+agent = "spark-engineer"
+
+[[task]]
+id = "probe"
+title = "Bước thử số 1: Databricks Free Edition / MotherDuck, chọn đường chính hay dự phòng"
+branch = "docs/probe-result"
+needs = ["cloud"]
+agent = "pipeline-ops"
+
+[[task]]
+id = "7"
+title = "Model incremental và workflow chạy theo lịch"
+branch = "feature/incremental-and-schedule"
+deps = ["6", "probe"]
+needs = ["cloud"]
+agent = "analytics-engineer"
+release_after = true
+
+[[task]]
+id = "8"
+title = "Cảnh báo chất lượng dữ liệu"
+branch = "feature/data-quality-alerts"
+deps = ["3", "7"]
+agent = "data-quality-governance"
+
+[[task]]
+id = "9"
+title = "Governance: phân quyền, nhãn và che cột PII"
+branch = "feature/governance"
+deps = ["6", "probe"]
+needs = ["cloud"]
+agent = "data-quality-governance"
+
+[[task]]
+id = "10"
+title = "Tối ưu query: partition, clustering, đo trước và sau"
+branch = "feature/query-optimization"
+deps = ["7"]
+agent = "analytics-engineer"
+
+[[task]]
+id = "11"
+title = "Dashboard tĩnh trên GitHub Pages"
+branch = "feature/dashboard-site"
+deps = ["7"]
+agent = "dashboard-builder"
+release_after = true
+
+[[task]]
+id = "13"
+title = "Port project dbt sang Snowflake trial"
+branch = "feature/snowflake-port"
+deps = ["6"]
+needs = ["snowflake"]
+optional = true
+agent = "analytics-engineer"
+
+[[task]]
+id = "14"
+title = "README kết quả từ runs.csv"
+branch = "docs/results"
+deps = ["8", "9", "10", "11", "12", "13"]
+agent = "release-manager"
+release_after = true

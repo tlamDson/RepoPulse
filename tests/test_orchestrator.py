@@ -361,3 +361,14 @@ def test_render_progress_lists_every_task_status(tasks):
     assert "| B | `feature/baseline-naive` | running |" in md
     assert "cần secret" in md and "| 13 |" in md and "skipped" in md
     assert "| 2 | `feature/event-spec` | pending |" in md
+
+
+def test_real_prs_toml_loads_and_starts_with_s04():
+    real = load_tasks(Path(__file__).resolve().parents[1] / "scripts" / "prs.toml")
+    assert real[0].id == "S0.4"
+    ready, blocked, _ = next_ready(real, set(), set(), NO_SECRETS, slots=2)
+    assert ids(ready) == ["S0.4"] and "probe" in blocked
+    known_agents = {
+        p.stem for p in (Path(__file__).resolve().parents[1] / ".claude" / "agents").glob("*.md")
+    }
+    assert {t.agent for t in real} <= known_agents
