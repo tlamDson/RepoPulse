@@ -107,6 +107,12 @@ def test_index_loads_only_local_stylesheet_and_script():
         assert (SITE / path).is_file(), path
 
 
+def test_index_declares_an_inline_icon_so_no_favicon_is_requested():
+    # Without a declared icon the browser asks for /favicon.ico, which Pages answers with a 404.
+    icons = [a.get("href", "") for t, a, _ in page().tags if t == "link" and a.get("rel") == "icon"]
+    assert icons == ["data:,"]
+
+
 # ---------------------------------------------------------------- nothing external
 
 
@@ -117,6 +123,8 @@ def test_no_external_or_root_absolute_resources_in_html():
                 continue
             if tag == "a" and name == "href":
                 continue  # plain links (e.g. to the repo) load nothing
+            if tag == "link" and attrs.get("rel") == "icon" and value == "data:,":
+                continue  # the empty inline icon: no request at all
             assert not EXTERNAL.match(value), (tag, name, value)
             assert not value.startswith("/"), (tag, name, value)  # Pages serves under /RepoPulse/
 
