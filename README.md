@@ -42,7 +42,7 @@ For each seed repo with at least one contribution in the data, six components in
 | Component | Definition | From |
 |---|---|---|
 | activity | human contributors / the maximum over scored repos | Q1 |
-| retention | share of human contributors active in at least two distinct ISO weeks | Q1/Q2 |
+| retention | share of human contributors active in at least two distinct ISO weeks (a Q6-only measure from the same activity data as Q1; not the Q2 W+4/W+12 cohort retention) | Q1 activity |
 | merge | PRs merged / human PRs opened | Q3 |
 | response | issues + PRs with a first human response from someone other than the author / opened | Q4 |
 | close | issues + PRs closed / opened | Q4 |

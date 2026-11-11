@@ -1,7 +1,8 @@
 -- Q6: health score per seed repo with >= 1 contribution event, built from Q1-Q5 components
 -- (each in [0, 1]; formula also documented in README.md):
 --   activity   human contributors / max human contributors over the scored repos   (Q1)
---   retention  share of human contributors active in >= 2 distinct ISO weeks       (Q1/Q2)
+--   retention  share of human contributors active in >= 2 distinct ISO weeks; Q6-only,
+--              from Q1 activity data (not the Q2 W+4/W+12 cohort retention)         (Q1)
 --   merge      PRs merged / human PRs opened (Q3 definitions; 0 when none opened)    (Q3)
 --   response   items with a first response / items opened, issues + PRs           (Q4)
 --   close      items closed / items opened, issues + PRs                           (Q4)

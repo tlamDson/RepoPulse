@@ -56,9 +56,34 @@ def read_artifact(path: str | os.PathLike[str]) -> list[dict[str, object]]:
     return rows
 
 
+def _existing_rows(runs_csv: str | os.PathLike[str]) -> set[tuple[str, ...]]:
+    if not os.path.exists(runs_csv):
+        return set()
+    with open(runs_csv, encoding="utf-8", newline="") as fh:
+        return {tuple(values) for values in list(csv.reader(fh))[1:] if values}
+
+
+def new_rows(
+    rows: list[dict[str, object]], runs_csv: str | os.PathLike[str]
+) -> list[dict[str, object]]:
+    """Rows not already in ``runs_csv`` (identical in every column) nor repeated earlier."""
+    seen = _existing_rows(runs_csv)
+    fresh = []
+    for row in rows:
+        key = tuple(validate_row(row)[c] for c in COLUMNS)
+        if key in seen:
+            continue
+        seen.add(key)
+        fresh.append(row)
+    return fresh
+
+
 def record(artifact: str | os.PathLike[str], runs_csv: str | os.PathLike[str]) -> int:
-    """Validate every artifact row, then append them all; return how many were appended."""
-    rows = read_artifact(artifact)
+    """Validate every artifact row, then append the new ones; return how many were appended.
+
+    Re-recording the same artifact is a no-op: rows already in ``runs_csv`` are skipped.
+    """
+    rows = new_rows(read_artifact(artifact), runs_csv)
     for row in rows:
         append_run(runs_csv, row)
     return len(rows)
@@ -70,11 +95,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--runs-csv", type=Path, default=Path("runs.csv"))
     args = parser.parse_args(argv)
     try:
+        total = len(read_artifact(args.artifact))
         n = record(args.artifact, args.runs_csv)
     except RunsLogError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
     print(f"appended {n} row(s) to {args.runs_csv}")
+    if total > n:
+        print(f"skipped {total - n} duplicate row(s) already in {args.runs_csv}")
     return 0
 
 
