@@ -80,12 +80,15 @@ def _run(**overrides) -> dict:
     return run
 
 
-def _scan(bytes_per_query: int | None = 1000, **overrides) -> dict:
+def _scan(bytes_per_query: int | None = 1000, row_groups: bool = True, **overrides) -> dict:
     scan: dict = {}
     for i, q in enumerate(QUERIES, start=1):
         scan[f"{q}_bytes"] = None if bytes_per_query is None else bytes_per_query * i
         scan[f"{q}_scan_rows"] = 10 * i
         scan[f"{q}_files_read"] = i
+        # DuckDB 2.x reports row groups per scan, 1.x does not (None)
+        scan[f"{q}_row_groups_scanned"] = i if row_groups else None
+        scan[f"{q}_row_groups_total"] = 2 * i if row_groups else None
     scan.update(overrides)
     return scan
 
@@ -221,8 +224,27 @@ def test_parse_scan_output_rejects_bytes_for_only_some_queries():
         query_opt.parse_scan_output(json.dumps(scan), "qopt-flat")
 
 
+def test_parse_scan_output_without_row_groups():
+    scan = _scan(row_groups=False)
+    assert query_opt.parse_scan_output(json.dumps(scan), "qopt-flat") == scan
+
+
+@pytest.mark.parametrize("key", ["q2_row_groups_scanned", "q6_row_groups_total"])
+def test_parse_scan_output_rejects_row_groups_for_only_some_queries(key):
+    with pytest.raises(query_opt.QueryOptError, match="row_groups"):
+        query_opt.parse_scan_output(json.dumps(_scan(**{key: None})), "qopt-flat")
+
+
 @pytest.mark.parametrize(
-    "bad", [{"q1_bytes": -1}, {"q2_scan_rows": 1.5}, {"q3_files_read": True}, {"q4_bytes": "9"}]
+    "bad",
+    [
+        {"q1_bytes": -1},
+        {"q2_scan_rows": 1.5},
+        {"q3_files_read": True},
+        {"q4_bytes": "9"},
+        {"q5_row_groups_scanned": -2},
+        {"q6_row_groups_total": 1.5},
+    ],
 )
 def test_parse_scan_output_rejects_bad_numbers(bad):
     with pytest.raises(query_opt.QueryOptError):
@@ -292,14 +314,22 @@ def test_read_proc_io_on_linux_counts_bytes_read_by_this_process(tmp_path):
 # ---------------------------------------------------------------- DuckDB profiling parser
 
 
-def _profile_fixture(variant: str) -> dict:
-    return json.loads((PROFILE_DIR / f"q3_{variant}.json").read_text(encoding="utf-8"))
+# (fixture file suffix, major version): DuckDB 1.x nodes use operator_type /
+# operator_cardinality; DuckDB 2.x puts the plan under "operator" and uses type /
+# intermediate_rows plus row_groups_scanned / total_row_groups_to_scan.
+PROFILE_VERSIONS = [("", "1"), ("_duckdb2", "2")]
 
 
-def test_profile_fixtures_are_real_duckdb_output_with_a_version():
+def _profile_fixture(variant: str, suffix: str = "") -> dict:
+    return json.loads((PROFILE_DIR / f"q3_{variant}{suffix}.json").read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize(("suffix", "major"), PROFILE_VERSIONS)
+def test_profile_fixtures_are_real_duckdb_output_with_a_version(suffix, major):
     for variant in ("qopt-flat", "qopt-partitioned"):
-        fixture = _profile_fixture(variant)
+        fixture = _profile_fixture(variant, suffix)
         assert re.fullmatch(r"\d+\.\d+\.\d+", fixture["duckdb_version"])
+        assert fixture["duckdb_version"].split(".")[0] == major
         assert fixture["query"] == "q3"
         assert fixture["layout"] == variant
         assert isinstance(json.loads(fixture["explain_json"]), dict)
@@ -309,19 +339,92 @@ def test_parse_profile_flat_layout_reads_one_file():
     # q3 reads raw_events once; the flat layout is one file and every fixture line comes out of
     # the scan (the type filter is applied above it). The two scans of `repos` are not parquet.
     parsed = query_opt.parse_profile(_profile_fixture("qopt-flat")["explain_json"])
-    assert parsed == {"scan_rows": FIXTURE_LINES, "files_read": 1}
+    assert parsed == {
+        "scan_rows": FIXTURE_LINES,
+        "files_read": 1,
+        "row_groups_scanned": None,  # DuckDB 1.x does not report row groups
+        "row_groups_total": None,
+    }
 
 
 def test_parse_profile_partitioned_layout_reads_only_the_matching_partitions():
     # q3 needs ForkEvent and PullRequestEvent: 2 of the 9 partition files, 15 fixture lines
     parsed = query_opt.parse_profile(_profile_fixture("qopt-partitioned")["explain_json"])
-    assert parsed == {"scan_rows": 15, "files_read": 2}
+    assert parsed == {
+        "scan_rows": 15,
+        "files_read": 2,
+        "row_groups_scanned": None,
+        "row_groups_total": None,
+    }
+
+
+def test_parse_profile_duckdb2_flat_layout():
+    parsed = query_opt.parse_profile(_profile_fixture("qopt-flat", "_duckdb2")["explain_json"])
+    assert parsed == {
+        "scan_rows": FIXTURE_LINES,
+        "files_read": 1,
+        "row_groups_scanned": 1,
+        "row_groups_total": 1,
+    }
+
+
+def test_parse_profile_duckdb2_partitioned_layout():
+    parsed = query_opt.parse_profile(
+        _profile_fixture("qopt-partitioned", "_duckdb2")["explain_json"]
+    )
+    assert parsed == {
+        "scan_rows": 15,
+        "files_read": 2,
+        "row_groups_scanned": 2,
+        "row_groups_total": 2,
+    }
 
 
 def test_parse_profile_sums_every_parquet_scan():
     plan = json.loads(_profile_fixture("qopt-partitioned")["explain_json"])
     doubled = {"operator_type": "UNION", "extra_info": {}, "children": [plan, plan]}
-    assert query_opt.parse_profile(json.dumps(doubled)) == {"scan_rows": 30, "files_read": 4}
+    assert query_opt.parse_profile(json.dumps(doubled)) == {
+        "scan_rows": 30,
+        "files_read": 4,
+        "row_groups_scanned": None,
+        "row_groups_total": None,
+    }
+
+
+def test_parse_profile_duckdb2_sums_every_parquet_scan():
+    plan = json.loads(_profile_fixture("qopt-partitioned", "_duckdb2")["explain_json"])
+    plan["operator"] = plan["operator"] * 2
+    assert query_opt.parse_profile(json.dumps(plan)) == {
+        "scan_rows": 30,
+        "files_read": 4,
+        "row_groups_scanned": 4,
+        "row_groups_total": 4,
+    }
+
+
+def test_parse_profile_duckdb2_rejects_a_scan_without_row_count():
+    text = _profile_fixture("qopt-flat", "_duckdb2")["explain_json"].replace(
+        '"intermediate_rows": 34', '"intermediate_rows": "34"'
+    )
+    with pytest.raises(query_opt.QueryOptError, match="rows"):
+        query_opt.parse_profile(text)
+
+
+def test_parse_profile_duckdb2_rejects_row_groups_on_only_some_scans():
+    plan = json.loads(_profile_fixture("qopt-partitioned", "_duckdb2")["explain_json"])
+    stripped = json.loads(json.dumps(plan))
+
+    def strip(node):
+        if (node.get("extra_info") or {}).get("Function") == "READ_PARQUET":
+            node.pop("row_groups_scanned")
+        for child in node.get("children", []):
+            strip(child)
+
+    for root in stripped["operator"]:
+        strip(root)
+    plan["operator"] = plan["operator"] + stripped["operator"]
+    with pytest.raises(query_opt.QueryOptError, match="row_groups"):
+        query_opt.parse_profile(json.dumps(plan))
 
 
 def test_parse_profile_rejects_non_json():
@@ -335,18 +438,21 @@ def test_parse_profile_rejects_a_plan_without_parquet_scan():
         query_opt.parse_profile(json.dumps(plan))
 
 
-def test_parse_profile_rejects_a_parquet_scan_without_file_count():
-    text = _profile_fixture("qopt-flat")["explain_json"].replace(
+@pytest.mark.parametrize(("suffix", "major"), PROFILE_VERSIONS)
+def test_parse_profile_rejects_a_parquet_scan_without_file_count(suffix, major):
+    text = _profile_fixture("qopt-flat", suffix)["explain_json"].replace(
         '"Total Files Read"', '"Something Else"'
     )
     with pytest.raises(query_opt.QueryOptError, match="Total Files Read"):
         query_opt.parse_profile(text)
 
 
-def test_parse_profile_rejects_a_non_integer_file_count():
-    text = _profile_fixture("qopt-flat")["explain_json"].replace(
+@pytest.mark.parametrize(("suffix", "major"), PROFILE_VERSIONS)
+def test_parse_profile_rejects_a_non_integer_file_count(suffix, major):
+    text = _profile_fixture("qopt-flat", suffix)["explain_json"].replace(
         '"Total Files Read": "1"', '"Total Files Read": "one"'
     )
+    assert text != _profile_fixture("qopt-flat", suffix)["explain_json"]
     with pytest.raises(query_opt.QueryOptError):
         query_opt.parse_profile(text)
 
@@ -400,6 +506,18 @@ def test_bytes_read_stays_empty_when_bytes_were_not_measured():
     notes = _notes(row)
     assert notes["bytes"] == "unavailable"
     assert not any(key.endswith("_bytes") and key != "layout_bytes" for key in notes)
+
+
+def test_row_groups_are_noted_per_query_when_duckdb_reports_them():
+    notes = _notes(_summarize())
+    for i, q in enumerate(QUERIES, start=1):
+        assert notes[f"{q}_row_groups_scanned"] == str(i)
+        assert notes[f"{q}_row_groups_total"] == str(2 * i)
+
+
+def test_row_groups_are_left_out_when_duckdb_does_not_report_them():
+    notes = _notes(_summarize(scan=_scan(row_groups=False)))
+    assert not any("row_groups" in key for key in notes)
 
 
 def test_row_count_only_cross_checked_is_noted():
@@ -600,6 +718,142 @@ def test_prepare_twice_does_not_duplicate_rows(gz_dir, tmp_path):
         )
         assert files_after == files_before[variant], variant
         assert query_opt.run_once(work, variant)["row_count"] == FIXTURE_LINES, variant
+
+
+def _write_gz_lines(out: Path, lines: list[bytes]) -> Path:
+    out.mkdir(parents=True)
+    with gzip.open(out / "2026-01-05-0.json.gz", "wb") as fh:
+        fh.write(b"\n".join(lines) + b"\n")
+    return out
+
+
+def _fixture_lines() -> list[bytes]:
+    lines: list[bytes] = []
+    for src in sorted(FIXTURE_DIR.glob("*.json")):
+        lines += [ln for ln in src.read_bytes().splitlines() if ln.strip()]
+    return lines
+
+
+def test_prepare_again_removes_partitions_that_no_longer_exist(tmp_path):
+    lines = _fixture_lines()
+    full = _write_gz_lines(tmp_path / "full", lines)
+    no_watch = _write_gz_lines(
+        tmp_path / "no_watch", [ln for ln in lines if json.loads(ln)["type"] != "WatchEvent"]
+    )
+    work = tmp_path / "layouts"
+    assert query_opt.prepare_layouts(full, work)["errors"] == {}
+    info = query_opt.prepare_layouts(no_watch, work)
+    assert info["errors"] == {}
+    for variant in ("qopt-partitioned", "qopt-partitioned-clustered"):
+        root = query_opt.layout_path(work, variant)
+        assert not (root / "type=WatchEvent").exists(), variant
+        assert all(p.name == "data_0.parquet" for p in root.rglob("*.parquet")), variant
+        assert query_opt.run_once(work, variant)["row_count"] == info["raw_rows"], variant
+
+
+def test_unsafe_partition_value_fails_only_the_partitioned_layouts(tmp_path):
+    lines = _fixture_lines()
+    evil = json.loads(lines[0])
+    evil["type"] = "../Evil Event"
+    raw = _write_gz_lines(tmp_path / "raw", [*lines, json.dumps(evil).encode()])
+    work = tmp_path / "layouts"
+    info = query_opt.prepare_layouts(raw, work)
+    assert set(info["errors"]) == {"qopt-partitioned", "qopt-partitioned-clustered"}
+    for message in info["errors"].values():
+        assert "../Evil Event" in message
+    assert set(info["layouts"]) == {"qopt-flat", "qopt-clustered"}
+    assert not (tmp_path / "Evil Event").exists()
+    assert not list(work.rglob("*Evil*"))
+
+
+# ---------------------------------------------------------------- large input: order in files
+
+BIG_COPIES = 5000  # 34 fixture lines x 5000 = 170,000 rows, enough for multi-threaded writes
+
+
+@pytest.fixture(scope="module")
+def big(tmp_path_factory) -> dict:
+    """170,000 events in shuffled arrival order, varied repos and times (deterministic)."""
+    base = tmp_path_factory.mktemp("query_opt_big")
+    raw = _gzip_fixture(base / "fixture")
+    big_raw = base / "raw"
+    big_raw.mkdir()
+    con = duckdb.connect()
+    try:
+        naive_duckdb.load(con, raw, naive_duckdb.DEFAULT_SEED)
+        con.execute(
+            "COPY (SELECT r.id || '-' || i AS id, r.type, r.actor, "
+            "{'id': r.repo.id, 'name': r.repo.name || '-' || (hash(i, r.id) % 997)} AS repo, "
+            "r.payload, r.created_at + to_seconds((hash(r.id, i) % 86400)::BIGINT) AS created_at "
+            f"FROM raw_events AS r, range({BIG_COPIES}) AS t(i) ORDER BY hash(i, r.id, 7)) "
+            f"TO '{(big_raw / '2026-01-05-0.json.gz').as_posix()}' "
+            "(FORMAT json, COMPRESSION gzip)"
+        )
+    finally:
+        con.close()
+    work = base / "layouts"
+    return {"raw": big_raw, "work": work, "info": query_opt.prepare_layouts(big_raw, work)}
+
+
+def _raw_ids_by_type(raw: Path) -> dict[str, list[str]]:
+    con = duckdb.connect()
+    try:
+        rows = con.execute(
+            f"SELECT type, id FROM read_json('{(raw / '*.json.gz').as_posix()}', "
+            "format = 'newline_delimited', columns = {'id': 'VARCHAR', 'type': 'VARCHAR'})"
+        ).fetchall()
+    finally:
+        con.close()
+    by_type: dict[str, list[str]] = {}
+    for kind, event_id in rows:
+        by_type.setdefault(kind, []).append(event_id)
+    return by_type
+
+
+def test_big_input_prepares_every_layout(big):
+    assert big["info"]["raw_rows"] == FIXTURE_LINES * BIG_COPIES
+    assert big["info"]["errors"] == {}
+    assert set(big["info"]["layouts"]) == set(VARIANTS)
+
+
+def test_big_partitioned_clustered_files_are_each_sorted(big):
+    files = query_opt.layout_files(big["work"], "qopt-partitioned-clustered")
+    assert len(files) == 9
+    total = 0
+    for path in files:
+        rows, ordered = _sorted_by(path, "repo.name, created_at")
+        assert rows == ordered, path.parent.name
+        total += len(rows)
+    assert total == FIXTURE_LINES * BIG_COPIES
+
+
+def test_big_clustered_file_is_sorted(big):
+    (path,) = query_opt.layout_files(big["work"], "qopt-clustered")
+    rows, ordered = _sorted_by(path, "type, repo.name, created_at")
+    assert rows == ordered
+
+
+def test_big_partitioned_files_keep_the_arrival_order(big):
+    expected = _raw_ids_by_type(big["raw"])
+    files = query_opt.layout_files(big["work"], "qopt-partitioned")
+    assert {p.parent.name for p in files} == {f"type={t}" for t in expected}
+    for path in files:
+        rows, _ = _sorted_by(path, "id")
+        assert [r[0] for r in rows] == expected[path.parent.name.split("=", 1)[1]], path
+
+
+def test_big_flat_file_keeps_the_arrival_order(big):
+    (path,) = query_opt.layout_files(big["work"], "qopt-flat")
+    con = duckdb.connect()
+    try:
+        raw = con.execute(
+            f"SELECT id FROM read_json('{(big['raw'] / '*.json.gz').as_posix()}', "
+            "format = 'newline_delimited', columns = {'id': 'VARCHAR'})"
+        ).fetchall()
+    finally:
+        con.close()
+    rows, _ = _sorted_by(path, "id")
+    assert rows == raw
 
 
 # ---------------------------------------------------------------- CLI
