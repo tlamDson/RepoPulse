@@ -64,7 +64,8 @@ agent = "spark-engineer"
 id = "probe"
 title = "Bước thử số 1: Databricks Free Edition / MotherDuck, chọn đường chính hay dự phòng"
 branch = "docs/probe-result"
-needs = ["cloud"]
+deps = ["S0.4"]
+needs = ["cloud", "harness"]  # chạy workflow có secret thật: chỉ sau khi harness đã kiểm
 agent = "pipeline-ops"
 
 [[task]]
