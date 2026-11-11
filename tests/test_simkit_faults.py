@@ -7,6 +7,7 @@ arrival delay, the per-minute event rate), not only by counting the manifest.
 import copy
 import json
 import random
+import re
 from collections import Counter, defaultdict
 from datetime import date, datetime, timedelta
 
@@ -281,6 +282,24 @@ def test_bot_seen_by_event_rate(clean):
     assert all(validate(e) == [] for e in result.events)
     assert find_duplicates(result.events) == []
     assert all(delay(e) <= LATE_THRESHOLD for e in result.events)
+
+
+def test_bot_ids_have_the_same_shape_as_clean_ids(clean):
+    """A bot must be found by its behavior, so its ids give nothing away by their format."""
+
+    def shapes(events, field):
+        return {re.sub(r"\d", "9", e[field]) for e in events if field in e}
+
+    result = inject_faults(clean, {"bot": 3}, seed=4)
+    bot_events = [result.events[i] for i in indices(result, "bot")]
+    for field in ("user_id", "session_id", "trip_id", "itinerary_id"):
+        assert shapes(bot_events, field)
+        assert shapes(bot_events, field) <= shapes(clean, field)
+    bot_ids = {r.detail["user_id"] for r in records(result, "bot")}
+    assert len(bot_ids) == 3
+    for field in ("session_id", "trip_id", "itinerary_id"):
+        clean_values = {e[field] for e in clean if field in e}
+        assert not clean_values & {e[field] for e in bot_events if field in e}
 
 
 # --- all together ----------------------------------------------------------------------------
