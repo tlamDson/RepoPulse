@@ -449,7 +449,7 @@ def run(args: argparse.Namespace) -> int:
 
         # new work
         exclude = set(final) | set(waiting)
-        ready, blk, skp = next_ready(tasks, done | exclude, set(runs), gates, args.parallel)
+        ready, blk, skp = next_ready(tasks, done, set(runs), gates, args.parallel, held=exclude)
         blocked.update(blk)
         skipped |= {t.id for t in skp}
         if keep is not None:
