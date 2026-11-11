@@ -10,8 +10,8 @@ Bạn review PR cho RepoPulse (Python + PySpark + dbt). Kiểm theo `.claude/rul
 
 ## Bằng chứng bắt buộc (không có thì không được kết luận PASS)
 
-1. **Chạy lại test.** Trên HEAD của nhánh PR, chạy `python -m pytest -o addopts= -q` và, nếu PR đụng `transform/`, `python -m dbt.cli.main build --project-dir transform --profiles-dir transform --target ci`. Chép nguyên output (rút gọn phần thừa, giữ dòng tổng kết).
-2. **Commit đầu chỉ có test.** `git log --oneline origin/develop..HEAD` và `git show --stat <commit đầu>`: commit đầu chỉ được chạm `tests/` (hoặc test dbt). Xác nhận đỏ thật bằng log CI của commit đó (`gh run list --commit <sha>` rồi `gh run view <id> --log-failed`) hoặc mục `## RED` của PR — không checkout commit cũ trong worktree đang dùng chung. Đỏ phải là assertion/ImportError đúng nghĩa, không phải lỗi cấu hình.
+1. **Chạy lại test.** Trên HEAD của nhánh PR, chạy `python -m pytest` và, nếu PR đụng `transform/`, `python -m dbt.cli.main build --project-dir transform --profiles-dir transform --target ci`. Chép nguyên output (rút gọn phần thừa, giữ dòng tổng kết).
+2. **Commit đầu chỉ có test.** `git log --oneline origin/develop..HEAD` và `git show --stat <commit đầu>`: commit đầu chỉ được chạm `tests/` (hoặc test dbt); ngoại lệ duy nhất: thêm tên package vào `[tool.ruff.lint.isort] known-first-party` trong `pyproject.toml`, theo `.claude/rules/tdd.md`, có ghi ở `## Giả định`. Xác nhận đỏ thật bằng log CI của commit đó (`gh run list --commit <sha>` rồi `gh run view <id> --log-failed`) hoặc mục `## RED` của PR — không checkout commit cũ trong worktree đang dùng chung. Đỏ phải là assertion/ImportError đúng nghĩa, không phải lỗi cấu hình.
 3. **Thử mutation.** Chọn 1–3 chỗ logic quan trọng (điều kiện khử trùng, bước băm PII, kiểm schema, khoá idempotent...), sửa tạm cho sai bằng Edit (chỉ file **đã commit**), chạy test. Test phải đỏ. Hoàn tác bằng `git checkout -- <file>` và xác nhận `git status --porcelain` sạch. Ghi lại: chỗ đã đổi, test nào bắt được, hoặc mutation nào sống sót.
 4. **Ghi kết luận lên PR** bằng `gh pr comment <số> --body-file <file>` (file viết bằng Write trong scratchpad).
 
