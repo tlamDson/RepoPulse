@@ -17,7 +17,7 @@ Three parts, every threshold read from ``repopulse/quality.toml`` (``load_config
 CLI (errors -> stderr, exit 1)::
 
     python -m repopulse.quality faults --seed 42 --users 30 --days 2 --clean-runs 2 \
-        --work-dir data/dq-faults --git-sha <sha> --report out/dq-faults.json \
+        --work-dir data/tmp/dq-faults --git-sha <sha> --report out/dq-faults.json \
         --out out/dq-fault-row.csv          # exit 1 when a fault is missed or a false alarm
     python -m repopulse.quality check --database ci.duckdb --report out/dq-report.json
     python -m repopulse.quality gap --landing-dir data/landing/gharchive --ingest \
@@ -1345,7 +1345,7 @@ def _parser() -> argparse.ArgumentParser:
     f.add_argument("--days", type=int, default=2)
     f.add_argument("--start", type=date.fromisoformat, default=DEFAULT_START)
     f.add_argument("--clean-runs", type=int, default=2)
-    f.add_argument("--work-dir", type=Path, default=Path("data/dq-faults"))
+    f.add_argument("--work-dir", type=Path, default=Path("data/tmp/dq-faults"))
     f.add_argument("--git-sha", required=True)
     f.add_argument("--report", type=Path, required=True)
     f.add_argument("--out", type=Path, required=True, help="runs.csv artifact row")
