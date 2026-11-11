@@ -7,7 +7,7 @@ có `"simulated": true`, thư mục ra mặc định là `data/simulated/` (khô
 `.gitignore`). Email mô phỏng chỉ dùng domain dành riêng `example.com` / `example.org`.
 
 Người dùng sau: PR 5 (bronze/silver: khử trùng, cửa sổ đến muộn, băm PII, quarantine) và PR 8
-(chạy bộ lỗi chèn qua pipeline; manifest là "đáp án" để đối chiếu).
+(chạy bộ lỗi chèn qua pipeline; manifest là "đáp án" để đối chiếu — `docs/data-quality.md`).
 
 ## API
 

@@ -25,6 +25,7 @@ simkit/           sinh dữ liệu mô phỏng có seed, chèn lỗi biết trư
 benchmarks/       ngày dữ liệu chuẩn, pipeline ngây thơ, queries/q1..q6  (PR B)
 tests/            pytest; fixtures/ chứa dữ liệu mẫu nhỏ
 transform/        project dbt (dbt_project.yml, profiles.yml, models/, seeds/)
+site/             dashboard tĩnh (HTML/CSS/JS thuần) cho GitHub Pages; export_site.py ghi data/ + tableau/ vào _site/ (PR 11)
 scripts/          orchestrate.py (CLI headless), prs.toml (DAG việc → agent → cổng)
 .github/workflows CI (ci.yml), benchmark (PR B), pipeline theo lịch (PR 7), deploy Pages (PR 11)
 .claude/          rules, agents, hooks/log_permission.py, auto-mode.json; state/ và worktrees/ không commit
