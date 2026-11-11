@@ -8,6 +8,17 @@ test-paths: ["tests"]
 target-path: "target"
 clean-targets: ["target", "dbt_packages"]
 
+# Source of stg_gharchive_events (docs/dbt-models.md):
+#   --vars '{silver_gharchive_parquet: "<glob>/*.parquet"}'  -> read_parquet('<glob>')
+#   not set                                                  -> seed fixture_silver_gharchive_events
+
 models:
   repopulse:
     +materialized: view
+    staging:
+      +schema: staging
+    intermediate:
+      +schema: intermediate
+    gold:
+      +schema: gold
+      +materialized: table

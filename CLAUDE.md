@@ -36,6 +36,8 @@ python -m ruff check .
 python -m ruff format --check .
 python -m pytest
 python -m dbt.cli.main build --project-dir transform --profiles-dir transform --target ci
+python -m dbt.cli.main build --project-dir transform --profiles-dir transform --target ci --vars "{silver_gharchive_parquet: '<glob>/*.parquet'}"   # đọc silver parquet thay seed fixture (docs/dbt-models.md)
+python -m pytest tests/test_dbt_marts.py         # mart Q1-Q6 so khớp benchmarks/queries/q*.sql, contract, PII
 gh pr checks <số-PR> --watch --interval 30
 
 python benchmarks/fetch_reference.py             # tải + kiểm sha256 ngày chuẩn (benchmarks/reference.toml)
