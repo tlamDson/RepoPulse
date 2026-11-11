@@ -101,11 +101,15 @@ def next_ready(
     running: set[str],
     gates: Gates,
     slots: int,
+    held: set[str] | None = None,
 ) -> tuple[list[Task], dict[str, str], list[Task]]:
     """Return (ready to start, blocked id -> reason, skipped optional tasks).
 
-    Skipped optional tasks count as satisfied for their dependants.
+    Skipped optional tasks count as satisfied for their dependants. ``held`` tasks (waiting
+    for a quota reset, or finished as failed/blocked) are not started and are NOT satisfied,
+    so their dependants stay waiting too.
     """
+    held = held or set()
     satisfied = set(done)
     skipped: list[Task] = []
     blocked: dict[str, str] = {}
@@ -114,7 +118,13 @@ def next_ready(
     while changed:  # skips can unlock later tasks, so iterate to a fixed point
         changed = False
         for t in tasks:
-            if t.id in satisfied or t.id in running or t in ready or t.id in blocked:
+            if (
+                t.id in satisfied
+                or t.id in running
+                or t.id in held
+                or t in ready
+                or t.id in blocked
+            ):
                 continue
             if not all(d in satisfied for d in t.deps):
                 continue
@@ -129,6 +139,20 @@ def next_ready(
                 ready.append(t)
     free = max(0, slots - len(running))
     return ready[:free], blocked, skipped
+
+
+def scheduling_sets(
+    done: set[str], final: dict[str, Decision], waiting: Iterable[str]
+) -> tuple[set[str], set[str]]:
+    """Split run-loop state into (done, held) for ``next_ready``.
+
+    Tasks merged during this run count as done even if ``gh pr list`` has not caught up.
+    Tasks waiting for a quota reset, or finished failed/blocked/stopped, are held: not
+    restarted and not satisfying their dependants.
+    """
+    merged = {k for k, d in final.items() if d.kind == "merged"}
+    held = (set(final) - merged) | set(waiting)
+    return set(done) | merged, held - merged
 
 
 def should_exit(running: int, waiting: int, refresh_pending: bool, stopping: bool) -> bool:
