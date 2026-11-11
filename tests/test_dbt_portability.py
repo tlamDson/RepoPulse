@@ -21,6 +21,7 @@ DUCKDB_ONLY = {
     "arg_min/arg_max (use min_by/max_by)": r"\barg_(min|max)\s*\(",
     "quantile/quantile_cont (use percentile_cont within group)": r"\bquantile(_cont|_disc)?\s*\(",
     "epoch()": r"\bepoch\s*\(",
+    "make_timestamp/epoch_us/epoch_ms": r"\b(make_timestamp|epoch_(us|ms))\s*\(",
     ":: cast (use cast(... as ...))": r"::",
     "list type x[]": r"\w\s*\[\s*\]",
     "bool_or/bool_and": r"\bbool_(or|and)\s*\(",
@@ -90,6 +91,8 @@ def dispatched() -> dict[str, str]:
         "select arg_min(a, b) from t",
         "select quantile_cont(x, 0.5) from t",
         "select epoch(ts) from t",
+        "select make_timestamp(epoch_us(ts)) from t",
+        "select epoch_ms(ts) from t",
         "select x::double from t",
         "select cast(x as varchar[]) from t",
         "select bool_or(x) from t",
@@ -137,6 +140,14 @@ def test_no_duckdb_only_syntax_outside_macros():
 
 def test_there_are_cross_database_macros():
     assert dispatched(), f"no adapter.dispatch macro under {MACROS}"
+
+
+def test_staging_normalises_created_at_to_utc_through_a_cross_database_macro():
+    staging = (TRANSFORM / "models" / "staging" / "stg_gharchive_events.sql").read_text(
+        encoding="utf-8"
+    )
+    assert dispatched().get("utc_timestamp") == "utc_timestamp", sorted(dispatched())
+    assert re.search(r"\{\{\s*utc_timestamp\(\s*'created_at'\s*\)\s*\}\}", staging)
 
 
 def test_every_cross_database_macro_has_duckdb_and_snowflake_branches():
