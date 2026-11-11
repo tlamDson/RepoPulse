@@ -62,8 +62,9 @@ Dừng orchestrator: tạo file `.claude/state/STOP` (việc đang chạy làm n
 
 | Vai | Model / effort | Làm gì |
 |---|---|---|
-| `scripts/orchestrate.py` | (Python, không phải agent) | Đọc DAG `scripts/prs.toml`, kiểm cổng (secret, harness), tạo worktree, chạy tối đa 5 phiên `claude -p` song song (dừng mở việc khi CI `develop` đỏ), chờ quota reset rồi `--resume`, dừng phiên treo, thử lại kèm lý do lần trước, release, dọn worktree, viết báo cáo |
-| Phiên PR (headless) | Fable, high | Một phiên mỗi PR, trong worktree của PR: kế hoạch ngắn có mục test phải đỏ, giao agent chuyên trách, chờ CI, giao review, merge, kết thúc bằng dòng `RESULT:` |
+| `scripts/orchestrate.py` | (Python, không phải agent) | Đọc DAG `scripts/prs.toml`, kiểm cổng (secret, harness), tạo worktree, chạy tối đa 5 phiên `claude -p` song song (dừng mở việc khi CI `develop` đỏ), chờ quota reset rồi `--resume`, dừng phiên treo, thử lại kèm lý do lần trước, chạy phiên review độc lập rồi tự merge khi PASS, release, dọn worktree, viết báo cáo |
+| Phiên PR (headless) | Fable, high | Một phiên mỗi PR, trong worktree của PR: kế hoạch ngắn có mục test phải đỏ, giao agent chuyên trách, chờ CI xanh, kết thúc bằng `RESULT: ready <số PR>`. Không tự review, không merge |
+| Phiên review (headless) | Opus, medium | `claude -p --agent code-reviewer` mới cho mỗi lần review, không thấy ngữ cảnh phiên PR; đăng comment, kết thúc bằng `REVIEW: PASS` hoặc `REVIEW: FAIL <finding>` |
 | Agent chuyên trách | Opus, medium | `pipeline-ops`, `event-schema-engineer`, `spark-engineer`, `analytics-engineer`, `data-quality-governance`, `dashboard-builder` — xem `.claude/agents/README.md` |
 | `code-reviewer` | Opus, medium | Review có bằng chứng: chạy lại test, commit đầu chỉ có test, mutation, PASS/FAIL |
 | `release-manager`, `qa-testing`, `researcher` | Sonnet, high | Release khi script thất bại, README kết quả; test bổ sung; đọc code |

@@ -34,8 +34,11 @@ from repopulse.orchestrator import (  # noqa: E402
     Worktree,
     build_command,
     build_prompt,
+    build_review_command,
+    build_review_prompt,
     clean_plan,
     decide_after_exit,
+    decide_after_review,
     develop_ci_blocks,
     develop_ci_state,
     failure_context,
@@ -44,6 +47,7 @@ from repopulse.orchestrator import (  # noqa: E402
     is_stalled,
     load_tasks,
     mark_trusted,
+    merge_ready,
     merged_task_ids,
     next_ready,
     parse_stream_line,
@@ -51,6 +55,7 @@ from repopulse.orchestrator import (  # noqa: E402
     rate_limit_action,
     releases_due,
     render_progress,
+    review_next,
     scheduling_sets,
     should_exit,
     should_stop,
@@ -239,6 +244,7 @@ class Run:
     stalled: bool = False
     last_output: float = 0.0
     log_offset: int = 0  # where this attempt starts in logs/pr-<id>.jsonl
+    review_pr: str | None = None  # set = independent review session of this PR number
     reader: threading.Thread | None = field(default=None, repr=False)
 
 
@@ -274,15 +280,23 @@ def _reader(run: Run, logfile: Path) -> None:
                 run.result_text = str(ev.get("result", ""))
 
 
-def start(task: Task, resume: str | None = None, previous_failure: str | None = None) -> Run:
+def start(
+    task: Task,
+    resume: str | None = None,
+    previous_failure: str | None = None,
+    review_pr: str | None = None,
+) -> Run:
+    """Start the PR (build) session, or with ``review_pr`` a fresh independent review session."""
     path = ensure_worktree(task)
     ensure_trusted([path])  # re-check: a running claude may have rewritten ~/.claude.json
-    prompt = (
-        "Tiếp tục đúng việc đang dở."
-        if resume
-        else build_prompt(task, previous_failure=previous_failure)
-    )
-    cmd = build_command(ROOT, prompt, resume)
+    if resume:
+        prompt = "Tiếp tục đúng việc đang dở."
+    elif review_pr:
+        prompt = build_review_prompt(task, review_pr)
+    else:
+        prompt = build_prompt(task, previous_failure=previous_failure)
+    builder = build_review_command if review_pr else build_command
+    cmd = builder(ROOT, prompt, resume)
     cmd[0] = shutil.which("claude") or "claude"
     env = dict(os.environ)
     env.update(
@@ -306,12 +320,32 @@ def start(task: Task, resume: str | None = None, previous_failure: str | None = 
         errors="replace",
     )
     now = time.time()
-    run = Run(task, proc, path, now, last_output=now, log_offset=offset)
+    run = Run(task, proc, path, now, last_output=now, log_offset=offset, review_pr=review_pr)
     run.reader = threading.Thread(target=_reader, args=(run, logfile), daemon=True)
     run.reader.start()
+    kind = f"review PR #{review_pr}" if review_pr else "build"
     note = f" resume={resume}" if resume else (" (thử lại có ngữ cảnh)" if previous_failure else "")
-    log(f"start {task.id} ({task.branch}) in {path}{note}")
+    log(f"start {task.id} [{kind}] ({task.branch}) in {path}{note}")
     return run
+
+
+def merge_pr(pr: str) -> str | None:
+    """Merge after an independent PASS, only if the required checks pass. Returns an error."""
+    out = sh(["gh", "pr", "checks", pr, "--json", "name,bucket"])
+    try:
+        checks = json.loads(out or "[]")
+    except json.JSONDecodeError:
+        return f"không đọc được check của PR #{pr}"
+    ok, why = merge_ready(checks)
+    if not ok:
+        return f"CI chưa xanh ({why})"
+    # --delete-branch also tries the local branch, which fails while the worktree holds it;
+    # the merge itself is judged by the PR state below, the worktree is removed by clean().
+    sh(["gh", "pr", "merge", pr, "--squash", "--delete-branch"])
+    state = sh(["gh", "pr", "view", pr, "--json", "state"])
+    if '"MERGED"' not in state:
+        return f"merge PR #{pr} thất bại"
+    return None
 
 
 # ---------- release develop -> main ----------
@@ -413,9 +447,11 @@ def run(args: argparse.Namespace) -> int:
     released = set(state["released"])
     failures: dict[str, int] = state.get("failures", {})
     last_failure: dict[str, str] = state.setdefault("last_failure", {})
+    pending_review: dict[str, str] = state.setdefault("pending_review", {})  # task -> PR number
+    review_fails: dict[str, int] = state.setdefault("review_fails", {})
     develop_red = False
     runs: dict[str, Run] = {}
-    waiting: dict[str, tuple[int, str | None]] = {}
+    waiting: dict[str, tuple[int, str | None, str | None]] = {}  # at, session, review PR
     final: dict[str, Decision] = {}
     blocked: dict[str, str] = {}
     skipped: set[str] = set()
@@ -465,7 +501,8 @@ def run(args: argparse.Namespace) -> int:
                     r.proc.terminate()
                 continue
             r.reader.join(timeout=10)
-            d = decide_after_exit(
+            decide = decide_after_review if r.review_pr else decide_after_exit
+            d = decide(
                 r.proc.returncode,
                 r.last_rate,
                 r.result_text,
@@ -474,24 +511,55 @@ def run(args: argparse.Namespace) -> int:
                 stalled=f"treo {args.stall_minutes:g} phút không có output" if r.stalled else None,
             )
             del runs[tid]
-            log(f"{tid}: {d.kind} {d.reason}")
+            phase = f"review #{r.review_pr}" if r.review_pr else "build"
+            log(f"{tid} [{phase}]: {d.kind} {d.reason}")
             hold_new = hold_new or (args.hold_at_90 and r.warn)
-            if d.kind == "resume_at":
-                waiting[tid] = (d.at or int(now), r.session_id)
+            if d.kind == "pass":
+                # an independent session said PASS: the orchestrator merges, not the author
+                err = merge_pr(r.review_pr or "")
+                pending_review.pop(tid, None)
+                if err:
+                    log(f"{tid}: review PASS nhưng không merge được: {err}")
+                    failures[tid] = failures.get(tid, 0) + 1
+                    last_failure[tid] = f"Review PASS nhưng orchestrator không merge được: {err}"
+                    if failures[tid] >= MAX_FAILURES:
+                        final[tid] = Decision("failed", err)
+                else:
+                    d = Decision("merged", r.review_pr or "")
+            elif d.kind == "fail":
+                action = review_next(d, review_fails.get(tid, 0))
+                review_fails[tid] = review_fails.get(tid, 0) + 1
+                pending_review.pop(tid, None)
+                if action == "fix":
+                    last_failure[tid] = (
+                        f"Review độc lập FAIL (vòng {review_fails[tid]}) PR #{r.review_pr}: "
+                        f"{d.reason}\nChi tiết ở comment review trên PR.\n"
+                        f"{failure_context(attempt_lines(r))}"
+                    )
+                else:
+                    final[tid] = Decision(
+                        "failed", f"review FAIL {review_fails[tid]} vòng: {d.reason}"
+                    )
+            elif d.kind == "ready":
+                pending_review[tid] = d.reason  # next start of this task is its review
+            elif d.kind == "resume_at":
+                waiting[tid] = (d.at or int(now), r.session_id, r.review_pr)
             elif d.kind == "stop":
                 stop_all = d.reason
                 final[tid] = d
             elif d.kind == "failed":
+                # a crashed/stalled review keeps pending_review, so the retry is a review again
                 failures[tid] = failures.get(tid, 0) + 1
                 last_failure[tid] = f"Lý do: {d.reason}\n{failure_context(attempt_lines(r))}"
                 if failures[tid] >= MAX_FAILURES:
                     final[tid] = d
             elif d.kind == "blocked":
                 final[tid] = d
-            else:
+            if d.kind == "merged":
                 done.add(tid)
                 final[tid] = d
                 last_failure.pop(tid, None)
+                review_fails.pop(tid, None)
                 last_refresh = 0
             state["failures"] = failures
             save_state(state)
@@ -522,11 +590,11 @@ def run(args: argparse.Namespace) -> int:
             continue
 
         # resume after usage-limit reset
-        for tid, (at, sid) in list(waiting.items()):
+        for tid, (at, sid, review_pr) in list(waiting.items()):
             if time.time() >= at and len(runs) < args.parallel and not stopping:
                 del waiting[tid]
                 task = next(t for t in tasks if t.id == tid)
-                runs[tid] = start(task, resume=sid)
+                runs[tid] = start(task, resume=sid, review_pr=review_pr)
 
         # new work
         sched_done, held = scheduling_sets(done, final, waiting)
@@ -540,14 +608,24 @@ def run(args: argparse.Namespace) -> int:
             if develop_red:
                 print("CI trên develop đang đỏ: chạy thật sẽ KHÔNG mở việc nào dưới đây.")
             for t in ready:
-                print(f"SẼ CHẠY {t.id}: cwd={worktree_path(t)}")
-                print("  " + " ".join(build_command(ROOT, "<prompt>", None)))
+                pr = pending_review.get(t.id)
+                builder = build_review_command if pr else build_command
+                print(
+                    f"SẼ CHẠY {t.id}"
+                    + (f" [review #{pr}]" if pr else "")
+                    + f": cwd={worktree_path(t)}"
+                )
+                print("  " + " ".join(builder(ROOT, "<prompt>", None)))
             if not ready:
                 print("Không có việc nào sẵn sàng. Bị chặn: " + json.dumps(blk, ensure_ascii=False))
             return 0
         if not stopping and not hold_new and not develop_red:
             for t in ready:
-                runs[t.id] = start(t, previous_failure=last_failure.get(t.id))
+                runs[t.id] = start(
+                    t,
+                    previous_failure=last_failure.get(t.id),
+                    review_pr=pending_review.get(t.id),
+                )
 
         if should_exit(
             len(runs), len(waiting), refresh_pending=last_refresh == 0, stopping=stopping

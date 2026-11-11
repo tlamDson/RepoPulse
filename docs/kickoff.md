@@ -17,6 +17,9 @@ python scripts/orchestrate.py run --auto-approve-harness             # chạy, r
 - Script đọc `scripts/prs.toml`, chạy tối đa 5 phiên `claude -p` song song (`--parallel N` để đổi),
   mỗi việc một worktree `.claude/worktrees/pr-<id>`. Số phiên thật bị giới hạn bởi độ rộng DAG.
   Không phiên nào chờ người: lệnh cần hỏi bị từ chối và ghi log.
+- Mỗi PR có hai loại phiên: phiên PR (Fable) viết code tới khi CI xanh rồi báo `ready`; sau đó một
+  phiên review mới (`--agent code-reviewer`, Opus) review độc lập. PASS thì script tự kiểm 3 check
+  bắt buộc và merge; FAIL thì phiên PR chạy lại kèm kết luận review, tối đa 2 vòng review.
 - CI trên `develop` đỏ (sau một lần merge): không mở việc mới, không release. Chỉ lượt CI xanh mới
   gỡ cờ (`gh` lỗi hay lượt bị huỷ thì giữ nguyên). Nếu lúc đó không còn phiên nào chạy, script dừng
   và ghi `develop-ci` vào "Việc cần Lam"; sửa xong thì chạy lại.
