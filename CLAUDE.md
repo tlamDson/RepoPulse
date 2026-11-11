@@ -60,6 +60,9 @@ python -m repopulse.spark.export --lake-dir data/lake --out data/silver-export  
 python -m repopulse.pipeline {window,timed,counts,row,md-reset} --help   # helper của .github/workflows/pipeline.yml (incremental batch theo giờ); docs/pipeline.md
 python -m dbt.cli.main build --project-dir transform --profiles-dir transform --target ci --full-refresh   # dựng lại fct_events (staging giữ lịch sử); khi nào cần: docs/dbt-models.md
 
+python -m repopulse.export_site --db ci.duckdb --runs runs.csv --out _site   # 6 mart public + runs.csv -> trang + CSV Tableau; thiếu mart/cột thì exit 1 (docs/dashboard.md)
+python -m http.server 8000 --bind 127.0.0.1 --directory _site                # xem thử trang local
+
 python scripts/orchestrate.py run --dry-run      # xem sẽ chạy việc nào
 python scripts/orchestrate.py run                # chạy headless, không cần người (mặc định 5 phiên)
 python scripts/orchestrate.py report             # tiến độ theo PR đã merge
