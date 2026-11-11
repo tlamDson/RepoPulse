@@ -415,11 +415,67 @@ def test_missing_motherduck_token_skips_without_connecting():
     assert connect.calls == []
 
 
+# --- secret shape (info only): tells a mistyped secret apart from a platform refusal ---------
+
+
+def shape(host=HOST, token=TOKEN):
+    ctx, transport, _ = make_ctx(env={"DATABRICKS_HOST": host, "DATABRICKS_TOKEN": token})
+    return probe.check_secret_shape(ctx), transport
+
+
+def test_secret_shape_passes_for_workspace_url_and_pat_without_calling_out():
+    result, transport = shape()
+    assert result.name == probe.SECRET_SHAPE
+    assert result.status == PASS
+    assert transport.calls == []
+
+
+@pytest.mark.parametrize(
+    ("host", "token", "expected"),
+    [
+        (HOST, "eyJhbGciOiJSUzI1NiJ9.notapat", "does not start with dapi"),
+        (HOST, f'"{TOKEN}"', "DATABRICKS_TOKEN is wrapped in quotes"),
+        (HOST, f"Bearer {TOKEN}", "DATABRICKS_TOKEN contains whitespace"),
+        (f'"{HOST}"', TOKEN, "DATABRICKS_HOST is wrapped in quotes"),
+        (HOST + "/?o=1234567890", TOKEN, "DATABRICKS_HOST has a path or query"),
+        (HOST + "/browse/folders", TOKEN, "DATABRICKS_HOST has a path or query"),
+        ("https://accounts.cloud.databricks.com", TOKEN, "account console"),
+        ("https://example.org", TOKEN, "not a Databricks workspace hostname"),
+    ],
+)
+def test_secret_shape_reports_the_problem_without_the_value(host, token, expected):
+    result, transport = shape(host, token)
+    assert result.status == FAIL
+    assert expected in result.detail
+    assert transport.calls == []
+    for value in (token, token.strip("\"'"), "1234567890", "example.org", NETLOC):
+        assert value not in result.detail
+
+
+def test_secret_shape_is_skipped_without_secrets():
+    ctx, _, _ = make_ctx(env={"MOTHERDUCK_TOKEN": MD_TOKEN})
+    result = probe.check_secret_shape(ctx)
+    assert result.status == SKIPPED
+    assert "DATABRICKS_HOST" in result.detail and "DATABRICKS_TOKEN" in result.detail
+
+
+def test_secret_shape_never_decides_the_path():
+    assert probe.SECRET_SHAPE not in probe.DECIDES_PATH
+    statuses = all_databricks(**{probe.SECRET_SHAPE: FAIL})
+    assert decide_path(results_with(**statuses)) == "primary"
+
+
+def test_host_with_path_or_query_is_reduced_to_scheme_and_hostname():
+    for raw in (HOST + "/?o=1234567890", HOST + "/browse/folders/1#x", NETLOC + "/?o=1"):
+        assert Secrets.from_env({"DATABRICKS_HOST": raw}).host == HOST
+
+
 def test_run_all_with_no_secrets_skips_everything_and_never_calls_out():
     connect = FakeConnect()
     ctx, transport, _ = make_ctx(env={}, connect=connect)
     results = run_all(ctx)
     assert {r.name for r in results} == {
+        probe.SECRET_SHAPE,
         AUTH,
         VOLUME,
         JOB,

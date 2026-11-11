@@ -133,6 +133,14 @@ def test_runs_probe_dbt_debug_and_uploads_artifact():
     assert "probe-result.json" in paths and "probe-result.md" in paths
 
 
+def test_install_pins_duckdb_to_a_version_motherduck_supports():
+    # MotherDuck rejects DuckDB clients newer than the version its extension supports, so an
+    # unpinned install fails the MotherDuck checks for a reason unrelated to the account.
+    installs = [s["run"] for s in steps(load()) if "pip install" in s.get("run", "")]
+    assert len(installs) == 1
+    assert re.search(r"""["']duckdb(==|<=|<)\d[\d.]*["']""", installs[0]), installs[0]
+
+
 @pytest.mark.parametrize("action", ["actions/checkout", "actions/setup-python"])
 def test_uses_standard_actions(action):
     uses = [str(s.get("uses", "")) for s in steps(load())]
