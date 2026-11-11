@@ -272,7 +272,12 @@ def decide_after_exit(
 ) -> Decision:
     """``stalled`` = reason when the loop killed a silent session; it beats a stale quota event."""
     result = parse_result(result_text)
-    if result and result[0] in ("merged", "ready"):
+    if result and result[0] == "ready":
+        number = _PR_NUMBER_RE.search(result[1])
+        if not number:
+            return Decision("failed", f"RESULT: ready thiếu số PR ({result[1] or 'trống'})")
+        return Decision("ready", number.group(1))
+    if result and result[0] == "merged":
         return Decision(result[0], result[1])
     if stalled:
         return Decision("failed", stalled)
@@ -290,17 +295,17 @@ REQUIRED_CHECKS = ("Lint", "Unit Tests", "dbt build (DuckDB)")
 MAX_REVIEW_ROUNDS = 2
 
 _REVIEW_RE = re.compile(r"REVIEW:\s*(PASS|FAIL)\b[ \t]*(.*)")
-_REVIEW_HEADING_RE = re.compile(r"Kết luận:\s*(PASS|FAIL)\b")
+_PR_NUMBER_RE = re.compile(r"#?(\d+)")
 
 
 def parse_review(text: str) -> tuple[str, str] | None:
-    """Last ``REVIEW: PASS|FAIL <why>`` line; falls back to the agent's ``Kết luận:`` heading."""
+    """Last explicit ``REVIEW: PASS|FAIL <why>`` line. Merging hangs on it, so nothing else
+    (e.g. the agent's ``Kết luận: PASS | FAIL`` template heading) counts as a verdict."""
     found = _REVIEW_RE.findall(text or "")
-    if found:
-        verdict, reason = found[-1]
-        return verdict, reason.strip()
-    heading = _REVIEW_HEADING_RE.findall(text or "")
-    return (heading[-1], "") if heading else None
+    if not found:
+        return None
+    verdict, reason = found[-1]
+    return verdict, reason.strip()
 
 
 def decide_after_review(

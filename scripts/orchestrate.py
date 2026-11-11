@@ -245,6 +245,7 @@ class Run:
     last_output: float = 0.0
     log_offset: int = 0  # where this attempt starts in logs/pr-<id>.jsonl
     review_pr: str | None = None  # set = independent review session of this PR number
+    review_sha: str = ""  # HEAD the review session saw; the merge must be exactly this commit
     reader: threading.Thread | None = field(default=None, repr=False)
 
 
@@ -321,6 +322,8 @@ def start(
     )
     now = time.time()
     run = Run(task, proc, path, now, last_output=now, log_offset=offset, review_pr=review_pr)
+    if review_pr:
+        run.review_sha = sh(["git", "-C", str(path), "rev-parse", "HEAD"]).strip()
     run.reader = threading.Thread(target=_reader, args=(run, logfile), daemon=True)
     run.reader.start()
     kind = f"review PR #{review_pr}" if review_pr else "build"
@@ -329,8 +332,11 @@ def start(
     return run
 
 
-def merge_pr(pr: str) -> str | None:
-    """Merge after an independent PASS, only if the required checks pass. Returns an error."""
+def merge_pr(pr: str, head_sha: str) -> str | None:
+    """Merge after an independent PASS, only if the required checks pass and the PR head is
+    still the commit that was reviewed. Returns an error."""
+    if not head_sha:
+        return f"không biết commit đã review của PR #{pr}"
     out = sh(["gh", "pr", "checks", pr, "--json", "name,bucket"])
     try:
         checks = json.loads(out or "[]")
@@ -341,7 +347,7 @@ def merge_pr(pr: str) -> str | None:
         return f"CI chưa xanh ({why})"
     # --delete-branch also tries the local branch, which fails while the worktree holds it;
     # the merge itself is judged by the PR state below, the worktree is removed by clean().
-    sh(["gh", "pr", "merge", pr, "--squash", "--delete-branch"])
+    sh(["gh", "pr", "merge", pr, "--squash", "--delete-branch", "--match-head-commit", head_sha])
     state = sh(["gh", "pr", "view", pr, "--json", "state"])
     if '"MERGED"' not in state:
         return f"merge PR #{pr} thất bại"
@@ -516,10 +522,11 @@ def run(args: argparse.Namespace) -> int:
             hold_new = hold_new or (args.hold_at_90 and r.warn)
             if d.kind == "pass":
                 # an independent session said PASS: the orchestrator merges, not the author
-                err = merge_pr(r.review_pr or "")
+                err = merge_pr(r.review_pr or "", r.review_sha)
                 pending_review.pop(tid, None)
                 if err:
                     log(f"{tid}: review PASS nhưng không merge được: {err}")
+                    last_refresh = 0  # re-read gh: if the merge did land, the task counts as done
                     failures[tid] = failures.get(tid, 0) + 1
                     last_failure[tid] = f"Review PASS nhưng orchestrator không merge được: {err}"
                     if failures[tid] >= MAX_FAILURES:
