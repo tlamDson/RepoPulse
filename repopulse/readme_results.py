@@ -229,6 +229,9 @@ _PROSE_OTHER = (
 )
 
 
+_FOOTER = "The full log, with every run and not only the newest, is [`runs.csv`](runs.csv)."
+
+
 def render(rows: Iterable[Row]) -> str:
     """Markdown of the Results block for ``rows`` (dicts keyed by ``runs_log.COLUMNS``)."""
     latest = _newest(rows)
@@ -296,6 +299,9 @@ def render(rows: Iterable[Row]) -> str:
                 TITLE_OTHER, _PROSE_OTHER, sorted(other, key=by_variant_date), (*_COMMON, "notes")
             )
         )
+    # A closing paragraph also keeps the last table apart from the end marker (a comment line
+    # right after a table row can be read as part of the table).
+    parts.append(_FOOTER)
     return "\n\n".join(parts) + "\n"
 
 
