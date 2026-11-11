@@ -14,7 +14,7 @@ import csv
 import json
 import smtplib
 from collections.abc import Callable, Iterable
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from email.message import EmailMessage
 from pathlib import Path
 
@@ -94,6 +94,21 @@ def rows_for_day(rows: list[dict], day: date) -> list[dict]:
     return [r for r in rows if str(r.get("ts", "")).startswith(prefix)]
 
 
+def rows_between(rows: list[dict], start_local: str, end_local: str) -> list[dict]:
+    """Rows with ``start_local <= ts < end_local`` (``YYYY-MM-DD HH:MM:SS`` local strings)."""
+    return [r for r in rows if start_local <= str(r.get("ts", "")) < end_local]
+
+
+def utc_window(start: datetime, end: datetime) -> tuple[str, str]:
+    """Aware local bounds as the ``...Z`` strings the permission log uses.
+
+    Each bound is converted on its own, so a window spanning a DST change keeps its real
+    length (adding ``timedelta(days=1)`` to a UTC start would be an hour off that day).
+    """
+    fmt = "%Y-%m-%dT%H:%M:%SZ"
+    return start.astimezone(UTC).strftime(fmt), end.astimezone(UTC).strftime(fmt)
+
+
 # ---------- rule proposals (#5) ----------
 
 
@@ -155,15 +170,21 @@ def _num(v: object) -> float:
 
 
 def build_daily_report(
-    day: date, rows: list[dict], denials: list[dict], todo: list[str]
+    day: date,
+    rows: list[dict],
+    denials: list[dict],
+    todo: list[str],
+    window: str | None = None,
 ) -> tuple[str, str]:
-    """(subject, markdown body) for one day of orchestrator runs."""
+    """(subject, markdown body) for one day of orchestrator runs (``window`` = its span)."""
     merged = [r for r in rows if r.get("outcome") == "merged"]
     failed = [r for r in rows if r.get("outcome") in FAILED_OUTCOMES]
     cost = sum(_num(r.get("cost_usd")) for r in rows)
     subject = f"RepoPulse {day}: {len(merged)} merged, {len(failed)} thất bại, ${cost:.2f}"
 
     lines = [f"# RepoPulse · báo cáo ngày {day}", ""]
+    if window:
+        lines += [f"Khoảng: {window}", ""]
     if not rows:
         lines += ["Không có phiên nào chạy trong ngày.", ""]
     else:

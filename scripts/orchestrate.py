@@ -40,10 +40,11 @@ from repopulse.daily_report import (  # noqa: E402
     metrics_row,
     needs_lam,
     read_metrics,
-    rows_for_day,
+    rows_between,
     run_metrics,
     send_email,
     smtp_config,
+    utc_window,
 )
 from repopulse.orchestrator import (  # noqa: E402
     Decision,
@@ -475,6 +476,7 @@ def run(args: argparse.Namespace) -> int:
     pending_review: dict[str, str] = state.setdefault("pending_review", {})  # task -> PR number
     review_fails: dict[str, int] = state.setdefault("review_fails", {})
     develop_red = False
+    daily_tried = ""  # local date of this process's last daily-report attempt
     runs: dict[str, Run] = {}
     waiting: dict[str, tuple[int, str | None, str | None]] = {}  # at, session, review PR
     final: dict[str, Decision] = {}
@@ -593,8 +595,17 @@ def run(args: argparse.Namespace) -> int:
             if d.kind == "merged":
                 clean(dry_run=False, active={str(x.path) for x in runs.values()})
 
-        if not args.dry_run and daily_due(datetime.now(), daily_sent(), args.daily_hour):
-            send_daily(date.today(), send=True)
+        today = date.today().isoformat()
+        if (
+            not args.dry_run
+            and daily_tried != today  # one attempt per day per process, sent or not
+            and daily_due(datetime.now(), daily_sent(), args.daily_hour)
+        ):
+            daily_tried = today
+            try:
+                send_daily(date.today(), *rolling_window(), send=True)
+            except Exception as exc:  # noqa: BLE001 - the report must never stop running sessions
+                log(f"daily: lỗi khi viết báo cáo ({type(exc).__name__}: {exc})")
 
         stopping = should_stop(STATE) or bool(stop_all)
         if args.hold_at_90 and not hold_new and any(r.warn for r in runs.values()):
@@ -751,8 +762,8 @@ def record_metrics(r: Run, d: Decision) -> None:
             run_metrics(attempt_lines(r)),
         )
         append_metrics(METRICS, row)
-    except OSError as exc:
-        log(f"metrics: không ghi được ({exc})")
+    except Exception as exc:  # noqa: BLE001 - metrics must never stop running sessions
+        log(f"metrics: không ghi được ({type(exc).__name__}: {exc})")
 
 
 # ---------- daily report ----------
@@ -764,42 +775,63 @@ def daily_sent() -> str | None:
     return DAILY_SENT.read_text("utf-8").strip() if DAILY_SENT.exists() else None
 
 
-def send_daily(day: date, send: bool) -> Path:
-    """Write logs/daily-<day>.md and, if SMTP is configured and ``send``, e-mail it."""
-    rows = rows_for_day(read_metrics(METRICS), day)
-    start = datetime(day.year, day.month, day.day).astimezone(UTC)  # local midnight in UTC
-    end = start + timedelta(days=1)
-    stamp = "%Y-%m-%dT%H:%M:%SZ"
-    denials = denials_between(permission_log_lines(), start.strftime(stamp), end.strftime(stamp))
+def calendar_window(day: date) -> tuple[datetime, datetime]:
+    """Aware local midnight of ``day`` and of the next day (each converted on its own: DST)."""
+    nxt = day + timedelta(days=1)
+    start = datetime(day.year, day.month, day.day).astimezone()
+    return start, datetime(nxt.year, nxt.month, nxt.day).astimezone()
+
+
+def rolling_window() -> tuple[datetime, datetime]:
+    """The 24 hours up to now, so sessions ending after the send hour are in tomorrow's mail."""
+    end = datetime.now().astimezone()
+    return end - timedelta(hours=24), end
+
+
+def send_daily(day: date, start: datetime, end: datetime, send: bool) -> bool:
+    """Write logs/daily-<day>.md for [start, end); e-mail it if ``send`` and SMTP is set.
+
+    Returns True only when the mail went out; only then is the day marked as sent, so setting
+    the SMTP variables later the same evening still gets that day's mail.
+    """
+    fmt = "%Y-%m-%d %H:%M:%S"
+    rows = rows_between(read_metrics(METRICS), start.strftime(fmt), end.strftime(fmt))
+    denials = denials_between(permission_log_lines(), *utc_window(start, end))
     reports = sorted(LOGS.glob("run-*.md"), key=lambda p: p.stat().st_mtime)
     todo = needs_lam(reports[-1].read_text("utf-8")) if reports else []
-    subject, body = build_daily_report(day, rows, denials, todo)
+    window = f"{start:%Y-%m-%d %H:%M} → {end:%Y-%m-%d %H:%M}"
+    subject, body = build_daily_report(day, rows, denials, todo, window=window)
     LOGS.mkdir(exist_ok=True)
     path = LOGS / f"daily-{day.isoformat()}.md"
     path.write_text(body, "utf-8")
     log(f"daily: {path}")
-    if send:
-        cfg = smtp_config(dict(os.environ))
-        if cfg is None:
-            log("daily: chưa đặt REPOPULSE_SMTP_USER / REPOPULSE_SMTP_APP_PASSWORD, chỉ ghi file")
-        else:
-            try:
-                send_email(build_email(subject, body, cfg), cfg)
-                log(f"daily: đã gửi mail tới {cfg['to']}")
-            except (OSError, smtplib.SMTPException) as exc:
-                log(f"daily: gửi mail lỗi ({type(exc).__name__}); chạy lại `daily --force`")
-        STATE.mkdir(parents=True, exist_ok=True)
-        DAILY_SENT.write_text(day.isoformat(), "utf-8")
-    return path
+    if not send:
+        return False
+    cfg = smtp_config(dict(os.environ))
+    if cfg is None:
+        log("daily: chưa đặt REPOPULSE_SMTP_USER / REPOPULSE_SMTP_APP_PASSWORD, chỉ ghi file")
+        return False
+    try:
+        send_email(build_email(subject, body, cfg), cfg)
+    except (OSError, smtplib.SMTPException) as exc:
+        log(f"daily: gửi mail lỗi ({type(exc).__name__}); chạy lại `daily --force`")
+        return False
+    log(f"daily: đã gửi mail tới {cfg['to']}")
+    STATE.mkdir(parents=True, exist_ok=True)
+    DAILY_SENT.write_text(day.isoformat(), "utf-8")
+    return True
 
 
 def daily(args: argparse.Namespace) -> int:
+    """``--date`` = that calendar day; without it, the 24 hours up to now (as the run loop)."""
     day = date.fromisoformat(args.date) if args.date else date.today()
     send = not args.no_send
     if send and not args.force and daily_sent() == day.isoformat():
         print(f"Báo cáo {day} đã gửi rồi; thêm --force để gửi lại.")
         return 0
-    print(send_daily(day, send=send))
+    start, end = calendar_window(day) if args.date else rolling_window()
+    send_daily(day, start, end, send=send)
+    print(LOGS / f"daily-{day.isoformat()}.md")
     return 0
 
 
