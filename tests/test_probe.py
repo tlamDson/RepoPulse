@@ -1080,6 +1080,25 @@ def test_cli_github_env_exports_masked_http_path(tmp_path, capsys):
     assert out.index("::add-mask::") == 0 or "\n::add-mask::" in out
 
 
+def test_cli_github_env_masks_bare_hostname_and_user_for_later_steps(tmp_path, capsys):
+    # GitHub masks the secret exactly as stored (`https://host`); `dbt debug` prints the bare
+    # hostname, which would otherwise show up in the public log.
+    env = dict(FULL_ENV, GITHUB_ENV=str(tmp_path / "github_env"))
+    argv = ["--json-out", str(tmp_path / "r.json"), "--markdown-out", str(tmp_path / "r.md")]
+    code, _ = run_cli(argv + ["--github-env"], env=env)
+    assert code == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert f"::add-mask::{NETLOC}" in lines
+    assert f"::add-mask::{USER}" in lines
+
+
+def test_cli_without_github_env_flag_prints_no_mask_commands(tmp_path, capsys):
+    argv = ["--json-out", str(tmp_path / "r.json"), "--markdown-out", str(tmp_path / "r.md")]
+    code, _ = run_cli(argv, env=dict(FULL_ENV, GITHUB_ENV=str(tmp_path / "github_env")))
+    assert code == 0
+    assert "::add-mask::" not in capsys.readouterr().out
+
+
 def test_cli_github_env_writes_nothing_without_http_path(tmp_path):
     gh_env = tmp_path / "github_env"
     env = {"GITHUB_ENV": str(gh_env)}
