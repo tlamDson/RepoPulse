@@ -38,6 +38,7 @@ metastore_db/
 derby.log
 data/raw/
 data/landing/
+data/simulated/
 *.parquet
 *.json.gz
 
