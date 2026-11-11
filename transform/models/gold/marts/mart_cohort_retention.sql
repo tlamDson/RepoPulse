@@ -25,8 +25,12 @@ select
     cast(count(*) as bigint) as cohort_size,
     cast(count(a4.actor_login) as bigint) as retained_w4,
     cast(count(a12.actor_login) as bigint) as retained_w12,
-    cast(round(100 * count(a4.actor_login)::double / count(*), 2) as double) as retention_w4_pct,
-    cast(round(100 * count(a12.actor_login)::double / count(*), 2) as double) as retention_w12_pct
+    cast(
+        round(100 * cast(count(a4.actor_login) as double) / count(*), 2) as double
+    ) as retention_w4_pct,
+    cast(
+        round(100 * cast(count(a12.actor_login) as double) / count(*), 2) as double
+    ) as retention_w12_pct
 from cohorts as c
 left join activity as a4
     on a4.actor_login = c.actor_login and a4.week = c.cohort_week + 28

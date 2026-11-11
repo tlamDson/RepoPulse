@@ -25,8 +25,8 @@ opened as (
     select
         repo_name,
         pr_number,
-        arg_min(actor_login, created_at) as author,
-        arg_min(is_bot, created_at) as author_is_bot,
+        min_by(actor_login, created_at) as author,
+        min_by(is_bot, created_at) as author_is_bot,
         min(created_at) as opened_at
     from ev
     where type = 'PullRequestEvent' and action = 'opened' and pr_number is not null
@@ -53,8 +53,12 @@ funnel as (
     select
         f.repo_name,
         count(distinct f.actor_login) as forkers,
-        count(distinct f.actor_login) filter (where p.pr_number is not null) as forkers_with_pr,
-        count(distinct f.actor_login) filter (where p.merged_at is not null) as forkers_with_merge
+        count(
+            distinct case when p.pr_number is not null then f.actor_login end
+        ) as forkers_with_pr,
+        count(
+            distinct case when p.merged_at is not null then f.actor_login end
+        ) as forkers_with_merge
     from forks as f
     left join prs as p
         on p.repo_name = f.repo_name and p.author = f.actor_login and p.opened_at >= f.forked_at
@@ -66,8 +70,12 @@ pr_stats as (
         repo_name,
         count(*) as prs_opened,
         count(merged_at) as prs_merged,
-        quantile_cont((epoch(merged_at) - epoch(opened_at)) / 3600, 0.5) as p50,
-        quantile_cont((epoch(merged_at) - epoch(opened_at)) / 3600, 0.9) as p90
+        percentile_cont(0.5) within group (
+            order by {{ hours_between('opened_at', 'merged_at') }}
+        ) as p50,
+        percentile_cont(0.9) within group (
+            order by {{ hours_between('opened_at', 'merged_at') }}
+        ) as p90
     from prs
     group by repo_name
 )

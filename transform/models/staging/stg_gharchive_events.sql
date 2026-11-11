@@ -1,5 +1,6 @@
 {#- Silver GH Archive events, columns of docs/spark-jobs.md, accumulated across runs.
-    Source chosen by var: silver_gharchive_parquet set -> read_parquet(<glob>); unset -> CI seed.
+    Source chosen by var: silver_gharchive_parquet set -> parquet glob (DuckDB only,
+    macros/cross_db.sql); unset -> CI seed fixture.
 
     Incremental and protected from --full-refresh: the scheduled pipeline hands dbt the silver of
     one run's fresh lake (a few hours), so this table is the only place the history lives. A run
@@ -16,7 +17,7 @@
 
 with source as (
 {%- if silver_parquet %}
-    select * from read_parquet('{{ silver_parquet | replace("'", "''") }}')
+    select * from {{ silver_parquet_relation(silver_parquet) }}
 {%- else %}
     select * from {{ ref('fixture_silver_gharchive_events') }}
 {%- endif %}

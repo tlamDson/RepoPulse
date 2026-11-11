@@ -42,12 +42,18 @@ Schema trên DuckDB: `main` (seed), `main_staging`, `main_intermediate`, `main_g
 (dbt ghép `<schema target>_<schema tuỳ chỉnh>`). `main_public` là thứ duy nhất vai `public`
 (dashboard, Tableau Public) được đọc; nhãn PII, vai và cách che: `docs/governance.md`.
 
+SQL của model và singular test chạy được trên cả DuckDB và Snowflake: không dùng cú pháp chỉ
+DuckDB có (`filter (where …)`, `arg_min`, `quantile_cont`, `epoch`, `::`, `bool_or`, …) ngoài
+macro `transform/macros/cross_db.sql`; `tests/test_dbt_portability.py` kiểm điều này. Bảng ánh xạ
+và workflow port: `docs/snowflake-port.md`. Var `silver_gharchive_parquet` chỉ dùng được trên
+DuckDB (Snowflake báo lỗi compile).
+
 ## Chọn nguồn bằng var
 
 | Var | Nguồn của `stg_gharchive_events` | Dùng khi |
 |---|---|---|
 | (không đặt) | seed `fixture_silver_gharchive_events` | job CI `dbt build (DuckDB)`: không có lake, không có mạng dữ liệu |
-| `silver_gharchive_parquet: "<glob>"` | `read_parquet('<glob>')` | pipeline theo lịch (`data/silver-export/*.parquet`, `docs/pipeline.md`), test so khớp (`tests/test_dbt_marts.py`), chạy tay trên file parquet có cột silver |
+| `silver_gharchive_parquet: "<glob>"` | `read_parquet('<glob>')` (macro `silver_parquet_relation`, chỉ DuckDB) | pipeline theo lịch (`data/silver-export/*.parquet`, `docs/pipeline.md`), test so khớp (`tests/test_dbt_marts.py`), chạy tay trên file parquet có cột silver |
 
 ```bash
 python -m dbt.cli.main build --project-dir transform --profiles-dir transform --target ci
