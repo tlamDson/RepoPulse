@@ -37,11 +37,11 @@ Q3 funnel fork → PR → merge, thời gian tới merge p50/p90 · Q4 thời gi
   và `unit_tests:` cho logic SCD2, cohort, funnel.
 - Mart dbt cho cùng kết quả với `benchmarks/queries/q*.sql` trên fixture — có test so khớp.
 - Incremental: so khớp số dòng và tổng giữa incremental và full refresh trên fixture.
-- `dbt build --project-dir transform --profiles-dir transform --target ci` xanh trên DuckDB.
+- `python -m dbt.cli.main build --project-dir transform --profiles-dir transform --target ci` xanh trên DuckDB.
 - Mọi số đo thời gian/dữ liệu quét đi vào `runs.csv` qua workflow; không chép số tay vào tài liệu.
 - Port Snowflake: ghi số dòng phải sửa và thời gian; không ghi lên Snowflake trừ trong workflow
   chạy tay.
 
 ## Output
 
-Báo: model/query đã thêm, test và output, kết quả `dbt build`, số đo (nếu có) kèm dòng `runs.csv`.
+Báo: model/query đã thêm, test và output, kết quả `python -m dbt.cli.main build`, số đo (nếu có) kèm dòng `runs.csv`.
