@@ -70,6 +70,10 @@ class Gate:
     reason: str
 
 
+DATABRICKS_SECRETS = frozenset({"DATABRICKS_HOST", "DATABRICKS_TOKEN", "DATABRICKS_HTTP_PATH"})
+KNOWN_NEEDS = frozenset({"cloud", "snowflake", "harness", "databricks"})  # plus "secret:<NAME>"
+
+
 def _has_cloud(secrets: frozenset[str]) -> bool:
     databricks = {"DATABRICKS_HOST", "DATABRICKS_TOKEN"} <= secrets
     return databricks or "MOTHERDUCK_TOKEN" in secrets
@@ -82,6 +86,14 @@ def _need_reason(need: str, gates: Gates) -> str | None:
         return "cần secret SNOWFLAKE_* (đăng ký Snowflake trial)"
     if need == "harness" and not gates.harness_approved:
         return "chờ duyệt harness (docs/harness-check.md chưa có 'Lam đã duyệt')"
+    if need == "databricks":
+        missing = sorted(DATABRICKS_SECRETS - gates.secrets)
+        return f"cần secret {', '.join(missing)}" if missing else None
+    if need.startswith("secret:"):
+        name = need.removeprefix("secret:")
+        return None if name in gates.secrets else f"cần secret {name} (chủ repo tự nạp)"
+    if need not in KNOWN_NEEDS:
+        return f"điều kiện không rõ trong prs.toml: {need}"
     return None
 
 
