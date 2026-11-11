@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import gzip
 import hashlib
+import http.client
 import json
 import shutil
+import urllib.error
 import zlib
 from collections import Counter
 from datetime import UTC, datetime, timedelta, timezone
@@ -244,6 +246,43 @@ def test_failure_during_forced_rerun_keeps_previous_partition(env):
     assert after == before
 
 
+def test_crash_while_swapping_files_leaves_no_manifest_so_next_run_rebuilds(env, monkeypatch):
+    # The manifest is what `skipped` trusts, so it must be the last file to appear: a forced
+    # re-run that dies while swapping the data file must not leave a manifest behind.
+    run(env)
+    write_source(env["src"], f"{DAY}-0.json.gz", fixture_lines(0)[:3])
+    real_replace = ingest.os.replace
+
+    def failing_replace(src, dst):
+        if Path(dst).name == "events.json.gz":
+            raise OSError("disk full")
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(ingest.os, "replace", failing_replace)
+    with pytest.raises(OSError, match="disk full"):
+        run(env, force=True)
+    monkeypatch.undo()
+
+    assert not (part(env) / "_manifest.json").exists()
+    assert [p.name for p in part(env).iterdir() if p.name.startswith(".")] == []
+
+    result = run(env)
+    assert result.status == "ingested", "an incomplete partition must be rebuilt, not skipped"
+    assert read_events(part(env) / "events.json.gz") == fixture_lines(0)[:3]
+    assert manifest(env)["events_total"] == 3
+
+
+def test_manifest_without_data_file_is_not_skipped(env):
+    run(env)
+    (part(env) / "events.json.gz").unlink()
+
+    result = run(env)
+
+    assert result.status == "ingested"
+    assert len(env["fetcher"].calls) == 2
+    assert len(read_events(part(env) / "events.json.gz")) == 19
+
+
 def test_fetcher_error_writes_nothing(env):
     def boom(name, dest_dir):
         raise ConnectionError("network down")
@@ -327,6 +366,20 @@ def test_malformed_lines_are_quarantined_and_counted(env):
     m = manifest(env)
     assert m["counts_by_type"] == HOUR0_COUNTS
     assert sum(m["counts_by_type"].values()) == m["events_total"] - m["events_malformed"]
+
+
+def test_deeply_nested_line_is_quarantined_not_fatal(env):
+    # json.loads raises RecursionError (not ValueError) on very deep nesting; one such line
+    # must not fail the whole hour.
+    deep = b"[" * 100_000 + b"]" * 100_000
+    write_source(env["src"], f"{DAY}-0.json.gz", fixture_lines(0) + [deep])
+
+    result = run(env)
+
+    assert result.status == "ingested"
+    assert result.events_malformed == 1
+    assert result.events_kept == 19
+    assert read_events(part(env) / "_quarantine.jsonl.gz") == [deep]
 
 
 def test_no_quarantine_file_without_bad_lines(env):
@@ -521,6 +574,145 @@ def test_cli_rejects_bad_arguments(env, monkeypatch, extra):
         ingest.main(cli_args(env, *extra))
     assert exc.value.code == 2
     assert env["fetcher"].calls == []
+
+
+# 12. download (urlopen is faked: no network)
+
+
+class FakeResponse:
+    """Context manager with read(n); raises `fail_after` once that many bytes were served."""
+
+    def __init__(self, body: bytes, fail_after: Exception | None = None):
+        self._body = body
+        self._pos = 0
+        self._fail = fail_after
+
+    def read(self, n: int = -1) -> bytes:
+        if self._pos >= len(self._body):
+            if self._fail is not None:
+                raise self._fail
+            return b""
+        end = len(self._body) if n < 0 else self._pos + n
+        chunk = self._body[self._pos : end]
+        self._pos = end
+        return chunk
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def http_error(code: int) -> urllib.error.HTTPError:
+    return urllib.error.HTTPError("https://example.invalid/x", code, "error", None, None)
+
+
+@pytest.fixture
+def net(monkeypatch):
+    """Scripted urlopen: each call pops the next outcome (exception to raise or response)."""
+    state = {"outcomes": [], "requests": [], "sleeps": []}
+
+    def fake_urlopen(req, timeout=None):
+        state["requests"].append(req)
+        outcome = state["outcomes"].pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr(ingest.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(ingest.time, "sleep", state["sleeps"].append)
+    return state
+
+
+NAME = "2026-01-05-3.json.gz"
+
+
+def test_download_writes_file_and_uses_generic_user_agent(net, tmp_path):
+    net["outcomes"] = [FakeResponse(b"payload-bytes")]
+
+    path = ingest.download(NAME, tmp_path / "raw")
+
+    assert path == tmp_path / "raw" / NAME
+    assert path.read_bytes() == b"payload-bytes"
+    assert [p.name for p in (tmp_path / "raw").iterdir()] == [NAME]
+    req = net["requests"][0]
+    assert req.full_url == f"https://data.gharchive.org/{NAME}"
+    assert req.get_header("User-agent") == "gharchive-ingest/1.0"
+    assert net["sleeps"] == []
+
+
+def test_download_returns_none_on_404_without_retry(net, tmp_path):
+    net["outcomes"] = [http_error(404)]
+
+    assert ingest.download(NAME, tmp_path / "raw") is None
+
+    assert len(net["requests"]) == 1
+    assert list((tmp_path / "raw").iterdir()) == []
+
+
+def test_download_retries_server_errors_then_succeeds(net, tmp_path):
+    net["outcomes"] = [http_error(503), http_error(502), FakeResponse(b"ok")]
+
+    path = ingest.download(NAME, tmp_path / "raw")
+
+    assert path.read_bytes() == b"ok"
+    assert len(net["requests"]) == 3
+    assert len(net["sleeps"]) == 2
+    assert [p.name for p in (tmp_path / "raw").iterdir()] == [NAME]
+
+
+def test_download_raises_after_last_retry_and_leaves_no_part_file(net, tmp_path):
+    net["outcomes"] = [urllib.error.URLError("dns") for _ in range(3)]
+
+    with pytest.raises(urllib.error.URLError):
+        ingest.download(NAME, tmp_path / "raw", retries=3)
+
+    assert len(net["requests"]) == 3
+    assert list((tmp_path / "raw").iterdir()) == []
+
+
+def test_download_raises_http_error_after_last_retry(net, tmp_path):
+    net["outcomes"] = [http_error(500), http_error(500)]
+
+    with pytest.raises(urllib.error.HTTPError):
+        ingest.download(NAME, tmp_path / "raw", retries=2)
+
+    assert len(net["requests"]) == 2
+    assert list((tmp_path / "raw").iterdir()) == []
+
+
+def test_download_retries_when_connection_drops_mid_body(net, tmp_path):
+    dropped = FakeResponse(b"half", fail_after=http.client.IncompleteRead(b"half", 100))
+    net["outcomes"] = [dropped, FakeResponse(b"whole-file")]
+
+    path = ingest.download(NAME, tmp_path / "raw")
+
+    assert path.read_bytes() == b"whole-file"
+    assert len(net["requests"]) == 2
+    assert [p.name for p in (tmp_path / "raw").iterdir()] == [NAME]
+
+
+def test_download_drop_mid_body_on_last_retry_leaves_no_part_file(net, tmp_path):
+    net["outcomes"] = [
+        FakeResponse(b"half", fail_after=http.client.IncompleteRead(b"half", 100)) for _ in range(2)
+    ]
+
+    with pytest.raises(http.client.IncompleteRead):
+        ingest.download(NAME, tmp_path / "raw", retries=2)
+
+    assert list((tmp_path / "raw").iterdir()) == []
+
+
+def test_cli_404_from_real_download_is_missing_and_exits_zero(env, net, capsys):
+    # End to end through the real download(): a file GH Archive has not published yet must
+    # not turn the scheduled run red.
+    net["outcomes"] = [http_error(404)]
+
+    code = ingest.main(cli_args(env, "--date", DAY, "--hour", "9"))
+
+    assert code == 0
+    assert json.loads(capsys.readouterr().out)["status"] == "missing"
 
 
 def test_counter_helper_matches_fixture():

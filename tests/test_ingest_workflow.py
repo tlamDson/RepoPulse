@@ -72,11 +72,12 @@ def test_every_job_has_timeout():
         assert 0 < job["timeout-minutes"] <= 30, name
 
 
-def test_concurrency_is_fixed_and_queues():
+def test_concurrency_queues_per_trigger():
+    # One group per trigger: GitHub keeps a single pending run per group, so a pull_request or
+    # dispatch run sharing the cron's group could evict a queued scheduled hour.
     conc = load().get("concurrency")
     assert isinstance(conc, dict)
-    assert isinstance(conc.get("group"), str) and conc["group"]
-    assert "${{" not in conc["group"], "one group for the whole workflow"
+    assert conc.get("group") == "ingest-gharchive-${{ github.event_name }}"
     assert conc.get("cancel-in-progress") is False
 
 
