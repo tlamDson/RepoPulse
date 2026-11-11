@@ -22,7 +22,7 @@ Vì đường dự phòng đã chạy thật còn đường chính thì chưa, c
 | Commit | `2d1df17` trên nhánh `docs/probe-result` |
 | Artifact | `probe-result` (`probe-result.json`, `probe-result.md`) |
 
-Bảng dưới chép từ `probe-result.json` của lần chạy đó (đã bỏ mã `ReqId` trong thông báo lỗi). Báo cáo chỉ có pass/fail/skipped, không có số đo (số đo chỉ lấy từ `runs.csv`).
+Bảng dưới chép từ `probe-result.json` của lần chạy đó (đã bỏ mã `ReqId` trong thông báo lỗi; artifact ghi `HTTP 401 401` vì Databricks trả `error_code` cũng là `401`, ở đây viết gọn `HTTP 401`). Báo cáo chỉ có pass/fail/skipped, không có số đo (số đo chỉ lấy từ `runs.csv`).
 
 | Check | Trạng thái | Chi tiết | Vai trò |
 |---|---|---|---|
