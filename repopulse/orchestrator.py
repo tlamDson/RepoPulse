@@ -131,6 +131,20 @@ def next_ready(
     return ready[:free], blocked, skipped
 
 
+def should_exit(running: int, waiting: int, refresh_pending: bool, stopping: bool) -> bool:
+    """End the run loop only when nothing is running and nothing more can start.
+
+    ``refresh_pending`` is set right after a task merges: the gates (e.g. the harness
+    auto-approval that depends on S0.4 being merged) are still the pre-merge snapshot, so
+    the loop must refresh them before concluding there is no work left.
+    """
+    if running:
+        return False
+    if stopping:
+        return True
+    return not waiting and not refresh_pending
+
+
 def merged_task_ids(tasks: list[Task], prs: Iterable[dict]) -> set[str]:
     merged = {p["headRefName"] for p in prs if p.get("state") == "MERGED"}
     return {t.id for t in tasks if t.branch in merged}

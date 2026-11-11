@@ -47,6 +47,7 @@ from repopulse.orchestrator import (  # noqa: E402
     rate_limit_action,
     releases_due,
     render_progress,
+    should_exit,
     should_stop,
     trust_keys,
 )
@@ -465,9 +466,9 @@ def run(args: argparse.Namespace) -> int:
             for t in ready:
                 runs[t.id] = start(t)
 
-        if not runs and not waiting:
-            break
-        if stopping and not runs:
+        if should_exit(
+            len(runs), len(waiting), refresh_pending=last_refresh == 0, stopping=stopping
+        ):
             break
         time.sleep(POLL_S)
 
