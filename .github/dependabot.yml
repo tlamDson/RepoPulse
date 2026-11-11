@@ -1,12 +1,15 @@
+# Updates go through develop like every other change (feature -> develop -> main).
 version: 2
 updates:
   - package-ecosystem: pip
     directory: "/"
+    target-branch: develop
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
   - package-ecosystem: github-actions
     directory: "/"
+    target-branch: develop
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
