@@ -112,13 +112,14 @@ The full log, with every run and not only the newest, is [`runs.csv`](runs.csv).
 
 ### Not measured yet
 
-Nothing here has a row in `runs.csv`, so this README gives no number for it:
+Nothing in this list has a row in `runs.csv`, so this README gives no number for it:
 
-- The scheduled pipeline (`pipeline-incremental` rows). Its rows are artifacts that someone merges with `record_run.py`; at the time of writing none has been merged.
 - Event counts and sizes at bronze, silver and gold, the time to add one day of data compared with a full refresh, and the share of events rejected for schema or duplicates (measures M1, M2 and M9 of [`docs/plan.md`](docs/plan.md)).
 - Data freshness at p50 and p95 (M3). It needs many scheduled runs to accumulate.
 - Anything on Databricks, which this deployment does not use.
 - The Tableau Public workbook. The dashboard build writes the CSV files; publishing is a manual step by the repo owner.
+
+The scheduled pipeline uploads its `pipeline-incremental` rows as workflow artifacts. They reach `runs.csv` only when someone merges them with `record_run.py`; a merged row then appears above under "Other runs".
 
 ## Design decisions
 
