@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Simulated app event. A simulated user shares a trip from the simulated trip-planner app.",
+  "properties": {
+    "channel": {
+      "enum": [
+        "link",
+        "email",
+        "whatsapp"
+      ],
+      "type": "string"
+    },
+    "event_id": {
+      "description": "Producer-assigned unique id. When present and non-empty it is the dedup key.",
+      "type": "string"
+    },
+    "event_name": {
+      "const": "trip_shared"
+    },
+    "event_version": {
+      "const": 1
+    },
+    "occurred_at": {
+      "description": "When the action happened on the client, RFC 3339 with offset.",
+      "format": "date-time",
+      "type": "string"
+    },
+    "received_at": {
+      "description": "When the collector received the event (used to spot late arrivals).",
+      "format": "date-time",
+      "type": "string"
+    },
+    "recipient_email": {
+      "format": "email",
+      "type": "string",
+      "x-pii": true
+    },
+    "session_id": {
+      "description": "App session the event belongs to.",
+      "type": "string"
+    },
+    "simulated": {
+      "description": "Always true - every event in this catalog is simulated.",
+      "enum": [
+        true
+      ],
+      "type": "boolean"
+    },
+    "trip_id": {
+      "type": "string"
+    },
+    "user_id": {
+      "description": "Pseudonymous app user id (not an email).",
+      "type": "string"
+    }
+  },
+  "required": [
+    "event_name",
+    "event_version",
+    "occurred_at",
+    "user_id",
+    "session_id",
+    "simulated",
+    "trip_id",
+    "channel"
+  ],
+  "title": "trip_shared v1",
+  "type": "object"
+}

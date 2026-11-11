@@ -1,0 +1,23 @@
+name: itinerary_generated
+description: The simulated trip-planner app generates a day-by-day itinerary for a trip.
+dedup_fields: [itinerary_id]
+versions:
+  - version: 1
+    fields:
+      trip_id:
+        type: string
+        required: true
+        pii: false
+      itinerary_id:
+        type: string
+        required: true
+        pii: false
+      day_count:
+        type: integer
+        required: true
+        pii: false
+      latency_ms:
+        type: number
+        required: true
+        pii: false
+        description: Time taken to generate the itinerary, in milliseconds.

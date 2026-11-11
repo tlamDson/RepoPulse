@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Simulated app event. A simulated user creates an account in the simulated trip-planner app.",
+  "properties": {
+    "country_code": {
+      "description": "ISO 3166-1 alpha-2 country code.",
+      "type": "string"
+    },
+    "email": {
+      "format": "email",
+      "type": "string",
+      "x-pii": true
+    },
+    "event_id": {
+      "description": "Producer-assigned unique id. When present and non-empty it is the dedup key.",
+      "type": "string"
+    },
+    "event_name": {
+      "const": "user_signed_up"
+    },
+    "event_version": {
+      "const": 2
+    },
+    "marketing_opt_in": {
+      "type": "boolean"
+    },
+    "occurred_at": {
+      "description": "When the action happened on the client, RFC 3339 with offset.",
+      "format": "date-time",
+      "type": "string"
+    },
+    "received_at": {
+      "description": "When the collector received the event (used to spot late arrivals).",
+      "format": "date-time",
+      "type": "string"
+    },
+    "session_id": {
+      "description": "App session the event belongs to.",
+      "type": "string"
+    },
+    "signup_method": {
+      "enum": [
+        "email",
+        "google",
+        "apple"
+      ],
+      "type": "string"
+    },
+    "simulated": {
+      "description": "Always true - every event in this catalog is simulated.",
+      "enum": [
+        true
+      ],
+      "type": "boolean"
+    },
+    "user_id": {
+      "description": "Pseudonymous app user id (not an email).",
+      "type": "string"
+    }
+  },
+  "required": [
+    "event_name",
+    "event_version",
+    "occurred_at",
+    "user_id",
+    "session_id",
+    "simulated",
+    "email",
+    "signup_method",
+    "marketing_opt_in"
+  ],
+  "title": "user_signed_up v2",
+  "type": "object"
+}
