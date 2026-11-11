@@ -303,6 +303,40 @@ def test_prepare_main_writes_manifest_and_is_resumable(tmp_path, gz_dir):
     assert again["hours"] == hours
 
 
+def test_prepare_main_exits_non_zero_when_an_hour_fails_and_keeps_the_others(tmp_path, gz_dir):
+    blob = (gz_dir / "2026-01-05-0.json.gz").read_bytes()
+    config = _write_config(tmp_path, levels="[1]")
+    good = _fake_downloader({"2026-01-05-0.json.gz": blob}, [])
+
+    def flaky(name: str, dest_dir: Path, **kwargs) -> Path | None:
+        if name == "2026-01-05-1.json.gz":
+            raise OSError("connection reset")
+        return good(name, dest_dir, **kwargs)
+
+    assert scale_prepare.main(["--config", str(config)], downloader=flaky) == 1
+    manifest = json.loads((tmp_path / "scale" / "manifest.json").read_text("utf-8"))
+    status = {h["name"]: h["status"] for h in manifest["hours"]}
+    assert status["2026-01-05-0.json.gz"] == "ok"
+    assert status["2026-01-05-2.json.gz"] == "missing"
+    # the failed hour is neither ok nor missing, so the next run tries it again
+    assert "2026-01-05-1.json.gz" not in status
+
+
+def test_prepare_main_prepares_an_hour_again_when_its_slim_file_is_gone(tmp_path, gz_dir):
+    blob = (gz_dir / "2026-01-05-0.json.gz").read_bytes()
+    config = _write_config(tmp_path, levels="[1]")
+    calls: list[str] = []
+    fake = _fake_downloader({"2026-01-05-0.json.gz": blob}, calls)
+    assert scale_prepare.main(["--config", str(config)], downloader=fake) == 0
+    slim = tmp_path / "scale" / "2026-01-05-0.json.gz"
+    slim.unlink()  # e.g. a partial cache restore: the manifest says ok, the file is not there
+
+    calls.clear()
+    assert scale_prepare.main(["--config", str(config)], downloader=fake) == 0
+    assert "2026-01-05-0.json.gz" in calls
+    assert slim.is_file()
+
+
 # ---------------------------------------------------------------- DuckDB side
 
 
@@ -590,8 +624,11 @@ def test_main_rejects_bad_git_sha_before_running(bench_config, tmp_path, monkeyp
         raise AssertionError("benchmark ran with an invalid git sha")
 
     monkeypatch.setattr(scale_bench, "run_in_subprocess", _must_not_run)
-    out = tmp_path / "scale-rows.csv"
-    code = scale_bench.main(["--config", str(bench_config), "--git-sha", "NOT-A-SHA"])
+    out, summary = tmp_path / "scale-rows.csv", tmp_path / "scale-summary.md"
+    code = scale_bench.main(
+        ["--config", str(bench_config), "--git-sha", "NOT-A-SHA"]
+        + ["--out", str(out), "--summary", str(summary)]
+    )
     assert code != 0
     assert not out.exists()
 
