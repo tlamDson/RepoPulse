@@ -27,9 +27,9 @@ typed as (
     select
         cast(event_id as varchar) as event_id,
         cast(event_type as varchar) as event_type,
-        -- Spark writes UTC; parquet may arrive as TIMESTAMPTZ. epoch_us is absolute for
-        -- TIMESTAMPTZ and UTC for TIMESTAMP, so the wall time is UTC whatever the session zone.
-        make_timestamp(epoch_us(created_at)) as created_at,
+        -- Spark writes UTC; parquet may arrive as TIMESTAMPTZ. utc_timestamp (macros/cross_db.sql)
+        -- keeps the UTC wall time whatever the session zone.
+        {{ utc_timestamp('created_at') }} as created_at,
         cast(event_date as date) as event_date,
         cast(actor_id as bigint) as actor_id,
         cast(actor_login as varchar) as actor_login,
@@ -39,8 +39,8 @@ typed as (
         cast(pr_number as bigint) as pr_number,
         cast(issue_number as bigint) as issue_number,
         cast(pr_merged as boolean) as pr_merged,
-        cast(commit_author_email_hashes as varchar[]) as commit_author_email_hashes,
-        cast(commit_author_name_hashes as varchar[]) as commit_author_name_hashes,
+        {{ cast_string_array('commit_author_email_hashes') }} as commit_author_email_hashes,
+        {{ cast_string_array('commit_author_name_hashes') }} as commit_author_name_hashes,
         cast(landing_date as date) as landing_date,
         cast(landing_hour as integer) as landing_hour,
         cast(is_late as boolean) as is_late

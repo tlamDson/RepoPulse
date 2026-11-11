@@ -71,8 +71,9 @@ với đường đọc seed; baseline chạy trên cùng các dòng raw với pa
 
 Pipeline theo lịch không cho dbt đọc thư mục Delta: `python -m repopulse.spark.export` đọc bảng
 silver qua Delta rồi ghi parquet thường (`docs/pipeline.md`). Spark ghi `created_at` là thời điểm
-UTC, parquet có thể tới DuckDB dưới dạng `TIMESTAMPTZ`; staging lấy `make_timestamp(epoch_us(…))`
-nên giờ tường luôn là UTC bất kể múi giờ phiên. Hai target DuckDB (`ci`, `motherduck`) cũng đặt
+UTC, parquet có thể tới DuckDB dưới dạng `TIMESTAMPTZ`; staging qua macro `utc_timestamp`
+(`macros/cross_db.sql`; nhánh DuckDB là `make_timestamp(epoch_us(…))`) nên giờ tường luôn là UTC
+bất kể múi giờ phiên. Hai target DuckDB (`ci`, `motherduck`) cũng đặt
 `TimeZone: UTC` trong `profiles.yml`.
 
 ## Incremental
