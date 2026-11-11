@@ -164,8 +164,13 @@ def rate_limit_action(event: dict | None) -> tuple[str, int | str | None]:
         if info.get("errorCode"):
             return ("stop", f"usage limit: {info['errorCode']}")
         return ("wait", info.get("resetsAt"))
-    if status == "allowed_warning" and (info.get("utilization") or 0) >= WARN_UTILIZATION:
-        return ("warn", info.get("utilization"))
+    windows = info.get("unifiedWindows") or {}
+    used = [info.get("utilization") or 0] + [
+        (w or {}).get("utilization") or 0 for w in windows.values() if isinstance(w, dict)
+    ]
+    peak = max(used)
+    if peak >= WARN_UTILIZATION and status in ("allowed", "allowed_warning"):
+        return ("warn", peak)
     return ("none", None)
 
 
@@ -319,6 +324,32 @@ def clean_plan(
     return plan
 
 
+# ---------- workspace trust ----------
+# In -p mode Claude Code ignores a project's permissions.allow unless the folder is trusted in
+# ~/.claude.json (projects["<path>"].hasTrustDialogAccepted). Every worktree is a new folder.
+
+
+def trust_keys(path: str | Path) -> list[str]:
+    p = str(path).replace("\\", "/").rstrip("/")
+    if len(p) > 1 and p[1] == ":":
+        return [p[0].lower() + p[1:], p[0].upper() + p[1:]]
+    return [p]
+
+
+def mark_trusted(config: dict, keys: Iterable[str]) -> tuple[dict, bool]:
+    out = dict(config)
+    projects = dict(out.get("projects") or {})
+    changed = False
+    for k in keys:
+        entry = dict(projects.get(k) or {})
+        if entry.get("hasTrustDialogAccepted") is not True:
+            entry["hasTrustDialogAccepted"] = True
+            projects[k] = entry
+            changed = True
+    out["projects"] = projects
+    return out, changed
+
+
 # ---------- stop file, harness gate, progress ----------
 
 
@@ -337,7 +368,9 @@ def harness_file_approved(text: str) -> bool:
 def harness_auto_approved(log_lines: Iterable[str], task_id: str) -> bool:
     for line in log_lines:
         entry = parse_stream_line(line)
-        if not entry or entry.get("task") != task_id or entry.get("event") != "PermissionDenied":
+        # headless (-p, prompts none): a PermissionRequest is an automatic denial too
+        events = ("PermissionDenied", "PermissionRequest")
+        if not entry or entry.get("task") != task_id or entry.get("event") not in events:
             continue
         if not any(e in str(entry.get("input", "")) for e in EXPECTED_DENIALS):
             return False

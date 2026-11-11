@@ -39,6 +39,7 @@ from repopulse.orchestrator import (  # noqa: E402
     harness_auto_approved,
     harness_file_approved,
     load_tasks,
+    mark_trusted,
     merged_task_ids,
     next_ready,
     parse_stream_line,
@@ -47,6 +48,7 @@ from repopulse.orchestrator import (  # noqa: E402
     releases_due,
     render_progress,
     should_stop,
+    trust_keys,
 )
 
 STATE = ROOT / ".claude" / "state"
@@ -113,6 +115,32 @@ def harness_approved(done: set[str], auto: bool) -> bool:
     if harness_file_approved(text):
         return True
     return auto and "S0.4" in done and harness_auto_approved(permission_log_lines(), "S0.4")
+
+
+# ---------- workspace trust (~/.claude.json) ----------
+
+CLAUDE_JSON = Path.home() / ".claude.json"
+
+
+def ensure_trusted(paths: list[Path]) -> None:
+    """Pre-accept the trust dialog for the repo and every worktree path, so -p sessions keep
+    the project's permissions.allow rules. Writes atomically; keeps one backup."""
+    keys = [k for p in paths for k in trust_keys(p)]
+    try:
+        cfg = json.loads(CLAUDE_JSON.read_text("utf-8")) if CLAUDE_JSON.exists() else {}
+    except (OSError, json.JSONDecodeError) as exc:
+        log(f"trust: không đọc được {CLAUDE_JSON} ({exc}); bỏ qua")
+        return
+    new, changed = mark_trusted(cfg, keys)
+    if not changed:
+        return
+    backup = CLAUDE_JSON.with_name(".claude.json.repopulse-backup")
+    if not backup.exists() and CLAUDE_JSON.exists():
+        shutil.copy2(CLAUDE_JSON, backup)
+    tmp = CLAUDE_JSON.with_name(".claude.json.repopulse-tmp")
+    tmp.write_text(json.dumps(new, indent=2, ensure_ascii=False), "utf-8")
+    os.replace(tmp, CLAUDE_JSON)
+    log(f"trust: đã đánh dấu tin cậy {len(paths)} thư mục")
 
 
 # ---------- worktrees ----------
@@ -199,6 +227,7 @@ def _reader(run: Run, logfile: Path) -> None:
 
 def start(task: Task, resume: str | None = None) -> Run:
     path = ensure_worktree(task)
+    ensure_trusted([path])  # re-check: a running claude may have rewritten ~/.claude.json
     prompt = "Tiếp tục đúng việc đang dở." if resume else build_prompt(task)
     cmd = build_command(ROOT, prompt, resume)
     cmd[0] = shutil.which("claude") or "claude"
@@ -342,6 +371,7 @@ def run(args: argparse.Namespace) -> int:
     gates = Gates(frozenset(), False)
 
     if not args.dry_run:
+        ensure_trusted([ROOT, *(worktree_path(t) for t in tasks)])
         clean(dry_run=False)
 
     while True:
@@ -387,6 +417,9 @@ def run(args: argparse.Namespace) -> int:
                 clean(dry_run=False, active={str(x.path) for x in runs.values()})
 
         stopping = should_stop(STATE) or bool(stop_all)
+        if not hold_new and any(r.warn for r in runs.values()):
+            hold_new = True
+            log("quota trên 90% (5 giờ hoặc 7 ngày): không mở việc mới")
 
         # releases happen only when nothing is running, so develop is stable
         due = [

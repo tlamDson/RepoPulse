@@ -386,7 +386,7 @@ def test_harness_file_approved_needs_a_line_starting_with_marker():
 
 
 def test_harness_auto_approved_counts_headless_permission_requests():
-    # In -p with --permission-prompts none a prompt is an automatic denial, logged as PermissionRequest.
+    # In -p with --permission-prompts none a prompt is an automatic denial (PermissionRequest).
     lines = [_log("S0.4", "python -c 'x'", event="PermissionRequest")]
     assert harness_auto_approved(lines, task_id="S0.4") is False
     assert harness_auto_approved([_log("S0.4", "gh secret list", "PermissionRequest")], "S0.4")
