@@ -485,3 +485,30 @@ def test_held_task_is_not_started_and_does_not_unlock_dependants(tasks):
 def test_held_default_keeps_old_behaviour(tasks):
     ready, _, _ = next_ready(tasks, {"S0.4", "B"}, set(), NO_SECRETS, slots=2)
     assert ids(ready) == ["2", "4"]
+
+
+def test_scheduling_sets_keeps_waiting_and_unmerged_final_out_of_done():
+    from repopulse.orchestrator import Decision, scheduling_sets
+
+    final = {
+        "4": Decision("merged", "16"),
+        "8": Decision("failed", "CI red"),
+        "9": Decision("blocked", "needs secret"),
+    }
+    done, held = scheduling_sets(done={"S0.4"}, final=final, waiting={"5"})
+    assert done == {"S0.4", "4"}  # merged in this run counts even if gh lags
+    assert held == {"5", "8", "9"}
+    assert "5" not in done and "8" not in done
+
+
+def test_scheduling_sets_feeds_next_ready_correctly(tasks):
+    from repopulse.orchestrator import Decision, scheduling_sets
+
+    done, held = scheduling_sets(done={"S0.4", "B", "2", "probe"}, final={}, waiting={"4"})
+    ready, _, _ = next_ready(tasks, done, set(), CLOUD, slots=2, held=held)
+    assert ready == []  # 7 depends on waiting 4
+    done, held = scheduling_sets(
+        done={"S0.4", "B", "2", "probe"}, final={"4": Decision("merged", "16")}, waiting=set()
+    )
+    ready, _, _ = next_ready(tasks, done, set(), CLOUD, slots=2, held=held)
+    assert ids(ready) == ["7"]
