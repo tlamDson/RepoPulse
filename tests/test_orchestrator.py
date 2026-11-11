@@ -811,3 +811,30 @@ def test_review_next_merges_on_pass_fixes_once_then_gives_up():
     assert review_next(Decision("pass"), failed_rounds=1, max_rounds=2) == "merge"
     assert review_next(Decision("fail", "x"), failed_rounds=0, max_rounds=2) == "fix"
     assert review_next(Decision("fail", "x"), failed_rounds=1, max_rounds=2) == "give_up"
+
+
+def _t(needs, optional=False):
+    from repopulse.orchestrator import Task
+
+    return Task(id="x", branch="feature/x", agent="a", needs=tuple(needs), optional=optional)
+
+
+def test_secret_gate_blocks_until_named_secret_exists():
+    g = gate_for(_t(["secret:ANTHROPIC_API_KEY"]), NO_SECRETS)
+    assert g.kind == "block" and "ANTHROPIC_API_KEY" in g.reason
+    ok = Gates(secrets=frozenset({"ANTHROPIC_API_KEY"}), harness_approved=True)
+    assert gate_for(_t(["secret:ANTHROPIC_API_KEY"]), ok) is None
+
+
+def test_databricks_gate_needs_host_token_and_http_path():
+    md_only = Gates(secrets=frozenset({"MOTHERDUCK_TOKEN"}), harness_approved=True)
+    assert gate_for(_t(["databricks"]), md_only).kind == "block"
+    two = Gates(secrets=frozenset({"DATABRICKS_HOST", "DATABRICKS_TOKEN"}), harness_approved=True)
+    assert "DATABRICKS_HTTP_PATH" in gate_for(_t(["databricks"]), two).reason
+    full = Gates(secrets=two.secrets | {"DATABRICKS_HTTP_PATH"}, harness_approved=True)
+    assert gate_for(_t(["databricks"]), full) is None
+
+
+def test_unknown_need_blocks_instead_of_passing_silently():
+    g = gate_for(_t(["clod"]), CLOUD)
+    assert g is not None and g.kind == "block" and "clod" in g.reason
