@@ -212,7 +212,7 @@ Giai đoạn 2 là phần mở rộng. Bỏ cũng không ảnh hưởng kết qu
 
 ## Cách chạy
 
-**Cập nhật 2026-11-11:** chạy headless bằng `scripts/orchestrate.py` (DAG ở `scripts/prs.toml`, mỗi PR một phiên `claude -p` trong worktree riêng, tối đa 2 song song, agent chuyên trách theo mảng, tự chờ quota, tự release). Cách dùng: `docs/kickoff.md`. Mô tả cũ bên dưới giữ để tham khảo vai trò.
+**Cập nhật 2026-11-11:** chạy headless bằng `scripts/orchestrate.py` (DAG ở `scripts/prs.toml`, mỗi PR một phiên `claude -p` trong worktree riêng, tối đa 5 song song (trước đây 2), agent chuyên trách theo mảng, tự chờ quota, tự release). Cách dùng: `docs/kickoff.md`. Mô tả cũ bên dưới giữ để tham khảo vai trò.
 
 - **Phiên chính Fable (effort high):** viết kế hoạch ngắn cho từng PR có mục test phải đỏ, giao việc, quyết định merge, ghi `docs/progress.md`.
 - **Subagent Opus (effort medium):** mỗi PR một agent trong worktree riêng, viết test đỏ rồi code; một agent Opus khác review có bằng chứng.

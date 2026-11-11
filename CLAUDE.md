@@ -50,7 +50,7 @@ python -m repopulse.ingest --summary out/ingest-summary.json      # giờ (now U
 python -m repopulse.spark.job --source gharchive --date 2026-01-05 --hour 16 --hours 2   # bronze/silver Delta (cần PII_HASH_SALT, Java 17, extra spark); docs/spark-jobs.md
 
 python scripts/orchestrate.py run --dry-run      # xem sẽ chạy việc nào
-python scripts/orchestrate.py run --parallel 2   # chạy headless, không cần người
+python scripts/orchestrate.py run                # chạy headless, không cần người (mặc định 5 phiên)
 python scripts/orchestrate.py report             # tiến độ theo PR đã merge
 python scripts/orchestrate.py quota              # quota gần nhất đọc từ log
 python scripts/orchestrate.py clean --dry-run    # worktree nào sẽ bị dọn
@@ -62,7 +62,7 @@ Dừng orchestrator: tạo file `.claude/state/STOP` (việc đang chạy làm n
 
 | Vai | Model / effort | Làm gì |
 |---|---|---|
-| `scripts/orchestrate.py` | (Python, không phải agent) | Đọc DAG `scripts/prs.toml`, kiểm cổng (secret, harness), tạo worktree, chạy tối đa 2 phiên `claude -p` song song, chờ quota reset rồi `--resume`, release, dọn worktree, viết báo cáo |
+| `scripts/orchestrate.py` | (Python, không phải agent) | Đọc DAG `scripts/prs.toml`, kiểm cổng (secret, harness), tạo worktree, chạy tối đa 5 phiên `claude -p` song song (dừng mở việc khi CI `develop` đỏ), chờ quota reset rồi `--resume`, dừng phiên treo, thử lại kèm lý do lần trước, release, dọn worktree, viết báo cáo |
 | Phiên PR (headless) | Fable, high | Một phiên mỗi PR, trong worktree của PR: kế hoạch ngắn có mục test phải đỏ, giao agent chuyên trách, chờ CI, giao review, merge, kết thúc bằng dòng `RESULT:` |
 | Agent chuyên trách | Opus, medium | `pipeline-ops`, `event-schema-engineer`, `spark-engineer`, `analytics-engineer`, `data-quality-governance`, `dashboard-builder` — xem `.claude/agents/README.md` |
 | `code-reviewer` | Opus, medium | Review có bằng chứng: chạy lại test, commit đầu chỉ có test, mutation, PASS/FAIL |
