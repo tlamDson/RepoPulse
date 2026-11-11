@@ -1,0 +1,107 @@
+name: Ingest GH Archive
+
+# Hourly incremental batch (not streaming): downloads GH Archive hour file(s), keeps the event
+# types gold needs and lands them as data/landing/gharchive/date=YYYY-MM-DD/hour=HH/.
+# Fallback path (docs/probe-result.md): the landing zone is the workflow artifact
+# `landing-gharchive-<run_id>`, not a Databricks Volume. No secrets are used.
+#
+# `schedule` (cron) and `workflow_dispatch` only run once this file is on `main`, the default
+# branch, i.e. after the next release. Until then only the pull_request trigger runs it (one real
+# hour, to prove the download works). Not a required check, so `paths:` on pull_request is fine
+# here (unlike ci.yml).
+#
+# Concurrency: one fixed group with cancel-in-progress false, so scheduled runs queue instead of
+# cancelling each other (GitHub keeps at most one pending run per group).
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "data date YYYY-MM-DD (UTC); empty = now minus 2 hours"
+        type: string
+        default: ""
+      hour:
+        description: "data hour 0..23 (UTC); needed with date"
+        type: string
+        default: ""
+      hours:
+        description: "consecutive hours ending at date/hour (1..6)"
+        type: string
+        default: "1"
+      force:
+        description: "re-download and rebuild partitions that already exist"
+        type: boolean
+        default: false
+  pull_request:
+    branches: [develop, main]
+    paths:
+      - "repopulse/ingest.py"
+      - ".github/workflows/ingest.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ingest-gharchive
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    name: Ingest GH Archive (hourly)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - run: pip install -e .
+
+      - name: Ingest
+        env:
+          INPUT_DATE: ${{ inputs.date }}
+          INPUT_HOUR: ${{ inputs.hour }}
+          INPUT_HOURS: ${{ inputs.hours }}
+          INPUT_FORCE: ${{ inputs.force }}
+        run: |
+          args=(
+            --landing-dir data/landing/gharchive
+            --work-dir "$RUNNER_TEMP/gharchive-raw"
+            --summary out/ingest-summary.json
+          )
+          if [ -n "$INPUT_DATE" ]; then args+=(--date "$INPUT_DATE" --hour "$INPUT_HOUR"); fi
+          if [ -n "$INPUT_HOURS" ]; then args+=(--hours "$INPUT_HOURS"); fi
+          if [ "$INPUT_FORCE" = "true" ]; then args+=(--force); fi
+          python -m repopulse.ingest "${args[@]}"
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "### GH Archive ingest (incremental batch)"
+            echo
+            if [ -f out/ingest-summary.json ]; then
+              echo '```json'
+              cat out/ingest-summary.json
+              echo '```'
+            else
+              echo "No summary written (ingest failed before the first hour)."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: landing-gharchive-${{ github.run_id }}
+          path: |
+            data/landing/gharchive
+            out/ingest-summary.json
+          if-no-files-found: warn
+          overwrite: true
+          retention-days: 7
