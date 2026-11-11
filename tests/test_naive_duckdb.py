@@ -1,6 +1,6 @@
 """Naive DuckDB baseline: Q1-Q6 on a hand-written fixture give hand-computed numbers.
 
-Fixture ``tests/fixtures/gharchive_small/*.json`` (32 lines, gzip-compressed into ``tmp_path``
+Fixture ``tests/fixtures/gharchive_small/*.json`` (34 lines, gzip-compressed into ``tmp_path``
 at test time so the pipeline reads real ``*.json.gz`` files). Weeks are ISO weeks starting Monday:
 W0 = 2026-01-05, W1 = 01-12, W4 = 02-02, W5 = 02-09, W12 = 03-30, W13 = 04-06.
 
@@ -10,7 +10,9 @@ Contribution events (PullRequest*, Issues*, IssueComment*) by humans on seed rep
                             alice 02-03, bob 02-10
   duckdb/duckdb (warehouse) carol 01-07, bob 01-12, duckmaint 01-12, 01-14, bob 03-31
   trinodb/trino (compute)   carol 01-13 x2, carol 02-11 (comment on her own PR), carol 04-07
-Ignored on purpose: dependabot[bot] (a bot), PushEvent/CreateEvent by alice on spark 01-06,
+Ignored on purpose: the bots dependabot[bot] and Spark-CI-Bot (the '-bot' suffix, mixed case;
+it opens spark PR #107 on 01-08 11:00 and comments on dave's issue #106 on 01-09 09:00, one
+hour before alice), PushEvent/CreateEvent by alice on spark 01-06,
 WatchEvent/ForkEvent (not contributions), alice/toy (not in the seed).
 """
 
@@ -27,7 +29,7 @@ from benchmarks import naive_duckdb
 from repopulse.runs_log import COLUMNS
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "gharchive_small"
-FIXTURE_LINES = 32  # 18 + 14 lines, one of them an exact duplicate of event 9000000002
+FIXTURE_LINES = 34  # 20 + 14 lines, one of them an exact duplicate of event 9000000002
 
 
 def d(text: str) -> date:
@@ -72,7 +74,7 @@ def _same(actual: list[tuple], expected: list[tuple]) -> None:
 
 
 def test_raw_table_counts_duplicate_lines_and_every_event_type(result, gz_dir):
-    # baseline does not dedupe: 32 lines read, including the duplicated PR-opened line
+    # baseline does not dedupe: 34 lines read, including the duplicated PR-opened line
     assert result["row_count"] == FIXTURE_LINES
     assert result["bytes_read"] == sum(p.stat().st_size for p in gz_dir.glob("*.json.gz"))
     for key in ("total_seconds", *(f"q{i}_seconds" for i in range(1, 7))):
@@ -174,7 +176,8 @@ def test_q2_cohort_retention_at_w4_and_w12(result):
         "retention_w12_pct",
     ]
     # First PR opened on a seed repo: alice #101 01-05 (W0), bob #105 01-08 (W0), carol #50
-    # 01-13 (W1). dependabot[bot] excluded; alice's PR on alice/toy is outside the seed.
+    # 01-13 (W1). Bots excluded (dependabot[bot] #103, Spark-CI-Bot #107 would join W0);
+    # alice's PR on alice/toy is outside the seed.
     # W0 cohort {alice, bob}: W4 = 02-02..02-08 -> alice (02-03) yes, bob (02-10 is W5) no
     #   -> 1/2 = 50.0; W12 = 03-30..04-05 -> bob (03-31 duckdb) yes, alice only on alice/toy
     #   -> 1/2 = 50.0
@@ -205,7 +208,7 @@ def test_q3_fork_pr_merge_funnel_and_time_to_merge(result):
     ]
     # spark: forkers alice (01-05 09:00), dave (01-05 08:00); alice opened #101 at 10:00 after
     #   the fork and it was merged -> 1 / 1. dave never opens a PR (other people's PRs after his
-    #   fork do not count for him). Human PRs opened: #101, #105 (bot #103 excluded),
+    #   fork do not count for him). Human PRs opened: #101, #105 (bots #103, #107 excluded),
     #   both merged. Hours to merge: #101 01-05 10:00 -> 01-06 10:00 = 24; #105 10:00 -> 16:00 = 6
     #   -> p50 = (6 + 24) / 2 = 15.0, p90 = 6 + 0.9 * (24 - 6) = 22.2
     # duckdb: bob forked 09:00, opened #8 10:00, merged 01-14 10:00 = 48 h
@@ -233,9 +236,10 @@ def test_q4_first_response_and_close_rate(result):
         "close_rate_pct",
     ]
     # spark issues: #102 (bob 11:00, sparkmaint 15:00 -> 4 h, closed), #106 (dave 08:00, alice
-    #   18:00 -> 10 h), #104 (no response) -> p50 7.0, p90 4 + 0.9 * 6 = 9.4; closed 1/3 = 33.33
+    #   18:00 -> 10 h; the Spark-CI-Bot comment at 09:00 is a bot, not a response), #104 (no
+    #   response) -> p50 7.0, p90 4 + 0.9 * 6 = 9.4; closed 1/3 = 33.33
     # spark PRs: #101 review 2 h after open; #105 merged without comment/review -> no response;
-    #   both merged -> closed 2/2
+    #   both merged -> closed 2/2. #107 opened by Spark-CI-Bot is not an item (bot opener).
     # duckdb issue #7: only a bot comment -> no response, not closed
     # duckdb PR #8: duckmaint comment 6 h after open; merged
     # trino PR #50: only the author touched it (incl. her own 02-11 comment) -> no response;
@@ -266,13 +270,14 @@ def test_q5_bus_factor_and_bot_share(result):
         "top3_share_pct",
     ]
     # spark events: alice 4 (incl. the duplicate line, baseline does not dedupe), bob 3,
-    #   sparkmaint 5, dave 1, dependabot[bot] 1 -> 14 total, bot 1/14 = 7.14 %;
+    #   sparkmaint 5, dave 1, dependabot[bot] 1, Spark-CI-Bot 2 (PR #107 + comment on #106)
+    #   -> 16 total, bot 3/16 = 18.75 %;
     #   human 13: top1 5/13 = 38.46, top2 9/13 = 69.23, top3 12/13 = 92.31
     # duckdb: carol 1, bot 1, bob 2, duckmaint 2 -> 6, bot 1/6 = 16.67 %; human 5:
     #   top1 2/5 = 40.0, top2 4/5 = 80.0, top3 5/5 = 100.0
     # trino: carol 4 -> bot 0.0, top1..3 = 100.0
     expected = [
-        ("apache/spark", "compute", 14, 1, 7.14, 4, 38.46, 69.23, 92.31),
+        ("apache/spark", "compute", 16, 3, 18.75, 4, 38.46, 69.23, 92.31),
         ("duckdb/duckdb", "warehouse", 6, 1, 16.67, 3, 40.0, 80.0, 100.0),
         ("trinodb/trino", "compute", 4, 0, 0.0, 1, 100.0, 100.0, 100.0),
     ]
