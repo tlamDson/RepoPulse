@@ -2,10 +2,10 @@
 
 Usage::
 
-    python benchmarks/record_run.py benchmark-row.csv [--runs-csv runs.csv]
+    python benchmarks/record_run.py benchmark-row.csv [pipeline-row.csv ...] [--runs-csv runs.csv]
 
-Every row is parsed and validated before anything is written, so a bad artifact leaves
-``runs.csv`` untouched.
+Every row of every artifact is parsed and validated before anything is written, so one bad
+artifact leaves ``runs.csv`` untouched.
 """
 
 from __future__ import annotations
@@ -89,15 +89,28 @@ def record(artifact: str | os.PathLike[str], runs_csv: str | os.PathLike[str]) -
     return len(rows)
 
 
+def record_many(
+    artifacts: list[str | os.PathLike[str]], runs_csv: str | os.PathLike[str]
+) -> tuple[int, int]:
+    """Validate the rows of every artifact first, then append the new ones.
+
+    One bad artifact appends nothing. Returns (rows read, rows appended).
+    """
+    rows = [row for artifact in artifacts for row in read_artifact(artifact)]
+    fresh = new_rows(rows, runs_csv)
+    for row in fresh:
+        append_run(runs_csv, row)
+    return len(rows), len(fresh)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Append benchmark artifact rows to runs.csv.")
-    parser.add_argument("artifact", type=Path)
+    parser.add_argument("artifacts", type=Path, nargs="+", metavar="artifact")
     parser.add_argument("--runs-csv", type=Path, default=Path("runs.csv"))
     args = parser.parse_args(argv)
     try:
-        total = len(read_artifact(args.artifact))
-        n = record(args.artifact, args.runs_csv)
-    except RunsLogError as exc:
+        total, n = record_many(args.artifacts, args.runs_csv)
+    except (RunsLogError, OSError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
     print(f"appended {n} row(s) to {args.runs_csv}")
