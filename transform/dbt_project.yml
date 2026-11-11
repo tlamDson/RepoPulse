@@ -1,0 +1,13 @@
+name: repopulse
+version: "0.0.1"
+config-version: 2
+profile: repopulse
+
+model-paths: ["models"]
+test-paths: ["tests"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+models:
+  repopulse:
+    +materialized: view
