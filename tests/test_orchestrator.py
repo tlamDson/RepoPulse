@@ -512,3 +512,123 @@ def test_scheduling_sets_feeds_next_ready_correctly(tasks):
     )
     ready, _, _ = next_ready(tasks, done, set(), CLOUD, slots=2, held=held)
     assert ids(ready) == ["7"]
+
+
+# ---------- retry with the previous failure (#1) ----------
+
+
+def _line(obj: dict) -> str:
+    return json.dumps(obj, ensure_ascii=False)
+
+
+def test_failure_context_prefers_final_result_text():
+    from repopulse.orchestrator import failure_context
+
+    lines = [
+        _line({"type": "assistant", "message": {"content": [{"type": "text", "text": "old"}]}}),
+        _line({"type": "result", "result": "CI đỏ ở job Lint\nRESULT: failed lint"}),
+    ]
+    ctx = failure_context(lines)
+    assert "CI đỏ ở job Lint" in ctx
+    assert "old" not in ctx
+
+
+def test_failure_context_falls_back_to_last_assistant_texts_and_truncates():
+    from repopulse.orchestrator import failure_context
+
+    long = "x" * 5000
+    lines = [
+        "not json",
+        _line({"type": "assistant", "message": {"content": [{"type": "text", "text": "đầu"}]}}),
+        _line({"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "B"}]}}),
+        _line({"type": "assistant", "message": {"content": [{"type": "text", "text": long}]}}),
+    ]
+    ctx = failure_context(lines, max_chars=800)
+    assert len(ctx) <= 800
+    assert ctx.endswith("x")  # keeps the tail, the most recent text
+    assert failure_context([]) == ""
+
+
+def test_build_prompt_without_failure_has_no_failure_section(tasks):
+    assert "Lần trước thất bại" not in build_prompt(tasks[2])
+
+
+def test_build_prompt_with_previous_failure_tells_session_what_went_wrong(tasks):
+    p = build_prompt(tasks[2], previous_failure="treo 30 phút\nchờ gh pr checks")
+    assert "Lần trước thất bại" in p
+    assert "treo 30 phút" in p and "chờ gh pr checks" in p
+    assert p.rstrip().endswith("RESULT: blocked <việc cần chủ repo làm>")  # contract stays last
+
+
+# ---------- develop CI health (#3) ----------
+
+
+def test_develop_ci_state_maps_latest_run():
+    from repopulse.orchestrator import develop_ci_state
+
+    assert develop_ci_state([]) == "unknown"
+    assert develop_ci_state([{"status": "completed", "conclusion": "success"}]) == "green"
+    assert develop_ci_state([{"status": "completed", "conclusion": "failure"}]) == "red"
+    assert develop_ci_state([{"status": "completed", "conclusion": "cancelled"}]) == "unknown"
+    assert develop_ci_state([{"status": "in_progress", "conclusion": ""}]) == "pending"
+    # only the newest run counts (gh lists newest first)
+    runs = [
+        {"status": "completed", "conclusion": "success"},
+        {"status": "completed", "conclusion": "failure"},
+    ]
+    assert develop_ci_state(runs) == "green"
+
+
+def test_develop_ci_pending_keeps_previous_verdict():
+    from repopulse.orchestrator import develop_ci_blocks
+
+    # red blocks new work; pending keeps whatever we knew before; green/unknown release it
+    assert develop_ci_blocks("red", previously_blocked=False) is True
+    assert develop_ci_blocks("pending", previously_blocked=True) is True
+    assert develop_ci_blocks("pending", previously_blocked=False) is False
+    assert develop_ci_blocks("green", previously_blocked=True) is False
+    assert develop_ci_blocks("unknown", previously_blocked=True) is False
+
+
+# ---------- stall detection (#6) ----------
+
+
+def test_is_stalled_after_silence_limit():
+    from repopulse.orchestrator import is_stalled
+
+    assert is_stalled(last_output=1000, now=1000 + 1799, limit_s=1800, last_rate=None) is False
+    assert is_stalled(last_output=1000, now=1000 + 1801, limit_s=1800, last_rate=None) is True
+
+
+def test_is_stalled_not_while_waiting_for_quota_reset():
+    from repopulse.orchestrator import is_stalled
+
+    rejected = {
+        "type": "rate_limit_event",
+        "rate_limit_info": {"status": "rejected", "resetsAt": 10_000},
+    }
+    # silent because the in-session watchdog waits for the reset: not a stall
+    assert is_stalled(last_output=1000, now=9000, limit_s=1800, last_rate=rejected) is False
+    # reset passed long ago and still silent: stalled
+    assert is_stalled(last_output=1000, now=10_000 + 1801, limit_s=1800, last_rate=rejected)
+
+
+# ---------- CLI defaults ----------
+
+
+def _load_cli():
+    import importlib.util
+    import sys
+
+    path = Path(__file__).resolve().parents[1] / "scripts" / "orchestrate.py"
+    spec = importlib.util.spec_from_file_location("orchestrate_cli", path)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["orchestrate_cli"] = mod  # dataclasses resolve annotations via sys.modules
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_cli_defaults_to_five_parallel_and_thirty_minute_stall():
+    args = _load_cli().build_parser().parse_args(["run"])
+    assert args.parallel == 5
+    assert args.stall_minutes == 30
