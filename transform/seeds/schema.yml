@@ -1,0 +1,30 @@
+version: 2
+
+seeds:
+  - name: repos_data_ecosystem
+    description: >
+      Data-ecosystem repos scored by Q1-Q6 (benchmarks/queries) and the gold marts.
+      Repo names match GH Archive repo.name; the baseline joins them case-insensitively.
+    config:
+      column_types:
+        repo_name: varchar
+        category: varchar
+    columns:
+      - name: repo_name
+        description: GitHub owner/name.
+        data_tests:
+          - not_null
+          - unique
+      - name: category
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - compute
+                  - orchestration
+                  - storage-format
+                  - warehouse
+                  - streaming
+                  - dataframe
+                  - bi

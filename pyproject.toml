@@ -8,7 +8,7 @@ license = { text = "MIT" }
 dependencies = []
 
 [project.optional-dependencies]
-dev = ["ruff>=0.6", "pytest>=8", "pre-commit>=3.8", "pyyaml>=6"]
+dev = ["ruff>=0.6", "pytest>=8", "pre-commit>=3.8", "pyyaml>=6", "duckdb>=1.1"]
 dbt = ["dbt-core>=1.8", "dbt-duckdb>=1.8"]
 
 [build-system]
@@ -26,8 +26,9 @@ target-version = "py311"
 select = ["E", "F", "I", "B", "UP"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["repopulse"]
+known-first-party = ["repopulse", "benchmarks"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]  # benchmarks/ is not an installed package; import it from the repo root
 addopts = "-q"
