@@ -357,6 +357,43 @@ def test_main_writes_one_median_row(gz_dir, tmp_path):
     assert float(row["total_seconds"]) > 0
 
 
+def test_main_rejects_invalid_variant_before_running(gz_dir, tmp_path, monkeypatch, capsys):
+    ref = tmp_path / "reference.toml"
+    ref.write_text(_reference_for(gz_dir), encoding="utf-8")
+
+    def _must_not_run(*args, **kwargs):
+        raise AssertionError("pipeline ran with an invalid variant")
+
+    monkeypatch.setattr(naive_duckdb, "run_in_subprocess", _must_not_run)
+    out = tmp_path / "benchmark-row.csv"
+    code = naive_duckdb.main(
+        ["--data-dir", str(gz_dir), "--reference", str(ref), "--git-sha", "abc1234"]
+        + ["--variant", "Bad Variant", "--out", str(out)]
+    )
+    assert code != 0
+    assert "variant" in capsys.readouterr().err
+    assert not out.exists()
+
+
+def test_main_refuses_files_not_listed_in_the_reference(gz_dir, tmp_path, monkeypatch, capsys):
+    ref = tmp_path / "reference.toml"
+    ref.write_text(_reference_for(gz_dir), encoding="utf-8")
+    (gz_dir / "2026-01-06-0.json.gz").write_bytes(gzip.compress(b"{}\n"))
+
+    def _must_not_run(*args, **kwargs):
+        raise AssertionError("pipeline ran on files outside the reference")
+
+    monkeypatch.setattr(naive_duckdb, "run_in_subprocess", _must_not_run)
+    out = tmp_path / "benchmark-row.csv"
+    code = naive_duckdb.main(
+        ["--data-dir", str(gz_dir), "--reference", str(ref), "--git-sha", "abc1234"]
+        + ["--out", str(out)]
+    )
+    assert code != 0
+    assert "2026-01-06-0.json.gz" in capsys.readouterr().err
+    assert not out.exists()
+
+
 def test_main_stops_before_pipeline_when_checksum_is_wrong(gz_dir, tmp_path, monkeypatch):
     ref = tmp_path / "reference.toml"
     ref.write_text(_reference_for(gz_dir), encoding="utf-8")

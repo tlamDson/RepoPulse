@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from benchmarks import fetch_reference
 from benchmarks.reference import (
     ChecksumError,
     evaluate_day,
@@ -111,6 +112,39 @@ def test_missing_file_is_an_error(tmp_path):
     (tmp_path / "a.json.gz").unlink()
     with pytest.raises(ChecksumError, match=r"a\.json\.gz"):
         verify_files(tmp_path, ref)
+
+
+def _write_toml(path: Path, ref: dict) -> Path:
+    lines = [f'data_date = "{ref["data_date"]}"']
+    for f in ref["files"]:
+        lines += ["[[files]]", f"hour = {f['hour']}", f'name = "{f["name"]}"']
+        lines += [f'sha256 = "{f["sha256"]}"', f"bytes = {f['bytes']}"]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
+
+
+def _no_network(*args, **kwargs):
+    raise AssertionError("download attempted although every file is present")
+
+
+def test_fetch_cli_passes_without_network_when_files_are_cached(tmp_path, monkeypatch):
+    data = tmp_path / "data"
+    data.mkdir()
+    ref = _fake_reference(data, {"a.json.gz": b"alpha", "b.json.gz": b"beta"})
+    toml_path = _write_toml(tmp_path / "reference.toml", ref)
+    monkeypatch.setattr(fetch_reference, "download", _no_network)
+    assert fetch_reference.main(["--reference", str(toml_path), "--data-dir", str(data)]) == 0
+
+
+def test_fetch_cli_exits_nonzero_on_checksum_mismatch(tmp_path, monkeypatch, capsys):
+    data = tmp_path / "data"
+    data.mkdir()
+    ref = _fake_reference(data, {"a.json.gz": b"alpha", "b.json.gz": b"beta"})
+    toml_path = _write_toml(tmp_path / "reference.toml", ref)
+    (data / "a.json.gz").write_bytes(b"ALPHA")  # same size -> no re-download, wrong sha256
+    monkeypatch.setattr(fetch_reference, "download", _no_network)
+    assert fetch_reference.main(["--reference", str(toml_path), "--data-dir", str(data)]) != 0
+    assert "a.json.gz" in capsys.readouterr().err
 
 
 # ---------------------------------------------------------------- committed reference.toml

@@ -33,6 +33,10 @@ pytest
 dbt build --project-dir transform --profiles-dir transform --target ci
 gh pr checks <số-PR> --watch --interval 30
 
+python benchmarks/fetch_reference.py             # tải + kiểm sha256 ngày chuẩn (benchmarks/reference.toml)
+python benchmarks/naive_duckdb.py --runs 5 --git-sha <sha> --out out/benchmark-row.csv
+python benchmarks/record_run.py <benchmark-row.csv>   # gộp dòng từ artifact vào runs.csv
+
 python scripts/orchestrate.py run --dry-run      # xem sẽ chạy việc nào
 python scripts/orchestrate.py run --parallel 2   # chạy headless, không cần người
 python scripts/orchestrate.py report             # tiến độ theo PR đã merge
