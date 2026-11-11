@@ -38,6 +38,8 @@ python -m pytest
 python -m dbt.cli.main build --project-dir transform --profiles-dir transform --target ci
 python -m dbt.cli.main build --project-dir transform --profiles-dir transform --target ci --vars "{silver_gharchive_parquet: '<glob>/*.parquet'}"   # đọc silver parquet thay seed fixture (docs/dbt-models.md)
 python -m pytest tests/test_dbt_marts.py         # mart Q1-Q6 so khớp benchmarks/queries/q*.sql, contract, PII
+python -m repopulse.governance scan --db ci.duckdb --schema main_gold --schema main_public   # email thô ở gold/public? exit 0 sạch, 1 có finding (docs/governance.md)
+python -m repopulse.governance check --manifest transform/target/manifest.json --policy transform/governance.yml --db ci.duckdb   # nhãn meta.pii + quyền theo vai
 gh pr checks <số-PR> --watch --interval 30
 
 python benchmarks/fetch_reference.py             # tải + kiểm sha256 ngày chuẩn (benchmarks/reference.toml)

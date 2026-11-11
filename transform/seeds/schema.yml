@@ -35,7 +35,7 @@ seeds:
       deduplicated by id, plus tests/fixtures/gharchive_scd2) in the column layout of
       silver/gharchive_events (docs/spark-jobs.md). stg_gharchive_events reads it only when the var
       silver_gharchive_parquet is not set, so `dbt build --target ci` runs without a lake.
-      Regenerate from the JSON fixtures with tests/test_dbt_marts.py::silver_select_sql.
+      Regenerate from the JSON fixtures with tests/dbt_helpers.py::silver_select_sql.
     config:
       column_types:
         event_id: varchar
