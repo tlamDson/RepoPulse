@@ -22,6 +22,7 @@ include = ["repopulse*", "eventspec*", "simkit*"]
 
 [tool.setuptools.package-data]
 eventspec = ["catalog/*.yaml", "schemas/*.json"]
+repopulse = ["quality.toml"]
 
 [tool.ruff]
 line-length = 100
