@@ -128,6 +128,17 @@ def test_duplicate_seen_by_find_duplicates(clean):
     assert len(result.events) == len(clean) + 6
 
 
+def test_every_duplicate_copy_follows_its_original(clean):
+    n = len(clean) // 3
+    result = inject_faults(clean, {"duplicate": n}, seed=8)
+    dups = find_duplicates(result.events)
+    assert sorted(d.index for d in dups) == indices(result, "duplicate")
+    by_copy = {d.index: d.first_index for d in dups}
+    for record in records(result, "duplicate"):
+        assert record.detail["original_index"] == by_copy[record.indices[0]]
+        assert record.detail["original_index"] < record.indices[0]
+
+
 def test_null_seen_by_validate(clean):
     result = inject_faults(clean, {"null": 7}, seed=4)
     invalid = sorted(i for i, e in enumerate(result.events) if validate(e))
@@ -174,6 +185,15 @@ def test_late_seen_by_arrival_delay_and_still_valid(clean):
     assert all(validate(e) == [] for e in result.events)
 
 
+def test_every_event_can_be_made_late_past_the_threshold(clean):
+    result = inject_faults(clean, {"late": len(clean)}, seed=8)
+    assert len(result.events) == len(clean)
+    delays = [delay(e) for e in result.events]
+    assert all(d is not None and d > LATE_THRESHOLD for d in delays)
+    assert all(validate(e) == [] for e in result.events)
+    assert sorted(e["event_id"] for e in result.events) == sorted(e["event_id"] for e in clean)
+
+
 def records_by_index(result):
     return {i: r for r in result.faults for i in r.indices}
 
@@ -214,6 +234,9 @@ def test_bot_seen_by_event_rate(clean):
         bot_events = [result.events[i] for i in record.indices]
         assert {e["user_id"] for e in bot_events} == {record.detail["user_id"]}
         assert len(bot_events) == record.detail["events"] > BOT_EVENTS_PER_MINUTE
+        times = sorted(parse_ts(e["occurred_at"]) for e in bot_events)
+        span = (times[-1] - times[0]).total_seconds()
+        assert span == record.detail["span_seconds"] < 60
     assert all(validate(e) == [] for e in result.events)
     assert find_duplicates(result.events) == []
     assert all(delay(e) <= LATE_THRESHOLD for e in result.events)
