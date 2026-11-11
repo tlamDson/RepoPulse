@@ -1,0 +1,20 @@
+name: trip_shared
+description: A simulated user shares a trip from the simulated trip-planner app.
+dedup_fields: [trip_id, user_id, channel, occurred_at]
+versions:
+  - version: 1
+    fields:
+      trip_id:
+        type: string
+        required: true
+        pii: false
+      channel:
+        type: string
+        enum: [link, email, whatsapp]
+        required: true
+        pii: false
+      recipient_email:
+        type: string
+        format: email
+        required: false
+        pii: true

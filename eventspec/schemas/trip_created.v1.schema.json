@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Simulated app event. A simulated user creates a trip in the simulated trip-planner app.",
+  "properties": {
+    "destination": {
+      "type": "string"
+    },
+    "end_date": {
+      "format": "date",
+      "type": "string"
+    },
+    "event_id": {
+      "description": "Producer-assigned unique id. When present and non-empty it is the dedup key.",
+      "type": "string"
+    },
+    "event_name": {
+      "const": "trip_created"
+    },
+    "event_version": {
+      "const": 1
+    },
+    "occurred_at": {
+      "description": "When the action happened on the client, RFC 3339 with offset.",
+      "format": "date-time",
+      "type": "string"
+    },
+    "received_at": {
+      "description": "When the collector received the event (used to spot late arrivals).",
+      "format": "date-time",
+      "type": "string"
+    },
+    "session_id": {
+      "description": "App session the event belongs to.",
+      "type": "string"
+    },
+    "simulated": {
+      "description": "Always true - every event in this catalog is simulated.",
+      "enum": [
+        true
+      ],
+      "type": "boolean"
+    },
+    "start_date": {
+      "format": "date",
+      "type": "string"
+    },
+    "traveler_count": {
+      "type": "integer"
+    },
+    "trip_id": {
+      "type": "string"
+    },
+    "user_id": {
+      "description": "Pseudonymous app user id (not an email).",
+      "type": "string"
+    }
+  },
+  "required": [
+    "event_name",
+    "event_version",
+    "occurred_at",
+    "user_id",
+    "session_id",
+    "simulated",
+    "trip_id",
+    "destination",
+    "start_date",
+    "end_date",
+    "traveler_count"
+  ],
+  "title": "trip_created v1",
+  "type": "object"
+}

@@ -1,0 +1,28 @@
+name: trip_created
+description: A simulated user creates a trip in the simulated trip-planner app.
+dedup_fields: [trip_id]
+versions:
+  - version: 1
+    fields:
+      trip_id:
+        type: string
+        required: true
+        pii: false
+      destination:
+        type: string
+        required: true
+        pii: false
+      start_date:
+        type: string
+        format: date
+        required: true
+        pii: false
+      end_date:
+        type: string
+        format: date
+        required: true
+        pii: false
+      traveler_count:
+        type: integer
+        required: true
+        pii: false

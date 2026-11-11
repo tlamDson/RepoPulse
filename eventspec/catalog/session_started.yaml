@@ -1,0 +1,19 @@
+name: session_started
+description: A simulated user opens the simulated trip-planner app.
+dedup_fields: [session_id]
+versions:
+  - version: 1
+    fields:
+      platform:
+        type: string
+        enum: [ios, android, web]
+        required: true
+        pii: false
+      app_version:
+        type: string
+        required: true
+        pii: false
+      device_model:
+        type: string
+        required: false
+        pii: false

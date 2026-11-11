@@ -42,6 +42,8 @@ python benchmarks/fetch_reference.py             # tải + kiểm sha256 ngày c
 python benchmarks/naive_duckdb.py --runs 5 --git-sha <sha> --out out/benchmark-row.csv
 python benchmarks/record_run.py <benchmark-row.csv>   # gộp dòng từ artifact vào runs.csv
 
+python -m eventspec.generate                     # sinh lại eventspec/schemas/ từ catalog (docs/eventspec.md)
+
 python -m repopulse.ingest --date 2026-01-05 --hour 15 --hours 2   # ingest GH Archive vào data/landing/gharchive
 python -m repopulse.ingest --summary out/ingest-summary.json      # giờ (now UTC - 2h); --force để làm lại
 
