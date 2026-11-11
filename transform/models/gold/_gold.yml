@@ -106,7 +106,9 @@ models:
     description: >
       One row per GH Archive event on a seed repo (grain event_id). user_key points at the
       dim_user version valid at created_at; repo_key at dim_repo. Commit author email/name
-      hashes from silver are not carried into gold.
+      hashes from silver are not carried into gold. Incremental (delete+insert on event_id):
+      each run recomputes every fact of the actors with staging rows newer than max(loaded_at),
+      because a late event can shift their dim_user versions.
     config:
       contract:
         enforced: true
@@ -189,6 +191,15 @@ models:
       - name: is_late
         config: {meta: {pii: none}}
         data_type: boolean
+      - name: loaded_at
+        description: >
+          Load marker copied from stg_gharchive_events (start of the dbt run that first staged the
+          event, UTC). Not a business column: the incremental run uses max(loaded_at) of this
+          table as its watermark to find touched actors.
+        config: {meta: {pii: none}}
+        data_type: timestamp
+        constraints:
+          - type: not_null
 
 unit_tests:
   - name: dim_user_login_change_starts_new_version
@@ -256,6 +267,9 @@ unit_tests:
       Actor 7 goes a -> b -> a: an event with login a before the rename points at version 1,
       not at the later version 3 that reuses the login; b points at 2, the last a at 3.
     model: fct_events
+    overrides:
+      macros:
+        is_incremental: false
     given:
       - input: ref('stg_gharchive_events')
         rows:
@@ -290,6 +304,9 @@ unit_tests:
       Login a then b in the same second: each event points at the version of its own login,
       the a event at the zero-length version 1.
     model: fct_events
+    overrides:
+      macros:
+        is_incremental: false
     given:
       - input: ref('stg_gharchive_events')
         rows:
@@ -310,3 +327,53 @@ unit_tests:
       rows:
         - {event_id: "21", user_key: "8-1"}
         - {event_id: "22", user_key: "8-2"}
+
+  - name: fct_events_incremental_recomputes_every_fact_of_touched_actors
+    description: >
+      Incremental run. Actor 7 gets a late event (loaded after the newest loaded_at of the
+      table) on a repo outside the seed, which makes 'old' version 1: both earlier facts of actor
+      7 are emitted again with user_key 7-2 although neither is new. Actor 9 has nothing new and
+      is not emitted; the out-of-seed event itself never becomes a fact.
+    model: fct_events
+    overrides:
+      macros:
+        is_incremental: true
+    given:
+      # format sql: dict rows for `this` need the table to exist already (not true on a fresh CI DB)
+      - input: this
+        format: sql
+        rows: |
+          select * from (values
+              ('31', 7, '7-1', timestamp '2026-01-10 00:00:00'),
+              ('32', 7, '7-1', timestamp '2026-01-10 00:00:00'),
+              ('41', 9, '9-1', timestamp '2026-01-10 00:00:00')
+          ) as t (event_id, actor_id, user_key, loaded_at)
+      - input: ref('stg_gharchive_events')
+        rows:
+          - {event_id: "30", actor_id: 7, actor_login: old, repo_name: someone/elsewhere,
+             event_type: WatchEvent, created_at: "2025-12-31 00:00:00",
+             loaded_at: "2026-01-11 00:00:00"}
+          - {event_id: "31", actor_id: 7, actor_login: a, repo_name: apache/spark,
+             event_type: IssueCommentEvent, created_at: "2026-01-01 00:00:00",
+             loaded_at: "2026-01-10 00:00:00"}
+          - {event_id: "32", actor_id: 7, actor_login: a, repo_name: apache/spark,
+             event_type: IssueCommentEvent, created_at: "2026-01-02 00:00:00",
+             loaded_at: "2026-01-10 00:00:00"}
+          - {event_id: "41", actor_id: 9, actor_login: z, repo_name: apache/spark,
+             event_type: IssueCommentEvent, created_at: "2026-01-02 00:00:00",
+             loaded_at: "2026-01-10 00:00:00"}
+      - input: ref('dim_repo')
+        rows:
+          - {repo_key: apache/spark, repo_name: apache/spark, category: compute}
+      - input: ref('dim_user')
+        rows:
+          - {user_key: "7-1", actor_id: 7, actor_login: old, version_number: 1,
+             valid_from: "2025-12-31 00:00:00", valid_to: "2026-01-01 00:00:00"}
+          - {user_key: "7-2", actor_id: 7, actor_login: a, version_number: 2,
+             valid_from: "2026-01-01 00:00:00", valid_to: null}
+          - {user_key: "9-1", actor_id: 9, actor_login: z, version_number: 1,
+             valid_from: "2026-01-02 00:00:00", valid_to: null}
+    expect:
+      rows:
+        - {event_id: "31", user_key: "7-2", loaded_at: "2026-01-10 00:00:00"}
+        - {event_id: "32", user_key: "7-2", loaded_at: "2026-01-10 00:00:00"}

@@ -118,6 +118,32 @@ def test_cli_rerun_reports_skipped_duplicate_and_exits_zero(tmp_path, capsys):
     assert len(_read(runs)) == 2
 
 
+def test_cli_records_several_artifacts_in_one_call(tmp_path, capsys):
+    runs = tmp_path / "runs.csv"
+    first = tmp_path / "a"
+    second = tmp_path / "b"
+    first.mkdir()
+    second.mkdir()
+    a = _artifact(first, GOOD)
+    b = _artifact(second, GOOD.replace("baseline", "pipeline-incremental"))
+    assert main([str(a), str(b), "--runs-csv", str(runs)]) == 0
+    assert [r[2] for r in _read(runs)[1:]] == ["baseline", "pipeline-incremental"]
+    assert "appended 2 row(s)" in capsys.readouterr().out
+
+
+def test_cli_with_one_bad_artifact_appends_nothing(tmp_path, capsys):
+    runs = tmp_path / "runs.csv"
+    first = tmp_path / "a"
+    second = tmp_path / "b"
+    first.mkdir()
+    second.mkdir()
+    a = _artifact(first, GOOD)
+    b = _artifact(second, GOOD.replace("baseline", "BAD"))
+    assert main([str(a), str(b), "--runs-csv", str(runs)]) != 0
+    assert not runs.exists()
+    assert "variant" in capsys.readouterr().err
+
+
 def test_cli_returns_nonzero_on_invalid_row(tmp_path, capsys):
     runs = tmp_path / "runs.csv"
     code = main(

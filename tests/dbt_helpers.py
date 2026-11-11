@@ -1,4 +1,4 @@
-"""Helpers shared by the dbt tests (test_dbt_marts.py, test_governance.py).
+"""Helpers shared by the dbt tests (test_dbt_marts.py, test_governance.py, test_dbt_incremental.py).
 
 Not a test module: the session fixtures ``lake``/``built`` in conftest.py and the tests import it
 as ``dbt_helpers`` (``tests/`` is on ``sys.path`` under pytest's default import mode).

@@ -15,6 +15,23 @@
 {%- endmacro %}
 
 
+{#- UTC wall time of a timestamp as a TIMESTAMP without zone. Spark writes UTC; on DuckDB the
+    silver parquet may arrive as TIMESTAMPTZ, and epoch_us is absolute for TIMESTAMPTZ and UTC
+    for TIMESTAMP, so the result is UTC whatever the session zone. On Snowflake the source is
+    always the seed (TIMESTAMP_NTZ, already UTC). -#}
+{% macro utc_timestamp(expr) -%}
+    {{ return(adapter.dispatch('utc_timestamp', 'repopulse')(expr)) }}
+{%- endmacro %}
+
+{% macro duckdb__utc_timestamp(expr) -%}
+    make_timestamp(epoch_us({{ expr }}))
+{%- endmacro %}
+
+{% macro snowflake__utc_timestamp(expr) -%}
+    cast({{ expr }} as timestamp)
+{%- endmacro %}
+
+
 {#- Cast an expression to an array of strings (silver's commit_author_*_hashes). The CI seed
     stores these columns as varchar (all empty in the fixture). -#}
 {% macro cast_string_array(expr) -%}

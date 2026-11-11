@@ -86,6 +86,7 @@ hay workflow. Checkout trong workflow dùng `fetch-depth: 0` để có commit g�
 | `bool_or(c)` | `max(case when c then 1 else 0 end) = 1` | Q6 |
 | `ends_with(s, '[bot]')` | `right(s, 5) = '[bot]'` | `dim_user` |
 | `cast(x as varchar[])` | macro `cast_string_array(x)`: Snowflake `cast(try_parse_json(...) as array)` | staging |
+| `make_timestamp(epoch_us(x))` | macro `utc_timestamp(x)`: DuckDB giữ nguyên biểu thức (giờ UTC của `TIMESTAMPTZ` từ parquet), Snowflake `cast(x as timestamp)` (nguồn luôn là seed) | staging |
 | `read_parquet('<glob>')` | macro `silver_parquet_relation(glob)`: Snowflake báo lỗi compile (đọc parquet cần stage, ngoài phạm vi) | staging |
 | alias `merge`, `close` | `merge_rate`, `close_rate` (cột ra của mart không đổi) | Q6 |
 

@@ -1,10 +1,41 @@
 -- Grain: one GH Archive event on a seed repo. user_key = the dim_user version of the event's
 -- actor with the event's login, latest valid_from at or before the event (the version valid at
 -- created_at). PII hash columns of silver are deliberately not selected.
-with events as (
+--
+-- Incremental (delete+insert on event_id). A late event can insert an earlier login version and
+-- shift the version_number (hence user_key) of every later event of that actor, even when the
+-- late event is on a repo outside the seed. So a run recomputes every fact of each touched actor:
+-- an actor with a staging row loaded after the newest loaded_at already in this table. Reworking
+-- an actor twice is harmless; skipping one is not, so the watermark comes from this table.
+{{ config(
+    materialized='incremental',
+    incremental_strategy='delete+insert',
+    unique_key='event_id',
+    on_schema_change='fail'
+) }}
+
+with staged as (
+    select * from {{ ref('stg_gharchive_events') }}
+),
+
+{%- if is_incremental() %}
+
+touched_actors as (
+    select distinct actor_id
+    from staged
+    where loaded_at > (
+        select coalesce(max(loaded_at), cast('1970-01-01' as timestamp)) from {{ this }}
+    )
+),
+{%- endif %}
+
+events as (
     select s.*, r.repo_key
-    from {{ ref('stg_gharchive_events') }} as s
+    from staged as s
     join {{ ref('dim_repo') }} as r on lower(s.repo_name) = r.repo_key
+    {%- if is_incremental() %}
+    where s.actor_id in (select actor_id from touched_actors)
+    {%- endif %}
 ),
 
 with_user as (
@@ -36,6 +67,7 @@ select
     cast(issue_number as bigint) as issue_number,
     cast(coalesce(pr_number, issue_number) as bigint) as item_number,
     cast(pr_merged as boolean) as pr_merged,
-    cast(is_late as boolean) as is_late
+    cast(is_late as boolean) as is_late,
+    cast(loaded_at as timestamp) as loaded_at
 from with_user
 where rn = 1

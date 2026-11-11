@@ -105,6 +105,18 @@ chèn khoá mới. Chạy lại cùng giờ không đổi số dòng của bản
 `bronze_rows == silver_inserted + duplicates_dropped + quarantined_total` — không dòng nào bị bỏ
 im lặng. `late_accepted` là số event muộn được chèn vào silver.
 
+## Export silver cho dbt
+
+```bash
+python -m repopulse.spark.export --lake-dir data/lake --out data/silver-export --summary out/export-summary.json
+```
+
+Đọc `silver/gharchive_events` **qua Delta** (không glob thẳng thư mục Delta, vì như thế bỏ qua
+`_delta_log`) rồi ghi đè `--out` bằng parquet thường, đúng 17 cột silver theo thứ tự ở bảng trên,
+timestamp dạng `TIMESTAMP_MICROS` (UTC). Lake chưa có silver (mọi giờ đều thiếu) thì ghi parquet
+rỗng vẫn mang schema, summary `{"silver_table": "missing", "rows": 0, ...}`. dbt đọc kết quả qua var
+`silver_gharchive_parquet` (`docs/dbt-models.md`); cả chuỗi theo lịch ở `docs/pipeline.md`.
+
 ## Test
 
 `tests/test_spark_*.py`: phần thuần Python (`pii`, `rules`, CLI) chạy ở mọi máy; test đánh dấu

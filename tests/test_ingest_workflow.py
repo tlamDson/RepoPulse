@@ -39,9 +39,11 @@ def test_workflow_name():
     assert load()["name"] == "Ingest GH Archive"
 
 
-def test_hourly_cron():
+def test_no_cron_of_its_own():
+    # The hourly cron lives in pipeline.yml, which runs ingest itself; a second cron here would
+    # download every hour twice.
     on = triggers(load())
-    assert on["schedule"] == [{"cron": "17 * * * *"}]
+    assert "schedule" not in on
 
 
 def test_dispatch_inputs():
@@ -73,8 +75,8 @@ def test_every_job_has_timeout():
 
 
 def test_concurrency_queues_per_trigger():
-    # One group per trigger: GitHub keeps a single pending run per group, so a pull_request or
-    # dispatch run sharing the cron's group could evict a queued scheduled hour.
+    # One group per trigger: GitHub keeps a single pending run per group, so a pull_request run
+    # sharing the dispatch group could evict a queued manual run.
     conc = load().get("concurrency")
     assert isinstance(conc, dict)
     assert conc.get("group") == "ingest-gharchive-${{ github.event_name }}"
@@ -146,5 +148,6 @@ def test_comment_explains_main_only_and_batch():
     text = comments()
     assert "main" in text
     assert "workflow_dispatch" in text
+    assert "pipeline.yml" in text  # where the hourly cron lives now
     assert re.search(r"incremental batch", text, re.IGNORECASE)
     assert "artifact" in text.lower()
