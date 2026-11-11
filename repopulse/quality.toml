@@ -1,0 +1,42 @@
+# Thresholds of repopulse.quality (docs/data-quality.md). The code reads every threshold from this
+# file: change a number here, not in Python.
+
+[faults]
+# Checks on the lake tables of the app events (SIMULATED data, simkit). They never read the simkit
+# manifest; the manifest is only the answer key used to score them.
+late_threshold_seconds = 3600 # silver: received_at - occurred_at above this is a late arrival
+bot_events_per_window = 30    # a user with more events than this inside one window is a bot
+bot_window_seconds = 60
+
+[faults.inject]
+# Faults the harness (`python -m repopulse.quality faults`) plants with simkit.
+duplicate = 5
+null = 5
+wrong_type = 5
+late = 5
+schema_drift = 5
+bot = 2
+
+[volume]
+# GH Archive (real data): events per landing hour.
+table = "main_staging.stg_gharchive_events"
+window_hours = 24     # N: median of up to N hours right before the evaluated hour
+min_history = 3       # fewer history hours: no conclusion (no alert)
+min_ratio = 0.3       # hour total < min_ratio * median total -> volume_drop
+evaluate_hours = 3    # newest hours evaluated per run
+type_min_median = 100 # event type with median >= this and 0 in the evaluated hour -> type missing
+
+[volume.reference]
+# Known GH Archive gap: from 2026-11 some hours lost PushEvent/CreateEvent/DeleteEvent. History:
+# full hours of the benchmark reference day (benchmarks/reference.toml); evaluate: a gap hour.
+history = ["2026-10-25T10", "2026-10-25T11", "2026-10-25T12"]
+evaluate = ["2026-11-03T12"]
+
+[freshness]
+table = "main_staging.stg_gharchive_events"
+column = "created_at"
+max_lag_hours = 8 # now - newest event above this -> freshness_stale
+
+[alert]
+label = "data-incident"
+template = ".github/ISSUE_TEMPLATE/data-incident.md"

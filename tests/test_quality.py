@@ -17,8 +17,10 @@ from pathlib import Path
 
 import pytest
 
+from benchmarks.record_run import read_artifact
 from repopulse import quality as q
-from repopulse.runs_log import validate_row
+from repopulse.pipeline import write_row
+from repopulse.runs_log import COLUMNS
 
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATE = ROOT / ".github" / "ISSUE_TEMPLATE" / "data-incident.md"
@@ -638,9 +640,10 @@ def make_staging(path: Path, rows: list[tuple]) -> None:
             "CREATE TABLE main_staging.stg_gharchive_events (event_id VARCHAR, event_type VARCHAR,"
             " created_at TIMESTAMP, landing_date DATE, landing_hour INTEGER)"
         )
-        con.executemany(
-            "INSERT INTO main_staging.stg_gharchive_events VALUES (?, ?, ?, ?, ?)", rows
-        )
+        if rows:
+            con.executemany(
+                "INSERT INTO main_staging.stg_gharchive_events VALUES (?, ?, ?, ?, ?)", rows
+            )
     finally:
         con.close()
 
@@ -970,14 +973,18 @@ def fault_report(**over) -> dict:
     return report
 
 
-def test_fault_row_is_a_valid_runs_csv_row_marked_simulated():
+def test_fault_row_is_a_valid_runs_csv_row_marked_simulated(tmp_path):
     row = q.fault_row(
         fault_report(),
         run_at=datetime(2026, 11, 11, 3, tzinfo=UTC),
         git_sha="abc1234",
         total_seconds=12.5,
     )
-    assert validate_row(row) == row
+    assert tuple(row) == COLUMNS
+    artifact = tmp_path / "dq-fault-row.csv"
+    write_row(artifact, row)
+    (parsed,) = read_artifact(artifact)  # what benchmarks/record_run.py merges into runs.csv
+    assert parsed["variant"] == "dq-fault-injection"
     assert row["variant"] == "dq-fault-injection"
     assert row["data_date"] == "2026-11-01"
     assert row["row_count"] == "321"
