@@ -1,0 +1,259 @@
+name: Data quality
+
+# Data quality checks of the hourly incremental batch (not streaming, not real-time); see
+# docs/data-quality.md. Every threshold lives in repopulse/quality.toml, not in this file.
+#
+# Jobs:
+# - checks: volume (each newest landing hour against the median of the hours before it) and
+#   freshness (age of the newest event) of main_staging.stg_gharchive_events. GH Archive is real
+#   data. After a scheduled pipeline run (workflow_run) or a manual dispatch it reads the
+#   `repopulse` database on MotherDuck (secret MOTHERDUCK_TOKEN, checked first). On a pull
+#   request it reads ci.duckdb built by `dbt build --target ci` from the seed fixture.
+# - alert: the only job allowed to write issues. It opens or updates one issue labelled
+#   data-incident per kind of check (template .github/ISSUE_TEMPLATE/data-incident.md); a hidden
+#   marker per check and data hour keeps hourly re-runs from repeating a comment. Pull requests
+#   only print the issue (--dry-run).
+# - fault-injection (pull request, dispatch): six simkit faults in SIMULATED app events (not real
+#   users) go through the real Spark bronze/silver batch; each must be caught by its own check
+#   and clean simulated runs must raise nothing. Uses a fixed fake salt (simulated data has no
+#   real PII). The runs.csv row (M4) is in the `data-quality-<run_id>` artifact; merge it with
+#   `python benchmarks/record_run.py out/dq-fault-row.csv`.
+# - reference-gap (pull request, dispatch): ingests the full reference hours and a known GH
+#   Archive gap hour (hours listed in quality.toml) and fails if the gap is not caught.
+#
+# workflow_run and workflow_dispatch only fire once this file is on `main` (default branch).
+# Runs triggered by a pipeline run of a pull request are skipped. `paths:` is fine on
+# pull_request because this workflow is not a required check. Secrets reach steps only via env.
+
+on:
+  workflow_run:
+    workflows: ["Pipeline (scheduled)"]
+    types: [completed]
+  workflow_dispatch:
+  pull_request:
+    branches: [develop, main]
+    paths:
+      - ".github/workflows/data-quality.yml"
+      - ".github/ISSUE_TEMPLATE/data-incident.md"
+      - "repopulse/quality.py"
+      - "repopulse/quality.toml"
+      - "simkit/**"
+      - "repopulse/spark/batch.py"
+      - "repopulse/spark/job.py"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('data-quality-pr-{0}', github.event.pull_request.number) || 'data-quality-alerts' }}
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    name: Volume and freshness
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.event != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check MotherDuck secret
+        if: github.event_name != 'pull_request'
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+        run: |
+          if [ -z "$MOTHERDUCK_TOKEN" ]; then
+            echo "::error::missing repo secret MOTHERDUCK_TOKEN (the owner adds it)"
+            exit 1
+          fi
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      # MotherDuck rejects a DuckDB client newer than it supports: same pin as probe.yml.
+      - name: Install
+        run: pip install -e ".[dev,dbt]" "duckdb==1.5.6"
+
+      - name: dbt build (pull request, seed fixture)
+        if: github.event_name == 'pull_request'
+        run: dbt build --project-dir transform --profiles-dir transform --target ci
+
+      - name: Volume and freshness (pull request, ci.duckdb)
+        if: github.event_name == 'pull_request'
+        run: python -m repopulse.quality check --database ci.duckdb --report out/dq-report.json
+
+      - name: Volume and freshness (MotherDuck)
+        if: github.event_name != 'pull_request'
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+        run: python -m repopulse.quality check --database md:repopulse --report out/dq-report.json
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "### Data quality: volume and freshness (incremental batch, GH Archive)"
+            echo
+            if [ -f out/dq-report.json ]; then
+              echo '```'
+              cat out/dq-report.json
+              echo '```'
+            else
+              echo "out/dq-report.json: not written (an earlier step failed)."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: data-quality-report-${{ github.run_id }}
+          path: out/dq-report.json
+          retention-days: 30
+
+  alert:
+    name: Data incident issue
+    needs: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    env:
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install
+        run: pip install -e .
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: data-quality-report-${{ github.run_id }}
+          path: out
+
+      - name: Print the issue (pull request, dry run)
+        if: github.event_name == 'pull_request'
+        run: python -m repopulse.quality alert --report out/dq-report.json --run-url "$RUN_URL" --dry-run
+
+      - name: Open or update the data-incident issue
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python -m repopulse.quality alert --report out/dq-report.json --run-url "$RUN_URL" \
+            --repo "$GITHUB_REPOSITORY"
+
+  fault-injection:
+    name: Fault injection (simulated app events)
+    if: github.event_name != 'workflow_run'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      # PySpark 3.5 + Delta need Java 17.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install
+        run: pip install -e ".[dev,spark,dbt]"
+
+      # SIMULATED app events only: the fixed fake salt is not a secret.
+      - name: Six faults through the Spark batch (simulated)
+        env:
+          PII_HASH_SALT: not-a-secret-pr-salt
+        run: |
+          python -m repopulse.quality faults --seed 42 --users 60 --days 2 --clean-runs 3 \
+            --work-dir "$RUNNER_TEMP/dq-faults" --git-sha "$GITHUB_SHA" \
+            --report out/dq-faults.json --out out/dq-fault-row.csv
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "### Fault injection (simulated app events, incremental batch)"
+            echo
+            for f in out/dq-fault-row.csv out/dq-faults.json; do
+              if [ -f "$f" ]; then
+                echo "\`$f\`"
+                echo
+                echo '```'
+                head -c 20000 "$f"
+                echo
+                echo '```'
+              else
+                echo "\`$f\`: not written (an earlier step failed)."
+              fi
+              echo
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: data-quality-${{ github.run_id }}
+          path: out/
+          if-no-files-found: warn
+          retention-days: 30
+
+  reference-gap:
+    name: Reference gap hour (GH Archive)
+    if: github.event_name != 'workflow_run'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install
+        run: pip install -e .
+
+      # Real GH Archive data: full reference hours vs a known gap hour (quality.toml).
+      - name: Gap hour must raise a volume alert
+        run: |
+          python -m repopulse.quality gap --ingest --landing-dir "$RUNNER_TEMP/gap-landing" \
+            --work-dir "$RUNNER_TEMP/gap-raw" --report out/dq-gap.json
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "### Reference gap hour (GH Archive, real data)"
+            echo
+            if [ -f out/dq-gap.json ]; then
+              echo '```'
+              cat out/dq-gap.json
+              echo '```'
+            else
+              echo "out/dq-gap.json: not written (an earlier step failed)."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: data-quality-gap-${{ github.run_id }}
+          path: out/dq-gap.json
+          if-no-files-found: warn
+          retention-days: 30
