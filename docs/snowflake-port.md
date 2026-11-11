@@ -102,4 +102,11 @@ Giả định của port:
 
 ## Kết quả
 
-Xem dòng `dbt-build-duckdb` / `dbt-build-snowflake` trong `runs.csv`. Tài liệu này không chép số.
+Lần chạy workflow trên nhánh `feature/snowflake-port` (commit `ee38cf0`) build xanh trên cả hai
+engine, cùng bộ seed, model, data test và unit test. Hai dòng của lần chạy đó đã gộp vào
+`runs.csv`: `variant=dbt-build-duckdb` và `variant=dbt-build-snowflake`, cùng `git_sha`. Thời gian
+build ở cột `total_seconds`, thời gian từng mart ở `q1_seconds`…`q6_seconds`, số dòng phải sửa ở
+`lines_changed=` trong `notes`. Tài liệu này không chép số: đọc ở `runs.csv`.
+
+Đây là build trên CI fixture (seed), không phải số đo trên dữ liệu thật, nên chỉ so được chi phí
+cố định của một lần `dbt build` giữa hai engine, không nói gì về tốc độ ở khối lượng lớn.
