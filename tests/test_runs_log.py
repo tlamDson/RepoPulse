@@ -1,6 +1,6 @@
 import csv
 import math
-from datetime import UTC, date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta, timezone, tzinfo
 
 import pytest
 
@@ -151,6 +151,19 @@ def test_empty_required_column_rejected(col, empty):
 # --- run_at -------------------------------------------------------------------
 
 
+class _NoOffset(tzinfo):
+    """A tzinfo that is set but knows no offset: the datetime is still naive."""
+
+    def utcoffset(self, dt):
+        return None
+
+    def dst(self, dt):
+        return None
+
+    def tzname(self, dt):
+        return None
+
+
 def test_run_at_accepts_aware_datetime():
     ts = datetime(2026, 11, 11, 8, 30, tzinfo=UTC)
     assert validate_row(minimal_row(run_at=ts))["run_at"] == ts.isoformat()
@@ -175,6 +188,7 @@ def test_run_at_string_is_normalised_to_isoformat():
         "2026-13-11T08:30:00+00:00",
         date(2026, 11, 11),
         1731313800,
+        datetime(2026, 11, 11, 8, 30, tzinfo=_NoOffset()),
     ],
 )
 def test_run_at_invalid_rejected(value):
@@ -222,7 +236,16 @@ def test_data_date_accepts_date_object():
 
 @pytest.mark.parametrize(
     "value",
-    ["2026-13-01", "20261110", "2026-02-30", "2026-11-10T00:00:00", "26-11-10", 20261110],
+    [
+        "2026-13-01",
+        "20261110",
+        "2026-02-30",
+        "2026-11-10T00:00:00",
+        "26-11-10",
+        20261110,
+        datetime(2026, 11, 10),
+        datetime(2026, 11, 10, 15, 0, tzinfo=UTC),
+    ],
 )
 def test_data_date_invalid_rejected(value):
     with pytest.raises(RunsLogError, match="data_date"):
