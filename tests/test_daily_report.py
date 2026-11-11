@@ -79,6 +79,31 @@ def test_append_and_read_metrics_roundtrip(tmp_path: Path):
     assert read_metrics(tmp_path / "missing.csv") == []
 
 
+def test_rows_between_is_half_open_on_local_timestamps():
+    from repopulse.daily_report import rows_between
+
+    rows = [
+        {"ts": "2026-11-10 21:59:59"},
+        {"ts": "2026-11-10 22:00:00"},
+        {"ts": "2026-11-11 21:59:59"},
+        {"ts": "2026-11-11 22:00:00"},
+    ]
+    got = rows_between(rows, "2026-11-10 22:00:00", "2026-11-11 22:00:00")
+    assert [r["ts"] for r in got] == ["2026-11-10 22:00:00", "2026-11-11 21:59:59"]
+
+
+def test_utc_window_converts_aware_local_bounds_including_a_dst_change():
+    # Review PR 26: local midnight + timedelta(days=1) is off by an hour on a DST day.
+    from datetime import timedelta, timezone
+
+    from repopulse.daily_report import utc_window
+
+    edt, est = timezone(timedelta(hours=-4)), timezone(timedelta(hours=-5))
+    start = datetime(2026, 11, 1, 0, 0, tzinfo=edt)  # before the fall-back change
+    end = datetime(2026, 11, 2, 0, 0, tzinfo=est)  # after it: a 25-hour local day
+    assert utc_window(start, end) == ("2026-11-01T04:00:00Z", "2026-11-02T05:00:00Z")
+
+
 def test_rows_for_day_filters_on_local_timestamp():
     rows = [{"ts": "2026-11-11 23:59:59"}, {"ts": "2026-11-12 00:00:00"}]
     assert rows_for_day(rows, date(2026, 11, 11)) == [{"ts": "2026-11-11 23:59:59"}]
@@ -216,6 +241,13 @@ def test_send_email_logs_in_and_sends_without_touching_the_network():
         ("send", "S"),
         ("close",),
     ]
+
+
+def test_build_daily_report_names_its_window_when_given():
+    _, body = build_daily_report(
+        date(2026, 11, 11), [], [], [], window="2026-11-10 22:00 → 2026-11-11 22:00"
+    )
+    assert "Khoảng: 2026-11-10 22:00 → 2026-11-11 22:00" in body
 
 
 def test_daily_due_once_per_day_after_the_hour():
