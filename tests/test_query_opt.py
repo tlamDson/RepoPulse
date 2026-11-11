@@ -258,6 +258,68 @@ def test_parse_scan_output_rejects_missing_key():
         query_opt.parse_scan_output(json.dumps(scan), "qopt-flat")
 
 
+# ---------------------------------------------------------------- prepare output parser
+
+
+def _prepared_output(**overrides) -> dict:
+    out = {
+        "raw_rows": FIXTURE_LINES,
+        "layouts": {v: _layout_info() for v in VARIANTS[:3]},
+        "errors": {VARIANTS[3]: "qopt-partitioned-clustered: boom"},
+    }
+    out.update(overrides)
+    return out
+
+
+def test_parse_prepare_output_takes_the_last_json_line():
+    info = _prepared_output()
+    assert query_opt.parse_prepare_output("log\n" + json.dumps(info) + "\n") == info
+
+
+@pytest.mark.parametrize("key", ["raw_rows", "layouts", "errors"])
+def test_parse_prepare_output_rejects_missing_key(key):
+    info = _prepared_output()
+    del info[key]
+    with pytest.raises(query_opt.QueryOptError, match=key):
+        query_opt.parse_prepare_output(json.dumps(info))
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"raw_rows": -1},
+        {"raw_rows": True},
+        {"raw_rows": 3.5},
+        {"layouts": []},
+        {"errors": {"qopt-partitioned-clustered": 5}},
+        {"layouts": {"qopt-flat": _layout_info(files=-1)}},
+        {"layouts": {"qopt-flat": _layout_info(prepare_seconds=math.nan)}},
+        {"layouts": {"qopt-flat": {"files": 1, "layout_bytes": 9}}},  # no prepare_seconds
+    ],
+)
+def test_parse_prepare_output_rejects_bad_values(bad):
+    with pytest.raises(query_opt.QueryOptError):
+        query_opt.parse_prepare_output(json.dumps(_prepared_output(**bad)))
+
+
+def test_parse_prepare_output_rejects_unknown_or_missing_layouts():
+    unknown = _prepared_output(errors={"qopt-other": "x", VARIANTS[3]: "boom"})
+    with pytest.raises(query_opt.QueryOptError, match="qopt-other"):
+        query_opt.parse_prepare_output(json.dumps(unknown))
+    missing = _prepared_output(errors={})
+    with pytest.raises(query_opt.QueryOptError, match=VARIANTS[3]):
+        query_opt.parse_prepare_output(json.dumps(missing))
+    both = _prepared_output(errors={VARIANTS[0]: "x", VARIANTS[3]: "boom"})
+    with pytest.raises(query_opt.QueryOptError, match=VARIANTS[0]):
+        query_opt.parse_prepare_output(json.dumps(both))
+
+
+@pytest.mark.parametrize("stdout", ["", "not json", "[1]"])
+def test_parse_prepare_output_rejects_non_object_output(stdout):
+    with pytest.raises(query_opt.QueryOptError, match="prepare"):
+        query_opt.parse_prepare_output(stdout)
+
+
 # ---------------------------------------------------------------- /proc/self/io
 
 
@@ -922,6 +984,7 @@ def test_main_stops_with_exit_2_on_checksum_mismatch(gz_dir, tmp_path, monkeypat
         raise AssertionError("ran despite a checksum mismatch")
 
     monkeypatch.setattr(query_opt, "prepare_layouts", _must_not_run)
+    monkeypatch.setattr(query_opt, "prepare_in_subprocess", _must_not_run, raising=False)
     monkeypatch.setattr(query_opt, "run_in_subprocess", _must_not_run)
     assert query_opt.main(argv) == 2
     assert not out.exists()
@@ -932,9 +995,58 @@ def test_main_refuses_files_not_listed_in_the_reference(gz_dir, tmp_path, monkey
     argv, out, _ = _cli(gz_dir, tmp_path, "--git-sha", "abc1234")
     (gz_dir / "2026-01-06-0.json.gz").write_bytes(gzip.compress(b"{}\n"))
     monkeypatch.setattr(query_opt, "prepare_layouts", lambda *a, **k: pytest.fail("prepared"))
+    monkeypatch.setattr(
+        query_opt, "prepare_in_subprocess", lambda *a, **k: pytest.fail("prepared"), raising=False
+    )
     assert query_opt.main(argv) == 2
     assert "2026-01-06-0.json.gz" in capsys.readouterr().err
     assert not out.exists()
+
+
+def test_main_never_prepares_layouts_in_its_own_process(gz_dir, tmp_path, monkeypatch):
+    # On Linux a child's ru_maxrss starts at the parent's peak RSS (the kernel carries the old
+    # mm's high-water mark over exec), so loading the day in the parent would show up as the
+    # peak_rss_mb of every run. Preparing must happen in a child process of its own.
+    def _not_in_parent(*args, **kwargs):
+        raise AssertionError("prepare_layouts ran in the parent process")
+
+    monkeypatch.setattr(query_opt, "prepare_layouts", _not_in_parent)
+    monkeypatch.setattr(query_opt, "load", _not_in_parent)
+    argv, out, _ = _cli(gz_dir, tmp_path, "--git-sha", "abc1234", "--runs", "1")
+    assert query_opt.main(argv) == 0
+    assert [r["variant"] for r in read_artifact(out)] == list(VARIANTS)
+
+
+def test_prepare_mode_prints_one_json_line(gz_dir, tmp_path, capsys):
+    work = tmp_path / "work"
+    argv = ["--prepare", "--data-dir", str(gz_dir), "--work-dir", str(work)]
+    assert query_opt.main(argv) == 0
+    info = query_opt.parse_prepare_output(capsys.readouterr().out)
+    assert info["raw_rows"] == FIXTURE_LINES
+    assert info["errors"] == {}
+    assert set(info["layouts"]) == set(VARIANTS)
+    assert info["layouts"]["qopt-partitioned"]["files"] == len(
+        query_opt.layout_files(work, "qopt-partitioned")
+    )
+
+
+def test_prepare_in_subprocess_reports_a_crash(tmp_path):
+    with pytest.raises(query_opt.QueryOptError, match="prepare"):
+        query_opt.prepare_in_subprocess(
+            tmp_path / "no-such-dir", work_dir=tmp_path / "work", seed=naive_duckdb.DEFAULT_SEED
+        )
+
+
+def test_main_fails_every_layout_when_preparing_crashes(gz_dir, tmp_path, monkeypatch, capsys):
+    def _crash(*args, **kwargs):
+        raise query_opt.QueryOptError("prepare failed (exit 1): boom")
+
+    monkeypatch.setattr(query_opt, "prepare_in_subprocess", _crash, raising=False)
+    argv, out, summary = _cli(gz_dir, tmp_path, "--git-sha", "abc1234", "--runs", "1")
+    assert query_opt.main(argv) == 1
+    assert read_artifact(out) == []
+    assert summary.read_text(encoding="utf-8").count("FAILED") == len(VARIANTS)
+    assert "boom" in capsys.readouterr().err
 
 
 def test_main_end_to_end_writes_four_rows_in_child_processes(gz_dir, tmp_path):
