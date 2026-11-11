@@ -372,3 +372,14 @@ def test_real_prs_toml_loads_and_starts_with_s04():
         p.stem for p in (Path(__file__).resolve().parents[1] / ".claude" / "agents").glob("*.md")
     }
     assert {t.agent for t in real} <= known_agents
+
+
+def test_harness_file_approved_needs_a_line_starting_with_marker():
+    from repopulse.orchestrator import harness_file_approved
+
+    template = (Path(__file__).resolve().parents[1] / "docs" / "harness-check.md").read_text(
+        "utf-8"
+    )
+    assert harness_file_approved(template) is False
+    assert harness_file_approved(template + "\nLam đã duyệt 2026-11-11\n") is True
+    assert harness_file_approved("") is False
