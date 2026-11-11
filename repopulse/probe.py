@@ -663,8 +663,15 @@ def _main_run(argv: list[str], env: Mapping[str, str], **deps: Any) -> int:
     )
     results = run_all(ctx)
     gh_env = env.get("GITHUB_ENV")
+    if args.github_env:
+        # GitHub only masks a secret exactly as stored; later steps (`dbt debug`) print the bare
+        # hostname and the warehouse path, so register those forms with the log masker too.
+        netloc = urlsplit(ctx.secrets.host).netloc if ctx.secrets.host else ""
+        match = _HTTP_PATH.search(ctx.http_path or "")
+        for value in (netloc, ctx.user_name, ctx.http_path, match.group(1) if match else None):
+            if value:
+                print(f"::add-mask::{value}")
     if args.github_env and gh_env and ctx.http_path:
-        print(f"::add-mask::{ctx.http_path}")
         _append(gh_env, f"PROBE_HTTP_PATH={ctx.http_path}\n")
     _publish(results, args, env, args.json_out)
     return 0
