@@ -203,8 +203,9 @@ def test_q3_fork_pr_merge_funnel_and_time_to_merge(result):
         "merge_hours_p50",
         "merge_hours_p90",
     ]
-    # spark: forkers alice (01-05 09:00), dave (01-13); alice opened #101 at 10:00 after the
-    #   fork and it was merged -> 1 / 1. Human PRs opened: #101, #105 (bot #103 excluded),
+    # spark: forkers alice (01-05 09:00), dave (01-05 08:00); alice opened #101 at 10:00 after
+    #   the fork and it was merged -> 1 / 1. dave never opens a PR (other people's PRs after his
+    #   fork do not count for him). Human PRs opened: #101, #105 (bot #103 excluded),
     #   both merged. Hours to merge: #101 01-05 10:00 -> 01-06 10:00 = 24; #105 10:00 -> 16:00 = 6
     #   -> p50 = (6 + 24) / 2 = 15.0, p90 = 6 + 0.9 * (24 - 6) = 22.2
     # duckdb: bob forked 09:00, opened #8 10:00, merged 01-14 10:00 = 48 h
