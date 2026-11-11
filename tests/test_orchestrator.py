@@ -366,8 +366,13 @@ def test_render_progress_lists_every_task_status(tasks):
 def test_real_prs_toml_loads_and_starts_with_s04():
     real = load_tasks(Path(__file__).resolve().parents[1] / "scripts" / "prs.toml")
     assert real[0].id == "S0.4"
-    ready, blocked, _ = next_ready(real, set(), set(), NO_SECRETS, slots=2)
-    assert ids(ready) == ["S0.4"] and "probe" in blocked
+    ready, blocked, _ = next_ready(real, set(), set(), CLOUD, slots=2)
+    assert ids(ready) == ["S0.4"]  # cloud probe waits for the harness check (S0.4) too
+    _, blocked, _ = next_ready(real, {"S0.4"}, set(), NO_SECRETS, slots=2)
+    assert "probe" in blocked
+    no_harness = Gates(secrets=CLOUD.secrets, harness_approved=False)
+    _, blocked, _ = next_ready(real, {"S0.4"}, set(), no_harness, slots=2)
+    assert "harness" in blocked["probe"]
     known_agents = {
         p.stem for p in (Path(__file__).resolve().parents[1] / ".claude" / "agents").glob("*.md")
     }
