@@ -9,7 +9,7 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = ["ruff>=0.6", "pytest>=8", "pre-commit>=3.8", "pyyaml>=6", "duckdb>=1.1"]
-dbt = ["dbt-core>=1.8", "dbt-duckdb>=1.8"]
+dbt = ["dbt-core>=1.8", "dbt-duckdb>=1.11.1"]
 
 [build-system]
 requires = ["setuptools>=68"]
