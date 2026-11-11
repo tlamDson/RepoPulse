@@ -395,7 +395,7 @@ def run(args: argparse.Namespace) -> int:
             )
             del runs[tid]
             log(f"{tid}: {d.kind} {d.reason}")
-            hold_new = hold_new or r.warn
+            hold_new = hold_new or (args.hold_at_90 and r.warn)
             if d.kind == "resume_at":
                 waiting[tid] = (d.at or int(now), r.session_id)
             elif d.kind == "stop":
@@ -417,7 +417,7 @@ def run(args: argparse.Namespace) -> int:
                 clean(dry_run=False, active={str(x.path) for x in runs.values()})
 
         stopping = should_stop(STATE) or bool(stop_all)
-        if not hold_new and any(r.warn for r in runs.values()):
+        if args.hold_at_90 and not hold_new and any(r.warn for r in runs.values()):
             hold_new = True
             log("quota trên 90% (5 giờ hoặc 7 ngày): không mở việc mới")
 
@@ -572,7 +572,18 @@ def main(argv: list[str] | None = None) -> int:
         help="coi harness đã duyệt nếu S0.4 merge và log không có lệnh bị từ chối lạ",
     )
     r.add_argument("--task-hours", type=float, default=4)
-    r.add_argument("--max-wait-hours", type=float, default=30)
+    r.add_argument(
+        "--max-wait-hours",
+        type=float,
+        default=6,
+        help="chờ limit reset tối đa bao lâu rồi chạy tiếp; mặc định 6h = chờ limit 5 giờ, "
+        "gặp limit tuần thì dừng",
+    )
+    r.add_argument(
+        "--hold-at-90",
+        action="store_true",
+        help="không mở việc mới khi quota 5 giờ hoặc 7 ngày vượt 90%% (mặc định: chạy tới hết)",
+    )
     r.set_defaults(fn=run)
     c = sub.add_parser("clean")
     c.add_argument("--dry-run", action="store_true")

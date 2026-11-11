@@ -174,6 +174,21 @@ def rate_limit_action(event: dict | None) -> tuple[str, int | str | None]:
     return ("none", None)
 
 
+def hold_until(event: dict | None) -> int | None:
+    """Reset time (epoch s) of the latest quota window at or above WARN_UTILIZATION, if any."""
+    if not event or event.get("type") != "rate_limit_event":
+        return None
+    info = event.get("rate_limit_info") or {}
+    windows = [w for w in (info.get("unifiedWindows") or {}).values() if isinstance(w, dict)]
+    windows.append(info)  # the flat fields describe the binding window
+    resets = [
+        int(w["resetsAt"])
+        for w in windows
+        if (w.get("utilization") or 0) >= WARN_UTILIZATION and w.get("resetsAt")
+    ]
+    return max(resets) if resets else None
+
+
 _RESULT_RE = re.compile(r"RESULT:\s*(merged|failed|blocked)\b[ \t]*(.*)")
 
 
