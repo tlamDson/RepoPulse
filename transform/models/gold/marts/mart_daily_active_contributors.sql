@@ -54,7 +54,7 @@ select
     cast(scope as varchar) as scope,
     cast(scope_key as varchar) as scope_key,
     cast(count(*) as bigint) as active_contributors,
-    cast(count(*) filter (where is_new) as bigint) as new_contributors,
-    cast(count(*) filter (where not is_new) as bigint) as returning_contributors
+    cast(count(case when is_new then 1 end) as bigint) as new_contributors,
+    cast(count(case when not is_new then 1 end) as bigint) as returning_contributors
 from flagged
 group by period, period_start, scope, scope_key
