@@ -123,3 +123,102 @@ branch = "docs/results"
 deps = ["8", "9", "10", "11", "12", "13"]
 agent = "release-manager"
 release_after = true
+
+# ---------- Plan v2 (2026-11-11): docs/plan.md mục "Plan v2" ----------
+
+[[task]]
+id = "D1"
+title = "Databricks serverless bronze/silver"
+branch = "feature/databricks-bronze-silver"
+deps = ["14"]  # plan v2 xây trên kết quả giai đoạn 1
+needs = ["databricks"]
+agent = "spark-engineer"
+
+[[task]]
+id = "D2"
+title = "Target dbt databricks trên SQL warehouse"
+branch = "feature/dbt-databricks-target"
+deps = ["D1"]
+needs = ["databricks"]
+agent = "analytics-engineer"
+
+[[task]]
+id = "D3"
+title = "So sánh hai đường end-to-end (runner+MotherDuck vs Databricks)"
+branch = "feature/pipeline-path-comparison"
+deps = ["D2"]
+needs = ["databricks"]
+agent = "pipeline-ops"
+
+[[task]]
+id = "D4"
+title = "Áp luật chọn đường chính đã chốt trong plan"
+branch = "feature/primary-path-switch"
+deps = ["D3"]
+agent = "pipeline-ops"
+release_after = true
+
+[[task]]
+id = "E1"
+title = "Ma trận engine Q1-Q6 (DuckDB, Spark, Databricks, MotherDuck, Snowflake)"
+branch = "feature/engine-matrix"
+deps = ["D2"]
+needs = ["databricks"]
+agent = "analytics-engineer"
+
+[[task]]
+id = "E2"
+title = "Delta Lake vs Apache Iceberg"
+branch = "feature/iceberg-vs-delta"
+deps = ["14"]  # plan v2 xây trên kết quả giai đoạn 1
+agent = "spark-engineer"
+
+[[task]]
+id = "P2a"
+title = "Streaming Redpanda + Spark Structured Streaming trên runner"
+branch = "feature/streaming-redpanda"
+deps = ["14"]  # plan v2 xây trên kết quả giai đoạn 1
+agent = "spark-engineer"
+
+[[task]]
+id = "P2b"
+title = "Thử chịu lỗi streaming: kill broker/consumer, đo mất/trùng/phục hồi"
+branch = "feature/streaming-fault-tolerance"
+deps = ["P2a"]
+agent = "pipeline-ops"
+
+[[task]]
+id = "P2c"
+title = "Trino + Hive Metastore + MinIO, tối ưu query trên Trino"
+branch = "feature/trino-hive"
+deps = ["14"]  # plan v2 xây trên kết quả giai đoạn 1
+agent = "analytics-engineer"
+
+[[task]]
+id = "P2d"
+title = "Airflow DAG: backfill, retry, SLA"
+branch = "feature/airflow-dags"
+deps = ["14"]  # plan v2 xây trên kết quả giai đoạn 1
+agent = "pipeline-ops"
+
+[[task]]
+id = "AI1"
+title = "dbt semantic layer (MetricFlow) cho Q1-Q6"
+branch = "feature/dbt-semantic-layer"
+deps = ["14"]  # plan v2 xây trên kết quả giai đoạn 1
+agent = "analytics-engineer"
+
+[[task]]
+id = "AI2"
+title = "SQL agent OpenAI-compatible (model local), chỉ đọc, có bộ đánh giá"
+branch = "feature/sql-agent"
+deps = ["AI1"]
+agent = "analytics-engineer"
+
+[[task]]
+id = "R2"
+title = "README kết quả v2 từ runs.csv"
+branch = "docs/results-v2"
+deps = ["D4", "E1", "E2", "P2b", "P2c", "P2d", "AI2"]
+agent = "release-manager"
+release_after = true
