@@ -44,7 +44,9 @@ BOT_WINDOW = timedelta(minutes=1)
 BOT_EVENTS_RANGE = (40, 80)
 BOT_GAP_MS = (100, 700)  # 79 gaps * 700 ms < 60 s: the whole burst fits in one minute
 LATE_EXTRA_MS = (60_000, 72 * 3_600_000)  # late events arrive 1 min to 72 h past the threshold
-DUPLICATE_MAX_DISTANCE = 20  # a resent copy lands at most this many events after the original
+# A resent copy is anchored at most this many INPUT events after the original. In the output it
+# can sit further away, because late and bot events are inserted in between.
+DUPLICATE_MAX_DISTANCE = 20
 
 _PROTECTED = frozenset({"event_id", "event_name", "event_version", "simulated"})
 _DRIFT_FIELDS = {

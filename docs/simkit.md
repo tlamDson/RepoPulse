@@ -65,7 +65,7 @@ Các trường không bao giờ bị sửa: `event_id`, `event_name`, `event_ver
 
 | loại | một lỗi là | quan sát độc lập bằng |
 |---|---|---|
-| `duplicate` | một bản sao y hệt (cùng `event_id`) của một event sạch, chèn sau bản gốc tối đa 20 vị trí | `eventspec.find_duplicates` trả đúng N, `index` = vị trí bản sao |
+| `duplicate` | một bản sao y hệt (cùng `event_id`) của một event sạch, luôn đứng sau bản gốc; được neo tối đa 20 event của input sau bản gốc, trong output có thể xa hơn vì event late/bot chen vào | `eventspec.find_duplicates` trả đúng N, `index` = vị trí bản sao |
 | `null` | một event có một trường (ngoài 4 trường trên) thành `null` | `validate` có `field '<f>' must be of type <t>, got null` |
 | `wrong_type` | một event có một trường đổi sang kiểu JSON khác (chuỗi → số nguyên; số → chuỗi số; boolean → `"true"`/`"false"`) | `validate` có `field '<f>' must be of type <t>, got <u>` |
 | `late` | một event có `received_at - occurred_at` > `LATE_THRESHOLD` (1 giờ; thêm 1 phút–72 giờ), vẫn hợp lệ schema; được dời tới vị trí nó "đến" trong luồng | `is_late(event)` / `arrival_delay(event)` |
