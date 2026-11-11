@@ -383,3 +383,44 @@ def test_harness_file_approved_needs_a_line_starting_with_marker():
     assert harness_file_approved(template) is False
     assert harness_file_approved(template + "\nLam đã duyệt 2026-11-11\n") is True
     assert harness_file_approved("") is False
+
+
+def test_harness_auto_approved_counts_headless_permission_requests():
+    # In -p with --permission-prompts none a prompt is an automatic denial, logged as PermissionRequest.
+    lines = [_log("S0.4", "python -c 'x'", event="PermissionRequest")]
+    assert harness_auto_approved(lines, task_id="S0.4") is False
+    assert harness_auto_approved([_log("S0.4", "gh secret list", "PermissionRequest")], "S0.4")
+
+
+def test_rate_limit_warns_on_any_unified_window_over_threshold():
+    ev = {
+        "type": "rate_limit_event",
+        "rate_limit_info": {
+            "status": "allowed",
+            "unifiedWindows": {
+                "five_hour": {"utilization": 0.04, "status": "allowed"},
+                "seven_day": {"utilization": 0.95, "status": "allowed"},
+            },
+        },
+    }
+    assert rate_limit_action(ev) == ("warn", 0.95)
+    ev["rate_limit_info"]["unifiedWindows"]["seven_day"]["utilization"] = 0.59
+    assert rate_limit_action(ev) == ("none", None)
+
+
+def test_trust_keys_cover_both_drive_letter_cases():
+    from repopulse.orchestrator import trust_keys
+
+    keys = trust_keys("D:\Desktop\RepoPulse\.claude\worktrees\pr-2")
+    assert "d:/Desktop/RepoPulse/.claude/worktrees/pr-2" in keys
+    assert "D:/Desktop/RepoPulse/.claude/worktrees/pr-2" in keys
+
+
+def test_mark_trusted_adds_keys_and_keeps_other_projects():
+    from repopulse.orchestrator import mark_trusted
+
+    cfg = {"projects": {"c:/other": {"hasTrustDialogAccepted": True, "x": 1}}, "keep": 2}
+    out, changed = mark_trusted(cfg, ["d:/a", "D:/a"])
+    assert changed is True and out["keep"] == 2 and out["projects"]["c:/other"]["x"] == 1
+    assert out["projects"]["d:/a"]["hasTrustDialogAccepted"] is True
+    assert mark_trusted(out, ["d:/a"])[1] is False
