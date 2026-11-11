@@ -3,7 +3,13 @@
 Input: the raw GH Archive fixtures ``tests/fixtures/gharchive_small`` (see test_naive_duckdb.py)
 plus ``tests/fixtures/gharchive_scd2`` (actor 1004 renames dave -> dave2 on 2026-02-12 and
 comments on spark issue #104; erin forks and opens PR #9 on ``DuckDB/DuckDB``, mixed case, to
-exercise the case-insensitive seed match).
+exercise the case-insensitive seed match). Those two directories are exactly the CI seed
+``fixture_silver_gharchive_events``.
+
+The silver parquet also gets ``tests/fixtures/gharchive_parquet_only`` (not in the seed): a
+WatchEvent of frank on spark, proving dbt really read the parquet, and actor 1010 commenting twice
+in the same second as ``gina`` then ``gina2`` (zero-length first SCD2 version). The baseline runs
+on the same raw lines as the parquet, so marts and queries still see the same events.
 
 Silver dedupes by ``event_id`` while the baseline does not, so both sides get the same
 deduplicated input: the duplicated line of event 9000000002 is dropped (first copy kept) before
@@ -37,10 +43,13 @@ pytest.importorskip("dbt.adapters.duckdb", reason="dbt-duckdb not installed")
 
 ROOT = Path(__file__).resolve().parents[1]
 PROJECT = ROOT / "transform"
-FIXTURE_DIRS = (
+SEED_FIXTURE_DIRS = (  # = transform/seeds/fixture_silver_gharchive_events.csv
     Path(__file__).parent / "fixtures" / "gharchive_small",
     Path(__file__).parent / "fixtures" / "gharchive_scd2",
 )
+PARQUET_ONLY_DIR = Path(__file__).parent / "fixtures" / "gharchive_parquet_only"
+FIXTURE_DIRS = (*SEED_FIXTURE_DIRS, PARQUET_ONLY_DIR)
+PARQUET_ONLY_IDS = ("9000000050", "9000000051", "9000000052")
 GOLD_SCHEMA = "main_gold"
 CORE_MODELS = ("fct_events", "dim_user", "dim_repo")
 MARTS = {  # baseline query -> (mart, ORDER BY used by the baseline query)
@@ -242,7 +251,56 @@ def test_dbt_build_succeeds_on_silver_fixture(built):
 
 def test_baseline_input_has_no_duplicate_ids(lake):
     ids = [json.loads(line)["id"] for line in dedup_lines()]
-    assert len(ids) == len(set(ids)) == 36  # 34 + 3 lines, minus the duplicate of 9000000002
+    assert len(ids) == len(set(ids)) == 39  # 34 + 3 + 3 lines, minus the duplicate of 9000000002
+    seed_ids = {json.loads(line)["id"] for line in dedup_lines(SEED_FIXTURE_DIRS)}
+    assert len(seed_ids) == 36
+    assert set(ids) - seed_ids == set(PARQUET_ONLY_IDS)
+
+
+def test_ci_seed_equals_silver_built_from_fixture_json(tmp_path):
+    raw = tmp_path / "events.json.gz"
+    with gzip.open(raw, "wt", encoding="utf-8") as fh:
+        fh.write("\n".join(dedup_lines(SEED_FIXTURE_DIRS)) + "\n")
+    seed = (PROJECT / "seeds" / "fixture_silver_gharchive_events.csv").as_posix()
+    con = duckdb.connect(":memory:")
+    try:
+        con.execute(f"CREATE TABLE expected AS {silver_select_sql(raw.as_posix())}")
+        con.execute(
+            "CREATE TABLE seed AS SELECT * FROM "
+            f"read_csv({_q(seed)}, header = true, all_varchar = true)"
+        )
+        cols = [r[0] for r in con.execute("DESCRIBE expected").fetchall()]
+        assert [r[0] for r in con.execute("DESCRIBE seed").fetchall()] == cols
+
+        def rows(table: str) -> dict[str, tuple]:
+            select = ", ".join(f'CAST("{c}" AS VARCHAR)' for c in cols)
+            return {r[0]: r for r in con.execute(f"SELECT {select} FROM {table}").fetchall()}
+
+        expected, actual = rows("expected"), rows("seed")
+    finally:
+        con.close()
+    assert sorted(actual) == sorted(expected)
+    for event_id, row in expected.items():
+        for col, a, e in zip(cols, actual[event_id], row, strict=True):
+            assert a == e, (event_id, col, a, e)
+
+
+def test_staging_reads_the_parquet_var_not_the_seed(connect_gold, lake):
+    gold = connect_gold()
+    con = duckdb.connect(":memory:")
+    try:
+        parquet_rows = con.execute(
+            f"SELECT count(*) FROM read_parquet({_q(lake['silver_glob'])})"
+        ).fetchone()[0]
+    finally:
+        con.close()
+    staged = gold.execute("SELECT count(*) FROM main_staging.stg_gharchive_events").fetchone()[0]
+    assert staged == parquet_rows == 39  # the seed has 36
+    in_fct = gold.execute(
+        f"SELECT event_id FROM {GOLD_SCHEMA}.fct_events WHERE event_id IN "
+        f"({', '.join(_q(i) for i in PARQUET_ONLY_IDS)}) ORDER BY event_id"
+    ).fetchall()
+    assert [r[0] for r in in_fct] == list(PARQUET_ONLY_IDS)
 
 
 @pytest.mark.parametrize("q", sorted(MARTS))
@@ -284,8 +342,8 @@ def test_fct_events_keeps_each_seed_repo_event_once(connect_gold, lake):
         f"SELECT count(*), count(DISTINCT event_id) FROM {GOLD_SCHEMA}.fct_events"
     ).fetchone()
     assert total == distinct == expected
-    # 2 of the 36 fixture events are on alice/toy (not in the seed)
-    assert total == 34
+    # 2 of the 39 fixture events are on alice/toy (not in the seed)
+    assert total == 37
 
 
 def test_dim_repo_matches_seed_case_insensitively(connect_gold):
@@ -340,6 +398,24 @@ def test_fct_events_point_at_user_version_valid_at_event_time(connect_gold):
         ("9000000016", "dave"),  # issue #106 01-09
         ("9000000040", "dave2"),  # comment 02-12 after the rename
     ]
+
+
+def test_same_second_rename_keeps_each_event_on_its_own_login_version(connect_gold):
+    gold = connect_gold()
+    t = datetime(2026, 2, 13, 10)
+    versions = gold.execute(
+        "SELECT user_key, actor_login, valid_from, valid_to, is_current "
+        f"FROM {GOLD_SCHEMA}.dim_user WHERE actor_id = 1010 ORDER BY version_number"
+    ).fetchall()
+    assert versions == [
+        ("1010-1", "gina", t, t, False),  # zero-length: gina2 shows up in the same second
+        ("1010-2", "gina2", t, None, True),
+    ]
+    facts = gold.execute(
+        f"SELECT event_id, user_key FROM {GOLD_SCHEMA}.fct_events "
+        "WHERE actor_id = 1010 ORDER BY event_id"
+    ).fetchall()
+    assert facts == [("9000000051", "1010-1"), ("9000000052", "1010-2")]
 
 
 # ---------------------------------------------------------------- contract must fail the build

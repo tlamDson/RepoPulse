@@ -193,3 +193,81 @@ unit_tests:
            valid_to: "2026-01-05 00:00:00", is_current: false}
         - {user_key: "7-3", actor_login: a, valid_from: "2026-01-05 00:00:00",
            valid_to: null, is_current: true}
+
+  - name: dim_user_same_second_login_change_is_zero_length_version
+    description: >
+      Login a then b in the same second (tie broken by event_id): version 1 is the zero-length
+      [t, t], version 2 starts at the same t and stays current.
+    model: dim_user
+    given:
+      - input: ref('stg_gharchive_events')
+        rows:
+          - {event_id: "22", actor_id: 8, actor_login: b, created_at: "2026-01-01 10:00:00"}
+          - {event_id: "21", actor_id: 8, actor_login: a, created_at: "2026-01-01 10:00:00"}
+          - {event_id: "23", actor_id: 8, actor_login: b, created_at: "2026-01-01 11:00:00"}
+    expect:
+      rows:
+        - {user_key: "8-1", actor_login: a, version_number: 1, valid_from: "2026-01-01 10:00:00",
+           valid_to: "2026-01-01 10:00:00", is_current: false}
+        - {user_key: "8-2", actor_login: b, version_number: 2, valid_from: "2026-01-01 10:00:00",
+           valid_to: null, is_current: true}
+
+  - name: fct_events_user_version_respects_valid_from_after_login_reuse
+    description: >
+      Actor 7 goes a -> b -> a: an event with login a before the rename points at version 1,
+      not at the later version 3 that reuses the login; b points at 2, the last a at 3.
+    model: fct_events
+    given:
+      - input: ref('stg_gharchive_events')
+        rows:
+          - {event_id: "11", actor_id: 7, actor_login: a, repo_name: apache/spark,
+             event_type: IssueCommentEvent, created_at: "2026-01-01 00:00:00"}
+          - {event_id: "15", actor_id: 7, actor_login: a, repo_name: apache/spark,
+             event_type: IssueCommentEvent, created_at: "2026-01-02 00:00:00"}
+          - {event_id: "12", actor_id: 7, actor_login: b, repo_name: apache/spark,
+             event_type: IssueCommentEvent, created_at: "2026-01-03 00:00:00"}
+          - {event_id: "14", actor_id: 7, actor_login: a, repo_name: apache/spark,
+             event_type: IssueCommentEvent, created_at: "2026-01-05 00:00:00"}
+      - input: ref('dim_repo')
+        rows:
+          - {repo_key: apache/spark, repo_name: apache/spark, category: compute}
+      - input: ref('dim_user')
+        rows:
+          - {user_key: "7-1", actor_id: 7, actor_login: a, version_number: 1,
+             valid_from: "2026-01-01 00:00:00", valid_to: "2026-01-03 00:00:00"}
+          - {user_key: "7-2", actor_id: 7, actor_login: b, version_number: 2,
+             valid_from: "2026-01-03 00:00:00", valid_to: "2026-01-05 00:00:00"}
+          - {user_key: "7-3", actor_id: 7, actor_login: a, version_number: 3,
+             valid_from: "2026-01-05 00:00:00", valid_to: null}
+    expect:
+      rows:
+        - {event_id: "11", user_key: "7-1"}
+        - {event_id: "15", user_key: "7-1"}
+        - {event_id: "12", user_key: "7-2"}
+        - {event_id: "14", user_key: "7-3"}
+
+  - name: fct_events_same_second_login_change_points_at_own_login_version
+    description: >
+      Login a then b in the same second: each event points at the version of its own login,
+      the a event at the zero-length version 1.
+    model: fct_events
+    given:
+      - input: ref('stg_gharchive_events')
+        rows:
+          - {event_id: "21", actor_id: 8, actor_login: a, repo_name: apache/spark,
+             event_type: IssueCommentEvent, created_at: "2026-01-01 10:00:00"}
+          - {event_id: "22", actor_id: 8, actor_login: b, repo_name: apache/spark,
+             event_type: IssueCommentEvent, created_at: "2026-01-01 10:00:00"}
+      - input: ref('dim_repo')
+        rows:
+          - {repo_key: apache/spark, repo_name: apache/spark, category: compute}
+      - input: ref('dim_user')
+        rows:
+          - {user_key: "8-1", actor_id: 8, actor_login: a, version_number: 1,
+             valid_from: "2026-01-01 10:00:00", valid_to: "2026-01-01 10:00:00"}
+          - {user_key: "8-2", actor_id: 8, actor_login: b, version_number: 2,
+             valid_from: "2026-01-01 10:00:00", valid_to: null}
+    expect:
+      rows:
+        - {event_id: "21", user_key: "8-1"}
+        - {event_id: "22", user_key: "8-2"}
