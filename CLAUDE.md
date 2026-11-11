@@ -14,6 +14,7 @@ Các rule chi tiết dưới đây áp dụng luôn, không chỉ khi được h
 ## Quy tắc bắt buộc (không được vi phạm)
 
 - **Git flow:** feature → `develop` (squash), release `develop` → `main` (merge commit). Không push thẳng lên `develop`/`main`, không force push, không `--admin`. `main` là nhánh mặc định (cron chỉ chạy trên đó).
+- **Một PR một việc.** Mỗi PR feature/fix/docs chỉ làm đúng một việc: một task trong `scripts/prs.toml` (luôn tính là một việc, đúng như mô tả của nó), hoặc một cải tiến/sửa lỗi ngoài `prs.toml`. Việc khác gặp trong lúc làm không gộp vào: phiên tay mở PR riêng, phiên headless ghi vào Nợ kỹ thuật hoặc `## Giả định`. PR release và PR Dependabot không áp dụng. Chi tiết: `.claude/rules/developer-guide.md`.
 - **Merge feature vào `develop` khi CI xanh cả 3 job** (`Lint`, `Unit Tests`, `dbt build (DuckDB)`) **và `code-reviewer` PASS**. Đủ thì merge ngay, không hỏi lại.
 - **Release `develop` → `main`** ở các mốc `release_after` trong `scripts/prs.toml`, khi CI của PR release xanh.
 - **PR sửa `.claude/settings.json`, `.claude/auto-mode.json` hoặc hook để chủ repo duyệt**, không tự merge.
