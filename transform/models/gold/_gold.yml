@@ -1,5 +1,8 @@
 version: 2
 
+# meta.pii on every column: class of transform/governance.yml (docs/governance.md). Columns
+# labelled other than none carry no_raw_email; the public schema re-exposes them masked.
+
 models:
   - name: dim_repo
     description: >
@@ -10,6 +13,7 @@ models:
         enforced: true
     columns:
       - name: repo_key
+        config: {meta: {pii: none}}
         data_type: varchar
         constraints:
           - type: not_null
@@ -17,12 +21,14 @@ models:
           - unique
       - name: repo_name
         description: Seed spelling (owner/name), the name reported by the marts.
+        config: {meta: {pii: none}}
         data_type: varchar
         constraints:
           - type: not_null
         data_tests:
           - unique
       - name: category
+        config: {meta: {pii: none}}
         data_type: varchar
         constraints:
           - type: not_null
@@ -52,33 +58,46 @@ models:
     columns:
       - name: user_key
         description: "'<actor_id>-<version_number>'"
+        config: {meta: {pii: public_identifier}}
         data_type: varchar
         constraints:
           - type: not_null
         data_tests:
           - unique
+          - no_raw_email
       - name: actor_id
+        config: {meta: {pii: public_identifier}}
         data_type: bigint
         constraints:
           - type: not_null
+        data_tests:
+          - no_raw_email
       - name: actor_login
+        config: {meta: {pii: public_identifier}}
         data_type: varchar
+        data_tests:
+          - no_raw_email
       - name: version_number
+        config: {meta: {pii: none}}
         data_type: bigint
         constraints:
           - type: not_null
       - name: valid_from
+        config: {meta: {pii: none}}
         data_type: timestamp
         constraints:
           - type: not_null
       - name: valid_to
+        config: {meta: {pii: none}}
         data_type: timestamp
       - name: is_current
+        config: {meta: {pii: none}}
         data_type: boolean
         constraints:
           - type: not_null
       - name: is_bot
         description: Login ends with '[bot]' or '-bot', case-insensitive (benchmarks/queries/q1.sql).
+        config: {meta: {pii: none}}
         data_type: boolean
         constraints:
           - type: not_null
@@ -93,44 +112,56 @@ models:
         enforced: true
     columns:
       - name: event_id
+        config: {meta: {pii: none}}
         data_type: varchar
         constraints:
           - type: not_null
         data_tests:
           - unique
       - name: event_type
+        config: {meta: {pii: none}}
         data_type: varchar
         constraints:
           - type: not_null
       - name: action
+        config: {meta: {pii: none}}
         data_type: varchar
       - name: created_at
+        config: {meta: {pii: none}}
         data_type: timestamp
         constraints:
           - type: not_null
       - name: event_date
+        config: {meta: {pii: none}}
         data_type: date
         constraints:
           - type: not_null
       - name: event_week
         description: ISO week (Monday start) of created_at.
+        config: {meta: {pii: none}}
         data_type: date
         constraints:
           - type: not_null
       - name: user_key
+        config: {meta: {pii: public_identifier}}
         data_type: varchar
         constraints:
           - type: not_null
         data_tests:
+          - no_raw_email
           - relationships:
               arguments:
                 to: ref('dim_user')
                 field: user_key
       - name: actor_id
+        config: {meta: {pii: public_identifier}}
         data_type: bigint
         constraints:
           - type: not_null
+        data_tests:
+          - no_raw_email
       - name: repo_key
+        config: {meta: {pii: none}}
         data_type: varchar
         constraints:
           - type: not_null
@@ -140,17 +171,23 @@ models:
                 to: ref('dim_repo')
                 field: repo_key
       - name: repo_id
+        config: {meta: {pii: none}}
         data_type: bigint
       - name: pr_number
+        config: {meta: {pii: none}}
         data_type: bigint
       - name: issue_number
+        config: {meta: {pii: none}}
         data_type: bigint
       - name: item_number
         description: coalesce(pr_number, issue_number), the issue/PR number used by Q4 and Q6.
+        config: {meta: {pii: none}}
         data_type: bigint
       - name: pr_merged
+        config: {meta: {pii: none}}
         data_type: boolean
       - name: is_late
+        config: {meta: {pii: none}}
         data_type: boolean
 
 unit_tests:
