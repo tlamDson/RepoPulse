@@ -1,0 +1,19 @@
+version: 2
+
+models:
+  - name: int_events_enriched
+    description: >
+      fct_events joined to dim_user (login and is_bot of the version valid at the event) and
+      dim_repo (seed repo_name, category). Shared input of the Q1-Q6 marts.
+    columns:
+      - name: event_id
+        data_tests:
+          - not_null
+          - unique
+      - name: actor_login
+      - name: is_bot
+        data_tests:
+          - not_null
+      - name: repo_name
+        data_tests:
+          - not_null

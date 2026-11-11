@@ -1,0 +1,29 @@
+version: 2
+
+models:
+  - name: stg_gharchive_events
+    description: >
+      GH Archive events with the exact columns of silver/gharchive_events (docs/spark-jobs.md):
+      one row per event_id (silver already dedupes). Source chosen by the var
+      silver_gharchive_parquet: set -> read_parquet('<glob>'); not set -> the CI seed
+      fixture_silver_gharchive_events (fixture, not a measurement).
+    columns:
+      - name: event_id
+        data_tests:
+          - not_null
+          - unique
+      - name: event_type
+        data_tests:
+          - not_null
+      - name: created_at
+        data_tests:
+          - not_null
+      - name: event_date
+        data_tests:
+          - not_null
+      - name: actor_id
+        data_tests:
+          - not_null
+      - name: repo_name
+        data_tests:
+          - not_null
