@@ -141,6 +141,20 @@ def next_ready(
     return ready[:free], blocked, skipped
 
 
+def scheduling_sets(
+    done: set[str], final: dict[str, Decision], waiting: Iterable[str]
+) -> tuple[set[str], set[str]]:
+    """Split run-loop state into (done, held) for ``next_ready``.
+
+    Tasks merged during this run count as done even if ``gh pr list`` has not caught up.
+    Tasks waiting for a quota reset, or finished failed/blocked/stopped, are held: not
+    restarted and not satisfying their dependants.
+    """
+    merged = {k for k, d in final.items() if d.kind == "merged"}
+    held = (set(final) - merged) | set(waiting)
+    return set(done) | merged, held - merged
+
+
 def should_exit(running: int, waiting: int, refresh_pending: bool, stopping: bool) -> bool:
     """End the run loop only when nothing is running and nothing more can start.
 
