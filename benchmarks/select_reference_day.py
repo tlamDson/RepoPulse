@@ -105,7 +105,8 @@ def main(argv: list[str] | None = None) -> int:
             continue
         print(f"{day}: accepted")
         if args.write:
-            args.write.write_text(render_toml(day, hours, args.max_size_ratio), encoding="utf-8")
+            toml_text = render_toml(day, hours, args.max_size_ratio)
+            args.write.write_text(toml_text, encoding="utf-8", newline="\n")
             print(f"wrote {args.write}")
         return 0
     print("no candidate day passed", file=sys.stderr)
