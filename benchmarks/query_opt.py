@@ -542,6 +542,41 @@ def parse_scan_output(stdout: str, label: str) -> dict:
     return scan
 
 
+def parse_prepare_output(stdout: str) -> dict:
+    """The last non-empty stdout line of the prepare child, as a checked dict.
+
+    Every layout of :data:`LAYOUTS` must appear exactly once, in ``layouts`` (with
+    ``prepare_seconds``, ``layout_bytes``, ``files``) or in ``errors`` (with a message).
+    """
+    label = "prepare"
+    info = _last_json_object(stdout, label)
+    absent = [k for k in ("raw_rows", "layouts", "errors") if k not in info]
+    if absent:
+        raise QueryOptError(f"{label} run: missing key(s): {', '.join(absent)}")
+    _check(label, info, ("raw_rows",), integer=True)
+    layouts, errors = info["layouts"], info["errors"]
+    if not isinstance(layouts, dict) or not isinstance(errors, dict):
+        raise QueryOptError(f"{label} run: layouts and errors must be JSON objects")
+    unknown = sorted((set(layouts) | set(errors)) - set(VARIANTS))
+    if unknown:
+        raise QueryOptError(f"{label} run: unknown layout(s): {', '.join(unknown)}")
+    both = sorted(set(layouts) & set(errors))
+    if both:
+        raise QueryOptError(f"{label} run: layout(s) both prepared and failed: {', '.join(both)}")
+    missing = [v for v in VARIANTS if v not in layouts and v not in errors]
+    if missing:
+        raise QueryOptError(f"{label} run: layout(s) not reported: {', '.join(missing)}")
+    for variant, layout in layouts.items():
+        if not isinstance(layout, dict):
+            raise QueryOptError(f"{label} run: {variant}: expected a JSON object")
+        _check(f"{label} {variant}", layout, ("prepare_seconds",), integer=False)
+        _check(f"{label} {variant}", layout, ("layout_bytes", "files"), integer=True)
+    for variant, message in errors.items():
+        if not isinstance(message, str):
+            raise QueryOptError(f"{label} run: {variant}: error must be a string, got {message!r}")
+    return info
+
+
 def run_in_subprocess(
     mode: str,
     variant: str,
@@ -553,12 +588,42 @@ def run_in_subprocess(
     """One timed run (``mode="run"``) or scan pass (``"scan"``) in a fresh interpreter."""
     if mode not in ("run", "scan"):
         raise QueryOptError(f"unknown mode {mode!r}")
+    stdout = _run_child(
+        ["--single" if mode == "run" else "--scan", "--layout", variant],
+        work_dir=work_dir,
+        seed=seed,
+        label=f"{variant} {mode}",
+        timeout_s=timeout_s,
+    )
+    if mode == "run":
+        return parse_run_output(stdout, variant)
+    return parse_scan_output(stdout, variant)
+
+
+def prepare_in_subprocess(
+    data_dir: Path, *, work_dir: Path, seed: Path, timeout_s: float = RUN_TIMEOUT_S
+) -> dict:
+    """:func:`prepare_layouts` in a fresh interpreter, so the parent never holds the data.
+
+    On Linux a child's ``ru_maxrss`` starts at the high-water mark of the process it was started
+    from (the kernel keeps the old address space's peak across ``exec``); a parent that had
+    loaded the day would therefore show up as the ``peak_rss_mb`` of every run.
+    """
+    stdout = _run_child(
+        ["--prepare", "--data-dir", str(data_dir)],
+        work_dir=work_dir,
+        seed=seed,
+        label="prepare",
+        timeout_s=timeout_s,
+    )
+    return parse_prepare_output(stdout)
+
+
+def _run_child(args: list[str], *, work_dir: Path, seed: Path, label: str, timeout_s: float) -> str:
     cmd = [
         sys.executable,
         str(Path(__file__).resolve()),
-        "--single" if mode == "run" else "--scan",
-        "--layout",
-        variant,
+        *args,
         "--work-dir",
         str(work_dir),
         "--seed",
@@ -567,13 +632,11 @@ def run_in_subprocess(
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s, check=False)
     except subprocess.TimeoutExpired:
-        raise QueryOptError(f"{variant} {mode} timed out after {timeout_s:.0f} s") from None
+        raise QueryOptError(f"{label} timed out after {timeout_s:.0f} s") from None
     if proc.returncode != 0:
         tail = "\n".join(proc.stderr.strip().splitlines()[-20:])
-        raise QueryOptError(f"{variant} {mode} failed (exit {proc.returncode}):\n{tail}")
-    if mode == "run":
-        return parse_run_output(proc.stdout, variant)
-    return parse_scan_output(proc.stdout, variant)
+        raise QueryOptError(f"{label} failed (exit {proc.returncode}):\n{tail}")
+    return proc.stdout
 
 
 # ---------------------------------------------------------------- rows
@@ -679,6 +742,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--summary", type=Path, default=Path("out/query-opt-summary.md"))
     parser.add_argument("--single", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--scan", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--prepare", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--layout", choices=VARIANTS, help=argparse.SUPPRESS)
     return parser
 
@@ -687,6 +751,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
+    if args.prepare:
+        if not args.data_dir:
+            parser.error("--data-dir is required with --prepare")
+        print(json.dumps(prepare_layouts(args.data_dir, args.work_dir, seed=args.seed)))
+        return 0
     if args.single or args.scan:
         if not args.layout:
             parser.error("--layout is required with --single/--scan")
@@ -724,8 +793,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
 
-    prepared = prepare_layouts(data_dir, args.work_dir, seed=args.seed)
-    print(f"prepared layouts from {prepared['raw_rows']} raw rows", flush=True)
+    try:  # in a child of its own: the parent must stay small (see prepare_in_subprocess)
+        prepared = prepare_in_subprocess(data_dir, work_dir=args.work_dir, seed=args.seed)
+        print(f"prepared layouts from {prepared['raw_rows']} raw rows", flush=True)
+    except QueryOptError as exc:
+        prepared = {"raw_rows": 0, "layouts": {}, "errors": dict.fromkeys(VARIANTS, str(exc))}
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(",".join(COLUMNS) + "\n", encoding="utf-8", newline="")

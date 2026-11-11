@@ -89,7 +89,23 @@ Why these keys, and what they cannot do:
   `fetchall()`. `row_count` (`count(*)` on the view) is taken after the clock stopped. DuckDB
   settings are the defaults, so inside one run a later query may profit from data cached by an
   earlier one; every layout runs the queries in the same order.
-- `peak_rss_mb`: `ru_maxrss` of the run process (as the baseline).
+- `peak_rss_mb`: `ru_maxrss` (`RUSAGE_SELF`) of the run process, read at the end of the run, the
+  same measure as the baseline. On Linux this value has a floor: the kernel carries the peak RSS
+  of the address space a process replaced at `exec` into its `ru_maxrss`, and Python's
+  `subprocess` starts children from the parent's address space, so every child reports at least
+  the parent's peak. That is why **the layouts are prepared in a child process of its own**
+  (hidden mode `--prepare`, one JSON line `{"raw_rows", "layouts", "errors"}` checked by
+  `parse_prepare_output`): the parent never loads the day, and its peak stays at an interpreter
+  with DuckDB imported, like the parent of `naive_duckdb.py`. A first version prepared in the
+  parent and every layout reported the parent's peak instead of its own. The floor itself remains
+  (it is also in the baseline's number); it is small compared with a run and is the same for every
+  row of this workflow. Tests check that `main` never prepares in its own process; there is no
+  test that a run's `peak_rss_mb` is below a large parent allocation, because with `ru_maxrss` it
+  is not.
+- Only `peak_rss_mb` is affected by this: the timings are taken inside the child, the bytes are
+  differences of the child's own `/proc/self/io` counters (a new process starts its I/O counters
+  at zero, and only deltas are used), and rows / files / row groups come from DuckDB's profile of
+  one query.
 - The row of a layout holds the median of its runs (`benchmarks/measure.py::summarize_runs`).
 - **Not comparable with the baseline:** `total_seconds` of the baseline includes loading the
   `*.json.gz` files into a table; here the data is already in parquet and `total_seconds` covers
