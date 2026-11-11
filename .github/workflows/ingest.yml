@@ -10,8 +10,9 @@ name: Ingest GH Archive
 # hour, to prove the download works). Not a required check, so `paths:` on pull_request is fine
 # here (unlike ci.yml).
 #
-# Concurrency: one fixed group with cancel-in-progress false, so scheduled runs queue instead of
-# cancelling each other (GitHub keeps at most one pending run per group).
+# Concurrency: one group per trigger with cancel-in-progress false, so scheduled runs queue
+# instead of cancelling each other. GitHub keeps at most one pending run per group, so a
+# pull_request or dispatch run must not share the cron's group: it could evict a queued hour.
 
 on:
   schedule:
@@ -44,7 +45,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ingest-gharchive
+  group: ingest-gharchive-${{ github.event_name }}
   cancel-in-progress: false
 
 jobs:

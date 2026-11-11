@@ -9,7 +9,9 @@ One GH Archive hour file (``YYYY-MM-DD-H.json.gz``) becomes one landing partitio
 
 The source file is streamed line by line (an hour is ~1 GB uncompressed) and deleted afterwards.
 Re-running an hour whose manifest already lists the same event types is a no-op (``skipped``);
-``force`` or different event types rebuild the partition from scratch. Duplicate ``id`` values
+``force`` or different event types rebuild the partition from scratch. A rebuild that fails while
+reading the source leaves the old partition untouched; one that dies during the final file swap
+leaves a partition without a manifest, which the next run rebuilds. Duplicate ``id`` values
 inside one source file are kept: deduplication belongs to silver.
 
 Stdlib only. Usage: ``python -m repopulse.ingest --help``.
@@ -20,6 +22,7 @@ from __future__ import annotations
 import argparse
 import gzip
 import hashlib
+import http.client
 import json
 import os
 import re
@@ -132,7 +135,8 @@ def download(name: str, dest_dir: Path, *, retries: int = 3, timeout: int = 300)
                 return None
             if attempt == retries:
                 raise
-        except (urllib.error.URLError, TimeoutError, ConnectionError):
+        except (urllib.error.URLError, http.client.HTTPException, TimeoutError, ConnectionError):
+            # HTTPException covers IncompleteRead: the server dropped the connection mid-body.
             part.unlink(missing_ok=True)
             if attempt == retries:
                 raise
@@ -167,7 +171,7 @@ def _event_type(line: bytes) -> str | None:
     """The event's ``type`` or None when the line is not a JSON object with a string type."""
     try:
         obj = json.loads(line)
-    except ValueError:  # JSONDecodeError and UnicodeDecodeError
+    except (ValueError, RecursionError):  # bad JSON, bad UTF-8, or absurdly deep nesting
         return None
     if not isinstance(obj, dict):
         return None
@@ -291,7 +295,8 @@ def ingest_hour(
     name = source_name(day, hour)
     dest = partition_dir(Path(landing_root), day, hour)
     existing = _read_manifest(dest)
-    if existing is not None and not force and existing.get("event_types") == types:
+    complete = existing is not None and (dest / EVENTS_FILE).is_file()
+    if complete and not force and existing.get("event_types") == types:
         return HourResult(
             data_date=day,
             hour=hour,
