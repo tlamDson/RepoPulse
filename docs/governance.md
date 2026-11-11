@@ -119,6 +119,6 @@ thực thi bằng cách chỉ chia sẻ đúng phần cần:
 - `analyst`: share chỉ-đọc của database gold.
 - `pipeline`: token MotherDuck trong secret của Actions.
 
-Chưa triển khai trên cloud trong PR này: chưa tạo share MotherDuck, chưa có job xuất dữ liệu cho
-dashboard (PR 11). Ánh xạ policy sang `grants` của dbt trên Snowflake (role theo vai, quyền theo
+Chưa triển khai trên cloud: chưa tạo share MotherDuck. Dashboard (PR 11) xuất đúng 6 mart của
+`main_public` bằng `python -m repopulse.export_site` (`docs/dashboard.md`). Ánh xạ policy sang `grants` của dbt trên Snowflake (role theo vai, quyền theo
 schema, masking policy cho cột `public_identifier`) để dành cho PR 13.
