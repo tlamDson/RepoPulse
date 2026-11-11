@@ -25,6 +25,11 @@ Bốn bước nặng chạy qua `python -m repopulse.pipeline timed --name <bư�
 | `workflow_dispatch` | input `date`/`hour`/`hours` (mặc định 3), `force`, `full_refresh` | như trên | như trên |
 | `pull_request` (lọc `paths:`) | 1 giờ thật (now − 2h) | `ci` (DuckDB local), salt giả cố định | không cần; có `MOTHERDUCK_TOKEN` thì thêm bước smoke |
 
+`PII_HASH_SALT` vào cả bước Spark (băm PII ở silver) lẫn mọi bước `dbt build`: các model `public`
+che `user_key`/`actor_id`/`actor_login` bằng `mask_pii` với cùng salt (`docs/governance.md`), và
+ngoài target `ci` thiếu salt là lỗi compile. Bước chỉ chạy trên pull request dùng salt giả cố định,
+không nhận secret thật.
+
 `schedule` và `workflow_dispatch` chỉ chạy khi file đã có trên `main` (sau release). Hai trigger này
 chung một nhóm concurrency (`pipeline-motherduck`, xếp hàng, không huỷ): mỗi lúc chỉ một lần ghi
 MotherDuck. Mỗi PR một nhóm riêng.

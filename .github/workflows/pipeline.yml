@@ -154,9 +154,12 @@ jobs:
             python -m repopulse.spark.export --lake-dir data/lake --out data/silver-export \
             --summary out/export-summary.json
 
+      # The public models mask identifiers with mask_pii (docs/governance.md): dbt needs the salt
+      # silver was hashed with, and off target ci a missing PII_HASH_SALT is a compile error.
       - name: dbt build
         env:
           MOTHERDUCK_TOKEN: ${{ github.event_name != 'pull_request' && secrets.MOTHERDUCK_TOKEN || '' }}
+          PII_HASH_SALT: ${{ github.event_name == 'pull_request' && 'not-a-secret-pr-salt' || secrets.PII_HASH_SALT }}
         run: |
           extra=()
           if [ "$FULL_REFRESH" = "true" ]; then extra+=(--full-refresh); fi
@@ -167,6 +170,8 @@ jobs:
 
       - name: Re-run changes no row count (pull request, DuckDB)
         if: github.event_name == 'pull_request'
+        env:
+          PII_HASH_SALT: not-a-secret-pr-salt
         run: |
           python -m repopulse.pipeline counts --database ci.duckdb --out out/counts-first.json
           dbt build --project-dir transform --profiles-dir transform --target ci \
@@ -180,6 +185,7 @@ jobs:
         env:
           MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
           MOTHERDUCK_DATABASE: repopulse_smoke
+          PII_HASH_SALT: not-a-secret-pr-salt
         run: |
           python -m repopulse.pipeline md-reset --database repopulse_smoke
           dbt build --project-dir transform --profiles-dir transform --target motherduck \
