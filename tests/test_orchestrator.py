@@ -429,3 +429,30 @@ def test_mark_trusted_adds_keys_and_keeps_other_projects():
     assert changed is True and out["keep"] == 2 and out["projects"]["c:/other"]["x"] == 1
     assert out["projects"]["d:/a"]["hasTrustDialogAccepted"] is True
     assert mark_trusted(out, ["d:/a"])[1] is False
+
+
+def test_hold_until_returns_reset_of_hot_windows():
+    from repopulse.orchestrator import hold_until
+
+    ev = {
+        "type": "rate_limit_event",
+        "rate_limit_info": {
+            "status": "allowed",
+            "resetsAt": 100,
+            "unifiedWindows": {
+                "five_hour": {"utilization": 0.2, "resetsAt": 200},
+                "seven_day": {"utilization": 0.93, "resetsAt": 5000},
+            },
+        },
+    }
+    assert hold_until(ev) == 5000
+    ev["rate_limit_info"]["unifiedWindows"]["five_hour"]["utilization"] = 0.95
+    assert hold_until(ev) == 5000  # wait for the latest hot window
+    ev["rate_limit_info"]["unifiedWindows"]["seven_day"]["utilization"] = 0.1
+    assert hold_until(ev) == 200
+    assert hold_until({"type": "assistant"}) is None
+    flat = {
+        "type": "rate_limit_event",
+        "rate_limit_info": {"status": "allowed_warning", "utilization": 0.95, "resetsAt": 7},
+    }
+    assert hold_until(flat) == 7
