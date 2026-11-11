@@ -43,6 +43,7 @@ python benchmarks/naive_duckdb.py --runs 5 --git-sha <sha> --out out/benchmark-r
 python benchmarks/record_run.py <benchmark-row.csv>   # gộp dòng từ artifact vào runs.csv
 
 python -m eventspec.generate                     # sinh lại eventspec/schemas/ từ catalog (docs/eventspec.md)
+python -m simkit.generate --seed 42 --users 100 --days 7 --null 5 --bot 2   # event simulated + manifest lỗi vào data/simulated/ (docs/simkit.md)
 
 python scripts/orchestrate.py run --dry-run      # xem sẽ chạy việc nào
 python scripts/orchestrate.py run --parallel 2   # chạy headless, không cần người
