@@ -4,7 +4,8 @@ Project dbt nằm ở `transform/`. Gold là star schema (`fct_events`, `dim_use
 sáu mart trả lời Q1–Q6 (`docs/plan.md`). Định nghĩa chuẩn của từng metric là
 `benchmarks/queries/qN.sql`; mart cho **cùng tên cột, cùng ngữ nghĩa và cùng kết quả** với query
 tương ứng trên cùng dữ liệu (đã khử trùng theo `event_id`), có test so khớp
-(`tests/test_dbt_marts.py`). Materialization hiện là `table` (full refresh); incremental là PR 7.
+(`tests/test_dbt_marts.py`). `stg_gharchive_events` và `fct_events` là incremental (mục
+"Incremental" dưới); dim và mart là `table`, dựng lại mỗi lần từ lịch sử đã tích luỹ.
 
 ## Sơ đồ
 
@@ -12,13 +13,13 @@ tương ứng trên cùng dữ liệu (đã khử trùng theo `event_id`), có t
 seed fixture_silver_gharchive_events ─┐   (mặc định, CI)
 read_parquet(var silver_gharchive_parquet) ─┤   (khi đặt var)
                                        ▼
-                    staging.stg_gharchive_events (view)
+                    staging.stg_gharchive_events (incremental, tích luỹ)
                          │                    │
 seed repos_data_ecosystem ──► gold.dim_repo   │
                          │         │          ▼
                          │         │    gold.dim_user (SCD2)
                          ▼         ▼          │
-                    gold.fct_events ◄─────────┘
+                    gold.fct_events (incremental) ◄─┘
                          │
                          ▼
           intermediate.int_events_enriched (view: fct + login/is_bot + repo_name/category)
@@ -39,7 +40,7 @@ Schema trên DuckDB: `main` (seed), `main_staging`, `main_intermediate`, `main_g
 | Var | Nguồn của `stg_gharchive_events` | Dùng khi |
 |---|---|---|
 | (không đặt) | seed `fixture_silver_gharchive_events` | job CI `dbt build (DuckDB)`: không có lake, không có mạng dữ liệu |
-| `silver_gharchive_parquet: "<glob>"` | `read_parquet('<glob>')` | test so khớp (`tests/test_dbt_marts.py`), chạy tay trên file parquet có cột silver |
+| `silver_gharchive_parquet: "<glob>"` | `read_parquet('<glob>')` | pipeline theo lịch (`data/silver-export/*.parquet`, `docs/pipeline.md`), test so khớp (`tests/test_dbt_marts.py`), chạy tay trên file parquet có cột silver |
 
 ```bash
 python -m dbt.cli.main build --project-dir transform --profiles-dir transform --target ci
@@ -55,15 +56,50 @@ Seed `fixture_silver_gharchive_events` là **fixture cho CI, không phải số 
 event không có trong seed, gồm ca đổi login cùng giây), nên test phân biệt được đường đọc parquet
 với đường đọc seed; baseline chạy trên cùng các dòng raw với parquet.
 
-Đọc thẳng bảng Delta silver và nối vào pipeline theo lịch là PR 7. Lưu ý cho PR 7: Spark ghi
-`created_at` dạng timestamp UTC; staging ép về `timestamp` không múi giờ, nên phiên DuckDB đọc
-Delta cần múi giờ UTC để `event_date`/tuần không lệch.
+Pipeline theo lịch không cho dbt đọc thư mục Delta: `python -m repopulse.spark.export` đọc bảng
+silver qua Delta rồi ghi parquet thường (`docs/pipeline.md`). Spark ghi `created_at` là thời điểm
+UTC, parquet có thể tới DuckDB dưới dạng `TIMESTAMPTZ`; staging lấy `make_timestamp(epoch_us(…))`
+nên giờ tường luôn là UTC bất kể múi giờ phiên. Hai target DuckDB (`ci`, `motherduck`) cũng đặt
+`TimeZone: UTC` trong `profiles.yml`.
+
+## Incremental
+
+Pipeline theo lịch chạy trên runner với lake mới mỗi lần, nên parquet silver đưa cho dbt chỉ có
+các giờ của lần chạy đó. Lịch sử nằm ở gold (MotherDuck), cụ thể ở staging:
+
+| Model | Materialization | Mỗi lần chạy |
+|---|---|---|
+| `stg_gharchive_events` | `incremental`, `append`, `full_refresh: false` | Chèn các `event_id` chưa có; bản đã có thắng (giống MERGE của silver). Cột `loaded_at` = `run_started_at` (UTC) của lần dbt chèn dòng |
+| `fct_events` | `incremental`, `delete+insert` theo `event_id` | Tính lại **mọi** fact của các actor "bị chạm": actor có dòng staging với `loaded_at` lớn hơn `max(loaded_at)` của chính `fct_events` |
+| `dim_user`, `dim_repo`, 6 mart | `table` | Dựng lại từ toàn bộ staging |
+
+Vì sao tính lại cả actor: một event đến muộn (kể cả trên repo ngoài seed, không thành fact) có thể
+chèn một phiên bản login sớm hơn vào `dim_user`, làm `version_number` (nên `user_key`) của mọi
+event sau của actor đó dịch đi. Tính lại một actor hai lần vô hại; bỏ sót mới sai, nên mốc lấy từ
+chính `fct_events`.
+
+Bất biến có test (`tests/test_dbt_incremental.py`): dựng từng lô trên một file DuckDB cho đúng
+từng dòng, từng cột như một lần build đầy đủ trên hợp các lô (trừ `loaded_at`); chạy lại lô cũ,
+lô trùng hoặc lô rỗng không đổi bảng nào; không trùng `event_id`; event đến muộn dịch phiên bản của
+fact cũ; `--full-refresh` giữ staging đã tích luỹ.
+
+**Khi nào cần `--full-refresh`** (input `full_refresh` của `workflow_dispatch` trong
+`pipeline.yml`):
+
+- Sửa seed `repos_data_ecosystem` (thêm/bớt repo): incremental chỉ tính lại actor bị chạm, nên
+  event cũ của repo mới thêm chưa thành fact.
+- Sửa logic SQL của `fct_events` hoặc đổi cột (model đặt `on_schema_change: fail`, đổi cột mà
+  không full refresh thì `dbt build` báo lỗi).
+
+`--full-refresh` dựng lại `fct_events` từ staging nhưng **không** đụng `stg_gharchive_events`
+(`full_refresh: false`): staging là nơi duy nhất giữ lịch sử, lake không còn. Muốn dựng lại cả
+staging thì phải xoá bảng bằng tay rồi nạp lại silver của mọi giờ (chưa có quy trình).
 
 ## Grain và khoá
 
 | Model | Grain | Khoá | Ghi chú |
 |---|---|---|---|
-| `stg_gharchive_events` | 1 event silver | `event_id` | Đủ 17 cột silver, kể cả mảng hash commit (silver được phép giữ hash) |
+| `stg_gharchive_events` | 1 event silver | `event_id` | Đủ 17 cột silver, kể cả mảng hash commit (silver được phép giữ hash), cộng `loaded_at` |
 | `dim_repo` | 1 repo trong seed | `repo_key` = `lower(repo_name)` | `repo_name` giữ cách viết của seed; event khớp không phân biệt hoa thường như baseline |
 | `dim_user` | 1 phiên bản login của 1 `actor_id` | `user_key` = `'<actor_id>-<version_number>'` | SCD2, xem dưới |
 | `fct_events` | 1 event trên repo seed | `event_id` | FK `user_key` → `dim_user`, `repo_key` → `dim_repo`; `event_week` = tuần ISO (thứ Hai); `item_number` = `coalesce(pr_number, issue_number)`. **Không** mang cột hash email/tên commit sang gold |
@@ -133,5 +169,6 @@ Khác biệt với baseline:
 | Singular | `transform/tests/` | Khoảng hiệu lực SCD2 không hở, không chồng, đúng một phiên bản hiện tại; fct trỏ đúng phiên bản; fct đủ mọi event trên repo seed, mỗi event một lần |
 | Unit (`unit_tests:`) | `_gold.yml`, `_marts.yml` | SCD2 (đổi login → 2 phiên bản; `a → b → a` → 3; đổi login cùng giây → phiên bản độ dài 0), `fct_events` chọn phiên bản theo cận `valid_from` (`a → b → a`) và ở ca cùng giây, cohort Q2, funnel Q3 |
 | pytest | `tests/test_dbt_marts.py` | So khớp 6 mart với `qN.sql` từng dòng từng cột; vi phạm contract làm `dbt build` thoát mã khác 0; gold không có cột/giá trị email; build lại cùng đầu vào cho cùng số dòng |
+| pytest | `tests/test_dbt_incremental.py` | Incremental theo lô bằng full build trên hợp các lô; idempotent; event muộn; `--full-refresh`; múi giờ UTC |
 
 Không có số đo nào trong tài liệu này; số đo chỉ lấy từ `runs.csv`.
