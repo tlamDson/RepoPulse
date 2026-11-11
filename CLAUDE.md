@@ -2,6 +2,8 @@
 
 RepoPulse: data platform nhỏ đo "sức khoẻ" các dự án open source hệ data (Spark, dbt, DuckDB, Airflow, Kafka...) từ dữ liệu sự kiện GitHub công khai (GH Archive), kèm một luồng event app mô phỏng theo logging spec. Stack: Python 3.11, PySpark + Delta Lake (Databricks Free Edition, hoặc chạy trên runner GitHub Actions nếu dùng đường dự phòng), dbt (DuckDB trên CI, Databricks SQL hoặc MotherDuck cho gold), GitHub Actions điều phối, dashboard tĩnh trên GitHub Pages.
 
+**Đường đã chọn (bước thử 2026-11-11): dự phòng** — PySpark + Delta trên runner GitHub Actions, gold trên MotherDuck (khoá phiên bản DuckDB theo bản MotherDuck hỗ trợ). Databricks chưa kiểm được vì secret `DATABRICKS_TOKEN` không phải personal access token. Chi tiết và cách thử lại: `docs/probe-result.md`.
+
 Kế hoạch: `docs/plan.md`. Tiến độ: `python scripts/orchestrate.py report` (nguồn sự thật là PR đã merge). Việc chờ chủ repo: `docs/lam-checklist.md` và `logs/run-<ngày>.md`.
 
 Các rule chi tiết dưới đây áp dụng luôn, không chỉ khi được hỏi:
