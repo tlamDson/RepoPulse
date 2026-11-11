@@ -692,6 +692,26 @@ def test_decide_after_exit_ready_carries_pr_number():
     assert d.reason == "31"
 
 
+def test_decide_after_exit_ready_keeps_only_the_digits():
+    for text in ("RESULT: ready #31", "RESULT: ready 31 (CI xanh)", "RESULT: ready PR #31"):
+        d = decide_after_exit(0, None, text, now=0, max_wait_s=0)
+        assert (d.kind, d.reason) == ("ready", "31"), text
+
+
+def test_decide_after_exit_ready_without_pr_number_is_a_counted_failure():
+    # Review PR 25: "ready" with no number put "" in pending_review, the next start was a build
+    # session again (falsy review_pr) and the loop never ended.
+    d = decide_after_exit(0, None, "RESULT: ready", now=0, max_wait_s=0)
+    assert d.kind == "failed"
+    assert "số PR" in d.reason
+
+
+def test_decide_after_exit_ready_beats_a_stale_rate_event():
+    stale = {"type": "rate_limit_event", "rate_limit_info": {"status": "rejected", "resetsAt": 9}}
+    d = decide_after_exit(0, stale, "RESULT: ready 31", now=0, max_wait_s=3600)
+    assert (d.kind, d.reason) == ("ready", "31")
+
+
 def test_build_review_command_runs_code_reviewer_agent_headless(tmp_path: Path):
     from repopulse.orchestrator import build_review_command
 
@@ -724,11 +744,14 @@ def test_parse_review_takes_last_verdict_line():
     assert parse_review("không có gì") is None
 
 
-def test_parse_review_falls_back_to_agent_heading():
+def test_parse_review_trusts_only_review_lines():
+    # Review PR 25: the agent's template "Kết luận: PASS | FAIL" must never read as a PASS;
+    # merging hangs on this, so only an explicit REVIEW: line counts.
     from repopulse.orchestrator import parse_review
 
-    assert parse_review("## Kết luận: FAIL\n### Finding\n- [chặn] x") == ("FAIL", "")
-    assert parse_review("## Kết luận: PASS") == ("PASS", "")
+    assert parse_review("## Kết luận: PASS | FAIL") is None
+    assert parse_review("## Kết luận: PASS") is None
+    assert parse_review("## Kết luận: PASS\n\nREVIEW: FAIL thiếu test") == ("FAIL", "thiếu test")
 
 
 def test_decide_after_review_maps_verdict_quota_and_missing_line():
@@ -761,6 +784,10 @@ def test_merge_ready_needs_all_three_required_checks_passing():
     assert merge_ready(red) == (False, "Unit Tests: fail")
     missing = [c for c in ok if c["name"] != "Lint"]
     assert merge_ready(missing) == (False, "Lint: thiếu")
+    # Review PR 25: a check still running (or skipped) is not a pass
+    for bucket in ("pending", "skipping", "cancel"):
+        running = [dict(c, bucket=bucket) if c["name"] == "Unit Tests" else c for c in ok]
+        assert merge_ready(running) == (False, f"Unit Tests: {bucket}")
 
 
 def test_review_next_merges_on_pass_fixes_once_then_gives_up():
