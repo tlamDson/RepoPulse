@@ -456,3 +456,17 @@ def test_hold_until_returns_reset_of_hot_windows():
         "rate_limit_info": {"status": "allowed_warning", "utilization": 0.95, "resetsAt": 7},
     }
     assert hold_until(flat) == 7
+
+
+def test_should_exit_waits_for_refresh_after_a_merge():
+    # Regression: S0.4 merged, gates were still the pre-merge snapshot (harness not yet
+    # auto-approved), nothing was running, so the loop exited instead of refreshing gates.
+    from repopulse.orchestrator import should_exit
+
+    assert should_exit(running=0, waiting=0, refresh_pending=True, stopping=False) is False
+    assert should_exit(running=0, waiting=0, refresh_pending=False, stopping=False) is True
+    assert should_exit(running=1, waiting=0, refresh_pending=False, stopping=False) is False
+    assert should_exit(running=0, waiting=1, refresh_pending=False, stopping=False) is False
+    # a STOP request still ends the run once nothing is running
+    assert should_exit(running=0, waiting=1, refresh_pending=True, stopping=True) is True
+    assert should_exit(running=1, waiting=0, refresh_pending=False, stopping=True) is False
