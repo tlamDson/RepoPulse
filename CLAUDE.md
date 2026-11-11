@@ -2,6 +2,8 @@
 
 RepoPulse: data platform nhỏ đo "sức khoẻ" các dự án open source hệ data (Spark, dbt, DuckDB, Airflow, Kafka...) từ dữ liệu sự kiện GitHub công khai (GH Archive), kèm một luồng event app mô phỏng theo logging spec. Stack: Python 3.11, PySpark + Delta Lake (Databricks Free Edition, hoặc chạy trên runner GitHub Actions nếu dùng đường dự phòng), dbt (DuckDB trên CI, Databricks SQL hoặc MotherDuck cho gold), GitHub Actions điều phối, dashboard tĩnh trên GitHub Pages.
 
+**Đường đã chọn (bước thử 2026-11-11): dự phòng** — PySpark + Delta trên runner GitHub Actions, gold trên MotherDuck (khoá phiên bản DuckDB theo bản MotherDuck hỗ trợ). Databricks chưa kiểm được vì secret `DATABRICKS_TOKEN` không phải personal access token. Chi tiết và cách thử lại: `docs/probe-result.md`.
+
 Kế hoạch: `docs/plan.md`. Tiến độ: `python scripts/orchestrate.py report` (nguồn sự thật là PR đã merge). Việc chờ chủ repo: `docs/lam-checklist.md` và `logs/run-<ngày>.md`.
 
 Các rule chi tiết dưới đây áp dụng luôn, không chỉ khi được hỏi:
@@ -25,13 +27,20 @@ Các rule chi tiết dưới đây áp dụng luôn, không chỉ khi được h
 
 ## Lệnh hay dùng
 
+Trên máy Windows của chủ repo, `pytest`, `ruff`, `dbt` không nằm trong PATH: luôn gọi dạng `python -m …` như dưới (CI Linux vẫn dùng lệnh trần trong `ci.yml`).
+
 ```bash
 pip install -e ".[dev,dbt]"          # cài một lần
 pre-commit install                   # hook ruff + gitleaks
-ruff check . && ruff format --check .
-pytest
-dbt build --project-dir transform --profiles-dir transform --target ci
+python -m ruff check .
+python -m ruff format --check .
+python -m pytest
+python -m dbt.cli.main build --project-dir transform --profiles-dir transform --target ci
 gh pr checks <số-PR> --watch --interval 30
+
+python benchmarks/fetch_reference.py             # tải + kiểm sha256 ngày chuẩn (benchmarks/reference.toml)
+python benchmarks/naive_duckdb.py --runs 5 --git-sha <sha> --out out/benchmark-row.csv
+python benchmarks/record_run.py <benchmark-row.csv>   # gộp dòng từ artifact vào runs.csv
 
 python scripts/orchestrate.py run --dry-run      # xem sẽ chạy việc nào
 python scripts/orchestrate.py run --parallel 2   # chạy headless, không cần người

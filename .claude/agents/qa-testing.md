@@ -17,10 +17,11 @@ Bạn phụ trách test cho RepoPulse (Python + PySpark + dbt). Bám sát `.clau
 ## Lệnh test
 
 ```bash
-pytest
-pytest tests/test_<module>.py -x -q
-dbt build --project-dir transform --profiles-dir transform --target ci
-ruff check . && ruff format --check .
+python -m pytest
+python -m pytest tests/test_<module>.py -x
+python -m dbt.cli.main build --project-dir transform --profiles-dir transform --target ci
+python -m ruff check .
+python -m ruff format --check .
 ```
 
 ## Pattern

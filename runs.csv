@@ -1,0 +1,2 @@
+run_at,git_sha,variant,data_date,total_seconds,q1_seconds,q2_seconds,q3_seconds,q4_seconds,q5_seconds,q6_seconds,peak_rss_mb,bytes_read,row_count,notes
+2026-11-11T07:43:57+00:00,ef8d83955bdd77e1b0d6cf93885d875cb8d51ad1,baseline,2026-10-25,4.197164,0.079778,0.093761,0.046045,0.061821,0.031841,0.062163,1238.0,295319902,1670400,runs=5 median

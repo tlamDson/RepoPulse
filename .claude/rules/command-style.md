@@ -19,8 +19,13 @@
 - **Thử mutation**: chỉ trên file **đã commit**, sửa bằng Edit, chạy test, rồi hoàn tác bằng
   `git checkout -- <file>` và kiểm `git status --porcelain` sạch. `git checkout --` **không** hoàn
   tác được file chưa được theo dõi.
+- **Gọi công cụ Python bằng `python -m`**: `python -m pytest`, `python -m ruff`,
+  `python -m dbt.cli.main build …`. Lệnh trần `pytest`/`ruff`/`dbt` không có trong PATH trên máy
+  local (exit code 127).
 - **Chờ CI**: `gh pr checks <số> --watch --interval 30` chạy foreground với timeout 600000; hết giờ
-  thì gọi lại, tới khi xong.
+  thì gọi lại, tới khi xong. Ngay sau khi push, lệnh có thể báo `no checks reported` (exit 1) vì check
+  chưa kịp đăng ký: đợi rồi gọi lại. Exit 1 cũng xảy ra khi có job đỏ — đọc output, đừng chỉ nhìn
+  exit code.
 
 ## Không làm
 

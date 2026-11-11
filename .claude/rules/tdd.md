@@ -8,17 +8,26 @@
 3. **REFACTOR** — cải thiện code, chạy lại toàn bộ test, không được break.
 
 ```bash
-pytest                                   # toàn bộ test Python
-pytest tests/test_<module>.py -x -q      # một file
-pytest -k <tên_test>                     # một case
-dbt build --project-dir transform --profiles-dir transform --target ci   # model + test dbt trên DuckDB
+python -m pytest                                   # toàn bộ test Python
+python -m pytest tests/test_<module>.py -x         # một file
+python -m pytest -k <tên_test>                     # một case
+python -m dbt.cli.main build --project-dir transform --profiles-dir transform --target ci   # dbt trên DuckDB
 ```
+
+Luôn dùng dạng `python -m` (trên máy local `pytest`/`ruff`/`dbt` không có trong PATH; `python -m` còn bảo
+đảm import đúng package của worktree hiện tại). `pyproject.toml` đã đặt `addopts = "-q"`: đừng thêm
+`-q` nữa (thành `-qq` sẽ mất dòng tổng kết `N passed` cần chép làm bằng chứng).
+
+**Package first-party mới** (`eventspec`, `simkit`, `benchmarks`...): khi commit chỉ có test import một
+package chưa tồn tại, ruff (isort) xếp nó vào nhóm bên thứ ba và báo `I001`. Thêm tên package vào
+`[tool.ruff.lint.isort] known-first-party` trong `pyproject.toml` **ngay trong commit test** và ghi
+vào mục `## Giả định` — đây là cấu hình lint, không vi phạm "commit đầu chỉ có test".
 
 ## Vị trí test
 
 - **Python** (`repopulse/`, `eventspec/`, `simkit/`...): `tests/test_<module>.py`, fixture dùng chung ở `tests/conftest.py`, dữ liệu mẫu nhỏ ở `tests/fixtures/`.
 - **PySpark**: test chạy với `SparkSession` local (`master("local[1]")`), fixture `spark` scope `session` trong `conftest.py`. Dữ liệu vài chục dòng, không đọc file GH Archive thật.
-- **dbt**: generic test và singular test trong `transform/models/**/schema.yml` và `transform/tests/`; unit test của dbt (`unit_tests:`) cho logic biến đổi; `contract: {enforced: true}` cho model gold. Test dbt "đỏ" nghĩa là `dbt build --target ci` thất bại đúng chỗ.
+- **dbt**: generic test và singular test trong `transform/models/**/schema.yml` và `transform/tests/`; unit test của dbt (`unit_tests:`) cho logic biến đổi; `contract: {enforced: true}` cho model gold. Test dbt "đỏ" nghĩa là `python -m dbt.cli.main build … --target ci` thất bại đúng chỗ.
 
 ## Quy ước
 
