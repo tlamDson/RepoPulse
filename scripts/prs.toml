@@ -175,8 +175,8 @@ agent = "spark-engineer"
 
 [[task]]
 id = "P2a"
-title = "Streaming Redpanda + Spark Structured Streaming trên runner"
-branch = "feature/streaming-redpanda"
+title = "Streaming Apache Kafka (KRaft, 3 broker) + Spark Structured Streaming trên runner"
+branch = "feature/streaming-kafka"
 deps = ["14"]  # plan v2 xây trên kết quả giai đoạn 1
 agent = "spark-engineer"
 
