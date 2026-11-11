@@ -41,6 +41,8 @@ gh pr checks <số-PR> --watch --interval 30
 python benchmarks/fetch_reference.py             # tải + kiểm sha256 ngày chuẩn (benchmarks/reference.toml)
 python benchmarks/naive_duckdb.py --runs 5 --git-sha <sha> --out out/benchmark-row.csv
 python benchmarks/record_run.py <benchmark-row.csv>   # gộp dòng từ artifact vào runs.csv
+python benchmarks/scale_prepare.py               # tải + lọc + rút gọn 30 ngày GH Archive cho benchmark scale (docs/benchmark-scale.md)
+python benchmarks/scale_bench.py --git-sha <sha> --out out/scale-rows.csv   # Spark vs DuckDB 1/7/30 ngày; gộp bằng record_run.py
 
 python -m eventspec.generate                     # sinh lại eventspec/schemas/ từ catalog (docs/eventspec.md)
 python -m simkit.generate --seed 42 --users 100 --days 7 --null 5 --bot 2   # event simulated + manifest lỗi vào data/simulated/ (docs/simkit.md)

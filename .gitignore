@@ -40,6 +40,9 @@ data/raw/
 data/landing/
 data/lake/
 data/simulated/
+data/scale/
+data/tmp/
+out/
 *.parquet
 *.json.gz
 
