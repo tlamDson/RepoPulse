@@ -25,12 +25,15 @@ Các rule chi tiết dưới đây áp dụng luôn, không chỉ khi được h
 
 ## Lệnh hay dùng
 
+Trên máy Windows của chủ repo, `pytest`, `ruff`, `dbt` không nằm trong PATH: luôn gọi dạng `python -m …` như dưới (CI Linux vẫn dùng lệnh trần trong `ci.yml`).
+
 ```bash
 pip install -e ".[dev,dbt]"          # cài một lần
 pre-commit install                   # hook ruff + gitleaks
-ruff check . && ruff format --check .
-pytest
-dbt build --project-dir transform --profiles-dir transform --target ci
+python -m ruff check .
+python -m ruff format --check .
+python -m pytest
+python -m dbt.cli.main build --project-dir transform --profiles-dir transform --target ci
 gh pr checks <số-PR> --watch --interval 30
 
 python scripts/orchestrate.py run --dry-run      # xem sẽ chạy việc nào
