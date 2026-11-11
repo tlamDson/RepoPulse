@@ -1,6 +1,6 @@
 """Naive DuckDB baseline: Q1-Q6 on a hand-written fixture give hand-computed numbers.
 
-Fixture ``tests/fixtures/gharchive_small/*.json`` (31 lines, gzip-compressed into ``tmp_path``
+Fixture ``tests/fixtures/gharchive_small/*.json`` (32 lines, gzip-compressed into ``tmp_path``
 at test time so the pipeline reads real ``*.json.gz`` files). Weeks are ISO weeks starting Monday:
 W0 = 2026-01-05, W1 = 01-12, W4 = 02-02, W5 = 02-09, W12 = 03-30, W13 = 04-06.
 
@@ -9,7 +9,7 @@ Contribution events (PullRequest*, Issues*, IssueComment*) by humans on seed rep
                             sparkmaint 01-06, 01-07, 01-08; bob 01-08; dave 01-09; alice 01-09,
                             alice 02-03, bob 02-10
   duckdb/duckdb (warehouse) carol 01-07, bob 01-12, duckmaint 01-12, 01-14, bob 03-31
-  trinodb/trino (compute)   carol 01-13 x2, carol 04-07
+  trinodb/trino (compute)   carol 01-13 x2, carol 02-11 (comment on her own PR), carol 04-07
 Ignored on purpose: dependabot[bot] (a bot), PushEvent/CreateEvent by alice on spark 01-06,
 WatchEvent/ForkEvent (not contributions), alice/toy (not in the seed).
 """
@@ -27,7 +27,7 @@ from benchmarks import naive_duckdb
 from repopulse.runs_log import COLUMNS
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "gharchive_small"
-FIXTURE_LINES = 31  # 18 + 13 lines, one of them an exact duplicate of event 9000000002
+FIXTURE_LINES = 32  # 18 + 14 lines, one of them an exact duplicate of event 9000000002
 
 
 def d(text: str) -> date:
@@ -72,7 +72,7 @@ def _same(actual: list[tuple], expected: list[tuple]) -> None:
 
 
 def test_raw_table_counts_duplicate_lines_and_every_event_type(result, gz_dir):
-    # baseline does not dedupe: 31 lines read, including the duplicated PR-opened line
+    # baseline does not dedupe: 32 lines read, including the duplicated PR-opened line
     assert result["row_count"] == FIXTURE_LINES
     assert result["bytes_read"] == sum(p.stat().st_size for p in gz_dir.glob("*.json.gz"))
     for key in ("total_seconds", *(f"q{i}_seconds" for i in range(1, 7))):
@@ -116,6 +116,7 @@ def test_q1_active_new_and_returning_contributors(result):
         ("day", d("2026-01-13"), "category", "compute", 1, 1, 0),  # carol first on trino
         ("day", d("2026-02-03"), "category", "compute", 1, 0, 1),  # alice
         ("day", d("2026-02-10"), "category", "compute", 1, 0, 1),  # bob
+        ("day", d("2026-02-11"), "category", "compute", 1, 0, 1),  # carol (trino)
         ("day", d("2026-04-07"), "category", "compute", 1, 0, 1),  # carol
         # day / category warehouse = duckdb (bot comment 01-07 ignored)
         ("day", d("2026-01-07"), "category", "warehouse", 1, 1, 0),  # carol
@@ -135,12 +136,13 @@ def test_q1_active_new_and_returning_contributors(result):
         ("day", d("2026-01-14"), "repo", "duckdb/duckdb", 1, 0, 1),
         ("day", d("2026-03-31"), "repo", "duckdb/duckdb", 1, 0, 1),
         ("day", d("2026-01-13"), "repo", "trinodb/trino", 1, 1, 0),
+        ("day", d("2026-02-11"), "repo", "trinodb/trino", 1, 0, 1),
         ("day", d("2026-04-07"), "repo", "trinodb/trino", 1, 0, 1),
         # week / category
         ("week", d("2026-01-05"), "category", "compute", 4, 4, 0),  # alice, bob, sparkmaint, dave
         ("week", d("2026-01-12"), "category", "compute", 1, 1, 0),  # carol (trino)
         ("week", d("2026-02-02"), "category", "compute", 1, 0, 1),  # alice
-        ("week", d("2026-02-09"), "category", "compute", 1, 0, 1),  # bob
+        ("week", d("2026-02-09"), "category", "compute", 2, 0, 2),  # bob (spark), carol (trino)
         ("week", d("2026-04-06"), "category", "compute", 1, 0, 1),  # carol
         ("week", d("2026-01-05"), "category", "warehouse", 1, 1, 0),  # carol
         ("week", d("2026-01-12"), "category", "warehouse", 2, 2, 0),  # bob new here, duckmaint
@@ -153,6 +155,7 @@ def test_q1_active_new_and_returning_contributors(result):
         ("week", d("2026-01-12"), "repo", "duckdb/duckdb", 2, 2, 0),
         ("week", d("2026-03-30"), "repo", "duckdb/duckdb", 1, 0, 1),
         ("week", d("2026-01-12"), "repo", "trinodb/trino", 1, 1, 0),
+        ("week", d("2026-02-09"), "repo", "trinodb/trino", 1, 0, 1),
         ("week", d("2026-04-06"), "repo", "trinodb/trino", 1, 0, 1),
     ]
     _same(_rows(result, "q1"), expected)
@@ -175,10 +178,12 @@ def test_q2_cohort_retention_at_w4_and_w12(result):
     # W0 cohort {alice, bob}: W4 = 02-02..02-08 -> alice (02-03) yes, bob (02-10 is W5) no
     #   -> 1/2 = 50.0; W12 = 03-30..04-05 -> bob (03-31 duckdb) yes, alice only on alice/toy
     #   -> 1/2 = 50.0
-    # W1 cohort {carol}: W5 -> no activity -> 0/1 = 0.0; W13 = 04-06.. -> 04-07 trino -> 100.0
+    # W1 cohort {carol}: W5 = 02-09.. -> 02-11 comment on trino -> 1/1 = 100.0;
+    #   W13 = 04-06.. -> 04-07 trino -> 100.0. (A W+5 window would give W0 1/2 via bob 02-10
+    #   but W1 0/1, so this row pins the offset.)
     expected = [
         (d("2026-01-05"), 2, 1, 1, 50.0, 50.0),
-        (d("2026-01-12"), 1, 0, 1, 0.0, 100.0),
+        (d("2026-01-12"), 1, 1, 1, 100.0, 100.0),
     ]
     _same(_rows(result, "q2"), expected)
 
@@ -232,7 +237,8 @@ def test_q4_first_response_and_close_rate(result):
     #   both merged -> closed 2/2
     # duckdb issue #7: only a bot comment -> no response, not closed
     # duckdb PR #8: duckmaint comment 6 h after open; merged
-    # trino PR #50: only the author touched it -> no response; closed
+    # trino PR #50: only the author touched it (incl. her own 02-11 comment) -> no response;
+    #   closed
     expected = [
         ("apache/spark", "issue", 3, 2, 7.0, 9.4, 1, 33.33),
         ("apache/spark", "pull_request", 2, 1, 2.0, 2.0, 2, 100.0),
@@ -263,11 +269,11 @@ def test_q5_bus_factor_and_bot_share(result):
     #   human 13: top1 5/13 = 38.46, top2 9/13 = 69.23, top3 12/13 = 92.31
     # duckdb: carol 1, bot 1, bob 2, duckmaint 2 -> 6, bot 1/6 = 16.67 %; human 5:
     #   top1 2/5 = 40.0, top2 4/5 = 80.0, top3 5/5 = 100.0
-    # trino: carol 3 -> bot 0.0, top1..3 = 100.0
+    # trino: carol 4 -> bot 0.0, top1..3 = 100.0
     expected = [
         ("apache/spark", "compute", 14, 1, 7.14, 4, 38.46, 69.23, 92.31),
         ("duckdb/duckdb", "warehouse", 6, 1, 16.67, 3, 40.0, 80.0, 100.0),
-        ("trinodb/trino", "compute", 3, 0, 0.0, 1, 100.0, 100.0, 100.0),
+        ("trinodb/trino", "compute", 4, 0, 0.0, 1, 100.0, 100.0, 100.0),
     ]
     _same(_rows(result, "q5"), expected)
 
@@ -296,7 +302,7 @@ def test_q6_health_score_ranking(result):
     # duckdb: activity 3/4 = 0.75; retention 1/3 (bob W1+W12); merge 1/1; response 1/2;
     #   close 1/2; diversity 1 - 0.4 = 0.6
     #   -> 0.1875 + 0.05 + 0.15 + 0.10 + 0.05 + 0.09 = 0.6275 -> 62.75
-    # trino: activity 1/4; retention 1/1 (carol W1+W13); merge 0/1; response 0/1; close 1/1;
+    # trino: activity 1/4; retention 1/1 (carol W1+W5+W13); merge 0/1; response 0/1; close 1/1;
     #   diversity 1 - 1 = 0 -> 0.0625 + 0.15 + 0.10 = 0.3125 -> 31.25
     expected = [
         (1, "apache/spark", "compute", 1.0, 0.5, 1.0, 0.6, 0.6, 0.6154, 74.73),
