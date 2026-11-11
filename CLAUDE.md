@@ -48,6 +48,7 @@ python benchmarks/naive_duckdb.py --runs 5 --git-sha <sha> --out out/benchmark-r
 python benchmarks/record_run.py <benchmark-row.csv> [<pipeline-row.csv> ...]   # gộp dòng từ artifact vào runs.csv (một file hỏng thì không ghi gì)
 python benchmarks/scale_prepare.py               # tải + lọc + rút gọn 30 ngày GH Archive cho benchmark scale (docs/benchmark-scale.md)
 python benchmarks/scale_bench.py --git-sha <sha> --out out/scale-rows.csv   # Spark vs DuckDB 1/7/30 ngày; gộp bằng record_run.py
+python benchmarks/query_opt.py --runs 10 --git-sha <sha> --out out/query-opt-rows.csv --summary out/query-opt-summary.md   # Q1-Q6 trên parquet phẳng/partition/clustering (ngày chuẩn); byte quét chỉ đo được trên Linux (docs/query-optimization.md)
 python benchmarks/snowflake_port.py --engine duckdb --run-results transform/target/run_results.json --git-sha <sha> --out out/snowflake-port-rows.csv   # dòng runs.csv cho một dbt build (port Snowflake, docs/snowflake-port.md); target snowflake chỉ chạy trong workflow snowflake-port.yml
 
 python -m eventspec.generate                     # sinh lại eventspec/schemas/ từ catalog (docs/eventspec.md)

@@ -1,0 +1,103 @@
+name: Query optimization
+
+# PR 10 (measure M10): Q1-Q6 verbatim on four parquet layouts of the reference day in
+# benchmarks/reference.toml (flat, partitioned by type, clustered, both), 10 runs each, median row
+# per layout in the runs.csv format. The naive baseline is measured again first, on the same
+# runner and commit, so the comparison does not mix runners. Bytes read come from /proc/self/io,
+# hence Linux. Details: docs/query-optimization.md.
+# Output: artifact `query-opt` (out/baseline-row.csv, out/query-opt-rows.csv,
+# out/query-opt-summary.md). Merge it with `python benchmarks/record_run.py`.
+# Not a required check, so `paths:` on pull_request is fine here (unlike ci.yml).
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [develop, main]
+    paths:
+      - ".github/workflows/query-opt.yml"
+      - "benchmarks/query_opt.py"
+      - "benchmarks/queries/**"
+      - "benchmarks/naive_duckdb.py"
+      - "benchmarks/measure.py"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: query-opt-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  query-opt:
+    name: Query optimization (parquet layouts)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - run: pip install -e ".[dev]"
+
+      - name: Cache reference day
+        uses: actions/cache@v4
+        with:
+          path: data/raw/gharchive
+          key: gharchive-${{ hashFiles('benchmarks/reference.toml') }}
+
+      - name: Download and verify reference files (stops on any checksum mismatch)
+        run: python benchmarks/fetch_reference.py
+
+      - name: Baseline on this runner and commit
+        run: >-
+          python benchmarks/naive_duckdb.py
+          --runs 10
+          --variant baseline
+          --git-sha "$GIT_SHA"
+          --out out/baseline-row.csv
+
+      - name: Query optimization layouts
+        run: >-
+          python benchmarks/query_opt.py
+          --runs 10
+          --git-sha "$GIT_SHA"
+          --out out/query-opt-rows.csv
+          --summary out/query-opt-summary.md
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "### Baseline row (same runner and commit)"
+            echo
+            if [ -f out/baseline-row.csv ]; then
+              echo '```csv'
+              cat out/baseline-row.csv
+              echo '```'
+            else
+              echo "No baseline row (the run stopped before it)."
+            fi
+            echo
+            if [ -f out/query-opt-summary.md ]; then
+              cat out/query-opt-summary.md
+            else
+              echo "No query optimization summary (the run stopped before it)."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: query-opt
+          path: |
+            out/baseline-row.csv
+            out/query-opt-rows.csv
+            out/query-opt-summary.md
+          if-no-files-found: warn
+          retention-days: 90
