@@ -62,6 +62,20 @@ def test_unit_tests_install_spark_extra():
     assert re.search(r"pip install -e \"?\.\[[^\]]*\bdev\b[^\]]*\]", runs), runs
 
 
+def test_unit_tests_install_dbt_extra():
+    # tests/test_dbt_marts.py runs dbt for real; without the extra it would only skip on CI
+    runs = "\n".join(str(s.get("run", "")) for s in unit_steps())
+    assert re.search(r"pip install -e \"?\.\[[^\]]*\bdbt\b[^\]]*\]", runs), runs
+
+
+def test_dbt_job_still_builds_without_a_lake():
+    # `dbt build (DuckDB)` stays on the seed fixture: only the dbt extra, no --vars
+    steps = job_by_name(load(), "dbt build (DuckDB)")["steps"]
+    runs = "\n".join(str(s.get("run", "")) for s in steps)
+    assert "dbt build --project-dir transform --profiles-dir transform --target ci" in runs
+    assert "--vars" not in runs
+
+
 def test_java_is_set_up_before_pytest_runs():
     steps = unit_steps()
     java_at = [
