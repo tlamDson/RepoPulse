@@ -46,7 +46,7 @@ Cập nhật sơ đồ này khi thêm thư mục mới.
 
 ## Secret
 
-`DATABRICKS_HOST`, `DATABRICKS_TOKEN`, `DATABRICKS_HTTP_PATH`, `MOTHERDUCK_TOKEN`, `SNOWFLAKE_*` — chủ repo tự thêm bằng `gh secret set` hoặc trên web. Agent không đọc `.env`, không in giá trị secret, không chạy `gh secret` (lệnh này ở nhóm `ask`). Biến mới thêm vào `.env.example` với giá trị rỗng.
+`DATABRICKS_HOST`, `DATABRICKS_TOKEN`, `DATABRICKS_HTTP_PATH`, `MOTHERDUCK_TOKEN`, `PII_HASH_SALT` (salt băm PII ở silver), và cho PR 13: `SNOWFLAKE_ACCOUNT`, `SNOWFLAKE_USER` (`REPOPULSE_CI`, user SERVICE, đăng nhập bằng key-pair), `SNOWFLAKE_PRIVATE_KEY` (PKCS#8 PEM), `SNOWFLAKE_ROLE`, `SNOWFLAKE_WAREHOUSE` (`REPOPULSE_WH`, XSMALL, auto-suspend 60s, resource monitor 20 credit), `SNOWFLAKE_DATABASE` (`REPOPULSE`) — chủ repo tự thêm bằng `gh secret set` hoặc trên web. Agent không đọc `.env`, không in giá trị secret, không chạy `gh secret` (lệnh này ở nhóm `ask`). Biến mới thêm vào `.env.example` với giá trị rỗng.
 
 ## Cạm bẫy đã biết
 
