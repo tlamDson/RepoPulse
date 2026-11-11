@@ -8,6 +8,8 @@
 # Claude Code: personal settings and worktrees stay local
 .claude/settings.local.json
 .claude/worktrees/
+.claude/state/
+logs/
 
 # Python
 __pycache__/

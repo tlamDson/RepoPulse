@@ -1,0 +1,8 @@
+# Profile dùng cho CI và chạy thử local: DuckDB, không cần tài khoản hay secret.
+repopulse:
+  target: ci
+  outputs:
+    ci:
+      type: duckdb
+      path: ci.duckdb  # tương đối với thư mục chạy lệnh (gốc repo); *.duckdb đã gitignore
+      threads: 2
