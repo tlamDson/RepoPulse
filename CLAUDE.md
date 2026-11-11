@@ -46,6 +46,7 @@ python -m eventspec.generate                     # sinh lại eventspec/schemas/
 
 python -m repopulse.ingest --date 2026-01-05 --hour 15 --hours 2   # ingest GH Archive vào data/landing/gharchive
 python -m repopulse.ingest --summary out/ingest-summary.json      # giờ (now UTC - 2h); --force để làm lại
+python -m repopulse.spark.job --source gharchive --date 2026-01-05 --hour 16 --hours 2   # bronze/silver Delta (cần PII_HASH_SALT, Java 17, extra spark); docs/spark-jobs.md
 
 python scripts/orchestrate.py run --dry-run      # xem sẽ chạy việc nào
 python scripts/orchestrate.py run --parallel 2   # chạy headless, không cần người
