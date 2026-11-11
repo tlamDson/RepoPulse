@@ -811,3 +811,14 @@ def test_review_next_merges_on_pass_fixes_once_then_gives_up():
     assert review_next(Decision("pass"), failed_rounds=1, max_rounds=2) == "merge"
     assert review_next(Decision("fail", "x"), failed_rounds=0, max_rounds=2) == "fix"
     assert review_next(Decision("fail", "x"), failed_rounds=1, max_rounds=2) == "give_up"
+
+
+def _t(needs, optional=False):
+    from repopulse.orchestrator import Task
+
+    return Task(id="x", branch="feature/x", agent="a", needs=tuple(needs), optional=optional)
+
+
+def test_unknown_need_blocks_instead_of_passing_silently():
+    g = gate_for(_t(["clod"]), CLOUD)
+    assert g is not None and g.kind == "block" and "clod" in g.reason

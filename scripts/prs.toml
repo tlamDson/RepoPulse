@@ -1,6 +1,7 @@
 # DAG of work for scripts/orchestrate.py. Order matters: earlier tasks are started first.
 # needs: "harness" (docs/harness-check.md approved), "cloud" (Databricks or MotherDuck
-# secrets), "snowflake" (SNOWFLAKE_* secrets). optional = skip instead of block.
+# secrets), "snowflake" (SNOWFLAKE_* secrets). Any other name blocks the task (a typo must
+# never pass silently). optional = skip instead of block.
 # release_after = open and merge a develop -> main release once this task is merged.
 
 [[task]]
