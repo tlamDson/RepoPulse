@@ -4,5 +4,5 @@ repopulse:
   outputs:
     ci:
       type: duckdb
-      path: target/ci.duckdb
+      path: ci.duckdb  # tương đối với thư mục chạy lệnh (gốc repo); *.duckdb đã gitignore
       threads: 2
