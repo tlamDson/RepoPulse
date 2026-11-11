@@ -94,6 +94,10 @@ SCAN_COUNT_KEYS: tuple[str, ...] = tuple(
     f"{q}_{kind}" for q in QUERIES for kind in ("scan_rows", "files_read")
 )
 BYTES_KEYS: tuple[str, ...] = tuple(f"{q}_bytes" for q in QUERIES)
+ROW_GROUP_KEYS: tuple[str, ...] = tuple(
+    f"{q}_row_groups_{kind}" for q in QUERIES for kind in ("scanned", "total")
+)
+SAFE_PARTITION_VALUE = re.compile(r"[A-Za-z0-9_]+")
 
 
 class QueryOptError(RuntimeError):
@@ -138,24 +142,59 @@ def _unsorted_rows(con: duckdb.DuckDBPyConnection, path: Path, keys: Sequence[st
     ).fetchone()[0]
 
 
+def _partition_values(con: duckdb.DuckDBPyConnection, column: str) -> list[str]:
+    """Distinct values of ``column``; each must be safe as a directory name."""
+    sql = f"SELECT DISTINCT {column} FROM raw_events ORDER BY 1"
+    values = [r[0] for r in con.execute(sql).fetchall()]
+    unsafe = [v for v in values if v is None or not SAFE_PARTITION_VALUE.fullmatch(v)]
+    if unsafe:
+        raise QueryOptError(
+            f"{column} value(s) not safe as a partition directory name: "
+            + ", ".join(repr(v) for v in unsafe)
+        )
+    return values
+
+
+def _remove_old_partitions(root: Path, column: str) -> None:
+    """Delete the parquet files of a previous preparation (and their now empty directories)."""
+    for part in sorted(root.glob(f"{column}=*")):
+        if not part.is_dir():
+            continue
+        for path in part.glob("*.parquet"):
+            path.unlink()
+        part.rmdir()  # fails loudly if something else lives there
+
+
+def _copy(con: duckdb.DuckDBPyConnection, select: str, path: Path) -> None:
+    # One COPY into one file keeps the order of the SELECT (DuckDB preserves insertion order for
+    # single-file writes); a PARTITION_BY write does not (it is written by several threads).
+    con.execute(f"COPY ({select}) TO {_sql_str(path.as_posix())} (FORMAT parquet)")
+
+
 def _write_layout(
     con: duckdb.DuckDBPyConnection, work_dir: Path, layout: Layout, raw_rows: int
 ) -> dict:
     root = layout_path(work_dir, layout.variant)
     root.mkdir(parents=True, exist_ok=True)
     order = f" ORDER BY {', '.join(layout.sort_by)}" if layout.sort_by else ""
-    select = f"SELECT * FROM raw_events{order}"
     start = time.perf_counter()
     if layout.partition_by:
-        # OVERWRITE empties the directory first, so preparing twice never duplicates rows
-        con.execute(
-            f"COPY ({select}) TO {_sql_str(root.as_posix())} "
-            f"(FORMAT parquet, PARTITION_BY ({', '.join(layout.partition_by)}), OVERWRITE)"
-        )
+        if len(layout.partition_by) != 1:
+            raise QueryOptError(f"{layout.variant}: only one partition column is supported")
+        (column,) = layout.partition_by
+        values = _partition_values(con, column)
+        _remove_old_partitions(root, column)
+        for value in values:
+            part = root / f"{column}={value}"
+            part.mkdir()
+            _copy(
+                con,
+                f"SELECT * EXCLUDE ({column}) FROM raw_events "
+                f"WHERE {column} = {_sql_str(value)}{order}",
+                part / "data_0.parquet",
+            )
     else:
-        con.execute(
-            f"COPY ({select}) TO {_sql_str((root / 'data.parquet').as_posix())} (FORMAT parquet)"
-        )
+        _copy(con, f"SELECT * FROM raw_events{order}", root / "data.parquet")
     seconds = time.perf_counter() - start
     files = layout_files(work_dir, layout.variant)
     if not files:
@@ -314,17 +353,31 @@ def read_proc_io(path: str | Path = PROC_IO) -> tuple[dict[str, int], int] | Non
 
 
 def _is_parquet_scan(node: Mapping) -> bool:
+    # DuckDB 1.x: operator_type / operator_name; DuckDB 2.x: type (no operator_name)
     extra = node.get("extra_info") or {}
+    kind = node.get("operator_type", node.get("type"))
     name = str(node.get("operator_name", "")).strip()
-    return node.get("operator_type") == "TABLE_SCAN" and (
+    return kind == "TABLE_SCAN" and (
         name == "READ_PARQUET"
         or (isinstance(extra, Mapping) and extra.get("Function") == "READ_PARQUET")
     )
 
 
-def parse_profile(text: str) -> dict[str, int]:
-    """Rows emitted by and files read by every parquet scan of an ``EXPLAIN (ANALYZE, FORMAT
-    JSON)`` plan, summed: ``{"scan_rows": int, "files_read": int}``."""
+def _count(node: Mapping, key: str) -> int:
+    value = node.get(key)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise QueryOptError(f"profile: bad {key} {value!r} on a parquet scan")
+    return value
+
+
+def parse_profile(text: str) -> dict[str, int | None]:
+    """Summed over every parquet scan of an ``EXPLAIN (ANALYZE, FORMAT JSON)`` plan.
+
+    ``scan_rows``: rows the scan emitted (``operator_cardinality`` on DuckDB 1.x,
+    ``intermediate_rows`` on 2.x). ``files_read``: ``extra_info["Total Files Read"]``.
+    ``row_groups_scanned`` / ``row_groups_total``: ``row_groups_scanned`` /
+    ``total_row_groups_to_scan`` (DuckDB 2.x only; None when the plan has no such fields).
+    """
     try:
         plan = json.loads(text)
     except ValueError:
@@ -332,6 +385,7 @@ def parse_profile(text: str) -> dict[str, int]:
     if not isinstance(plan, dict):
         raise QueryOptError(f"profile: expected a JSON object, got {type(plan).__name__}")
     scan_rows = files_read = found = 0
+    groups: list[tuple[int, int] | None] = []
     stack: list = [plan]
     while stack:
         node = stack.pop()
@@ -339,20 +393,44 @@ def parse_profile(text: str) -> dict[str, int]:
             raise QueryOptError(f"profile: plan node is not an object: {node!r}"[:200])
         if _is_parquet_scan(node):
             found += 1
-            rows = node.get("operator_cardinality")
-            if isinstance(rows, bool) or not isinstance(rows, int) or rows < 0:
-                raise QueryOptError(f"profile: bad operator_cardinality {rows!r}")
+            rows_key = (
+                "operator_cardinality" if "operator_cardinality" in node else "intermediate_rows"
+            )
+            scan_rows += _count(node, rows_key)
             files = (node.get("extra_info") or {}).get("Total Files Read")
             if files is None:
                 raise QueryOptError("profile: parquet scan without 'Total Files Read'")
             if not re.fullmatch(r"\d+", str(files)):
                 raise QueryOptError(f"profile: bad 'Total Files Read' {files!r}")
-            scan_rows += rows
             files_read += int(str(files))
-        stack.extend(node.get("children") or [])
+            present = [k in node for k in ("row_groups_scanned", "total_row_groups_to_scan")]
+            if all(present):
+                groups.append(
+                    (_count(node, "row_groups_scanned"), _count(node, "total_row_groups_to_scan"))
+                )
+            elif any(present):
+                raise QueryOptError("profile: parquet scan with only one of the row_groups fields")
+            else:
+                groups.append(None)
+        children = node.get("children") or []
+        if "operator" in node and node is plan:  # DuckDB 2.x: the operator tree sits here
+            children = [*children, *(node.get("operator") or [])]
+        stack.extend(children)
     if not found:
         raise QueryOptError("profile: no parquet scan in the plan")
-    return {"scan_rows": scan_rows, "files_read": files_read}
+    if all(g is None for g in groups):
+        scanned = total = None
+    elif any(g is None for g in groups):
+        raise QueryOptError("profile: row_groups reported for only some parquet scans")
+    else:
+        scanned = sum(g[0] for g in groups)
+        total = sum(g[1] for g in groups)
+    return {
+        "scan_rows": scan_rows,
+        "files_read": files_read,
+        "row_groups_scanned": scanned,
+        "row_groups_total": total,
+    }
 
 
 def _fresh_connection(work_dir: str | Path, variant: str, seed: str | Path):
@@ -406,6 +484,8 @@ def scan_once(work_dir: str | Path, variant: str, seed: str | Path = DEFAULT_SEE
         profile = parse_profile(text)
         result[f"{q}_scan_rows"] = profile["scan_rows"]
         result[f"{q}_files_read"] = profile["files_read"]
+        result[f"{q}_row_groups_scanned"] = profile["row_groups_scanned"]
+        result[f"{q}_row_groups_total"] = profile["row_groups_total"]
     return result
 
 
@@ -450,14 +530,15 @@ def parse_scan_output(stdout: str, label: str) -> dict:
     """The last non-empty stdout line of one scan pass, as a checked dict."""
     scan = _last_json_object(stdout, label)
     _check(label, scan, SCAN_COUNT_KEYS, integer=True)
-    absent = [k for k in BYTES_KEYS if k not in scan]
-    if absent:
-        raise QueryOptError(f"{label} run: missing key(s): {', '.join(absent)}")
-    measured = [k for k in BYTES_KEYS if scan[k] is not None]
-    if measured and len(measured) != len(BYTES_KEYS):
-        raise QueryOptError(f"{label} run: bytes measured for {', '.join(measured)} only")
-    if measured:
-        _check(label, scan, BYTES_KEYS, integer=True)
+    for keys, what in ((BYTES_KEYS, "bytes"), (ROW_GROUP_KEYS, "row_groups")):
+        absent = [k for k in keys if k not in scan]
+        if absent:
+            raise QueryOptError(f"{label} run: missing key(s): {', '.join(absent)}")
+        measured = [k for k in keys if scan[k] is not None]
+        if measured and len(measured) != len(keys):
+            raise QueryOptError(f"{label} run: {what} measured for {', '.join(measured)} only")
+        if measured:
+            _check(label, scan, keys, integer=True)
     return scan
 
 
@@ -563,6 +644,10 @@ def summarize_layout(
             notes.append(f"{q}_bytes={int(scan[f'{q}_bytes'])}")
         notes.append(f"{q}_scan_rows={int(scan[f'{q}_scan_rows'])}")
         notes.append(f"{q}_files_read={int(scan[f'{q}_files_read'])}")
+        for kind in ("scanned", "total"):  # DuckDB 2.x only
+            value = scan.get(f"{q}_row_groups_{kind}")
+            if value is not None:
+                notes.append(f"{q}_row_groups_{kind}={int(value)}")
     row["notes"] = " ".join(notes)
     validate_row(row)
     return row
