@@ -14,14 +14,14 @@ Người dùng sau: PR 5 (bronze/silver: khử trùng, cửa sổ đến muộn,
 ```python
 from simkit import simulate, inject_faults, to_jsonl, bot_users, is_late, arrival_delay
 
-sim = simulate(seed=42, users=100, days=7, start=date(2026, 11, 1))   # -> Simulation
-sim.users    # tuple[SimUser(user_id, persona, email, signed_up_at)]
-sim.events   # list[dict], sắp theo occurred_at, mọi event qua eventspec.validate
+sim = simulate(seed=42, users=100, days=7, start=date(2026, 11, 1))  # -> Simulation
+sim.users  # tuple[SimUser(user_id, persona, email, signed_up_at)]
+sim.events  # list[dict], sắp theo occurred_at, mọi event qua eventspec.validate
 
-result = inject_faults(sim.events, {"duplicate": 5, "bot": 2}, seed=42)   # -> FaultResult
-result.events      # list[dict] đã chèn lỗi (input không bị sửa)
-result.faults      # tuple[FaultRecord(fault, indices, event_ids, detail)]
-result.counts()    # {"duplicate": 5, "null": 0, ..., "bot": 2}
+result = inject_faults(sim.events, {"duplicate": 5, "bot": 2}, seed=42)  # -> FaultResult
+result.events  # list[dict] đã chèn lỗi (input không bị sửa)
+result.faults  # tuple[FaultRecord(fault, indices, event_ids, detail)]
+result.counts()  # {"duplicate": 5, "null": 0, ..., "bot": 2}
 result.manifest()  # dict JSON được, xem "Manifest"
 ```
 
