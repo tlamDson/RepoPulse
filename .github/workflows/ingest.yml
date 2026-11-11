@@ -5,18 +5,20 @@ name: Ingest GH Archive
 # Fallback path (docs/probe-result.md): the landing zone is the workflow artifact
 # `landing-gharchive-<run_id>`, not a Databricks Volume. No secrets are used.
 #
-# `schedule` (cron) and `workflow_dispatch` only run once this file is on `main`, the default
-# branch, i.e. after the next release. Until then only the pull_request trigger runs it (one real
-# hour, to prove the download works). Not a required check, so `paths:` on pull_request is fine
-# here (unlike ci.yml).
+# No cron of its own: the hourly schedule lives in pipeline.yml, which runs this same ingest step
+# and then Spark + dbt. A second cron here would download every hour twice. This workflow stays
+# for manual ingest-only runs (`workflow_dispatch`, landing artifact only) and for pull requests
+# that touch the ingest code.
 #
-# Concurrency: one group per trigger with cancel-in-progress false, so scheduled runs queue
-# instead of cancelling each other. GitHub keeps at most one pending run per group, so a
-# pull_request or dispatch run must not share the cron's group: it could evict a queued hour.
+# `workflow_dispatch` only runs once this file is on `main`, the default branch, i.e. after the
+# next release. Until then only the pull_request trigger runs it (one real hour, to prove the
+# download works). Not a required check, so `paths:` on pull_request is fine here (unlike ci.yml).
+#
+# Concurrency: one group per trigger with cancel-in-progress false, so runs queue instead of
+# cancelling each other. GitHub keeps at most one pending run per group, so a pull_request run
+# must not share the dispatch group: it could evict a queued manual run.
 
 on:
-  schedule:
-    - cron: "17 * * * *"
   workflow_dispatch:
     inputs:
       date:
@@ -50,7 +52,7 @@ concurrency:
 
 jobs:
   ingest:
-    name: Ingest GH Archive (hourly)
+    name: Ingest GH Archive (ingest only)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
