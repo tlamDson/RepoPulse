@@ -24,3 +24,19 @@ repopulse:
       type: duckdb
       path: "md:repopulse"
       threads: 2
+
+    # Port Snowflake (docs/snowflake-port.md). Cần `pip install -e ".[dbt,snowflake]"`. Chỉ chạy
+    # trong .github/workflows/snowflake-port.yml. User SERVICE đăng nhập key-pair: private_key là
+    # PEM PKCS#8 không mật khẩu, đọc từ biến môi trường; không có password.
+    snowflake:
+      type: snowflake
+      account: "{{ env_var('SNOWFLAKE_ACCOUNT', '') }}"
+      user: "{{ env_var('SNOWFLAKE_USER', '') }}"
+      private_key: "{{ env_var('SNOWFLAKE_PRIVATE_KEY', '') }}"
+      role: "{{ env_var('SNOWFLAKE_ROLE', '') }}"
+      warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE', '') }}"
+      database: "{{ env_var('SNOWFLAKE_DATABASE', '') }}"
+      schema: repopulse
+      threads: 4
+      client_session_keep_alive: false
+      query_tag: repopulse-snowflake-port

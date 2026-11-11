@@ -1,10 +1,11 @@
 {#- Silver GH Archive events, columns of docs/spark-jobs.md. Source chosen by var:
-    silver_gharchive_parquet set -> read_parquet(<glob>); unset -> CI seed fixture. -#}
+    silver_gharchive_parquet set -> parquet glob (DuckDB only, macros/cross_db.sql); unset -> CI
+    seed fixture. -#}
 {%- set silver_parquet = var('silver_gharchive_parquet', none) -%}
 
 with source as (
 {%- if silver_parquet %}
-    select * from read_parquet('{{ silver_parquet | replace("'", "''") }}')
+    select * from {{ silver_parquet_relation(silver_parquet) }}
 {%- else %}
     select * from {{ ref('fixture_silver_gharchive_events') }}
 {%- endif %}
@@ -23,8 +24,8 @@ select
     cast(pr_number as bigint) as pr_number,
     cast(issue_number as bigint) as issue_number,
     cast(pr_merged as boolean) as pr_merged,
-    cast(commit_author_email_hashes as varchar[]) as commit_author_email_hashes,
-    cast(commit_author_name_hashes as varchar[]) as commit_author_name_hashes,
+    {{ cast_string_array('commit_author_email_hashes') }} as commit_author_email_hashes,
+    {{ cast_string_array('commit_author_name_hashes') }} as commit_author_name_hashes,
     cast(landing_date as date) as landing_date,
     cast(landing_hour as integer) as landing_hour,
     cast(is_late as boolean) as is_late

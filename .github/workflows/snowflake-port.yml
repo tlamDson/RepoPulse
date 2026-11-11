@@ -1,0 +1,115 @@
+name: Snowflake port
+
+# PR 13 (docs/plan.md, docs/snowflake-port.md): run the same dbt project on the Snowflake trial
+# and compare with the main DuckDB version on the same CI fixture (seed). Each `dbt build` gives
+# one runs.csv row (variants dbt-build-duckdb / dbt-build-snowflake: build time, mart times,
+# lines changed by the port). Artifact `snowflake-port`; merge it with
+# `python benchmarks/record_run.py out/snowflake-port-rows.csv`.
+#
+# Trigger:
+# - workflow_dispatch only shows in the Actions tab once this file is on `main` (after release).
+# - So `push` is limited to the branch feature/snowflake-port to run it inside this PR. No
+#   `pull_request`: Snowflake is written only by this manually started workflow. After the merge
+#   the branch is deleted and the push trigger no longer fires.
+#
+# Missing SNOWFLAKE_ACCOUNT: the Snowflake steps are skipped at step level (notice), the workflow
+# stays green and only the DuckDB row is written. Secrets enter only through `env:`; no step
+# prints them. dbt logs stay in the job log so Snowflake SQL errors can be fixed.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feature/snowflake-port]
+    paths:
+      - "transform/**"
+      - ".github/workflows/snowflake-port.yml"
+      - "benchmarks/snowflake_port*"
+      - "pyproject.toml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: snowflake-port-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  port:
+    name: dbt build (DuckDB vs Snowflake)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GIT_SHA: ${{ github.sha }}
+      DBT_SEND_ANONYMOUS_USAGE_STATS: "false"
+      SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+      SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+      SNOWFLAKE_PRIVATE_KEY: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
+      SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
+      SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+      SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE }}
+    steps:
+      # Full history: the line count diffs base_sha (benchmarks/snowflake_port.toml) against HEAD.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install
+        run: pip install -e ".[dbt,snowflake]"
+
+      - name: dbt build (DuckDB, main version)
+        run: dbt build --project-dir transform --profiles-dir transform --target ci
+
+      - name: Row dbt-build-duckdb
+        run: >-
+          python benchmarks/snowflake_port.py --engine duckdb
+          --run-results transform/target/run_results.json
+          --git-sha "$GIT_SHA"
+          --out out/snowflake-port-rows.csv
+          --summary out/snowflake-port-summary.md
+
+      - name: Snowflake secrets missing
+        if: env.SNOWFLAKE_ACCOUNT == ''
+        run: echo "::notice::Snowflake secrets are not set; skipped the Snowflake build (no dbt-build-snowflake row)."
+
+      - name: dbt debug (Snowflake)
+        if: env.SNOWFLAKE_ACCOUNT != ''
+        run: dbt debug --project-dir transform --profiles-dir transform --target snowflake
+
+      - name: dbt build (Snowflake)
+        if: env.SNOWFLAKE_ACCOUNT != ''
+        run: dbt build --project-dir transform --profiles-dir transform --target snowflake
+
+      # always(): a failed build still reports its failing nodes in the summary (no row written).
+      - name: Row dbt-build-snowflake
+        if: always() && env.SNOWFLAKE_ACCOUNT != ''
+        run: >-
+          python benchmarks/snowflake_port.py --engine snowflake
+          --run-results transform/target/run_results.json
+          --git-sha "$GIT_SHA"
+          --out out/snowflake-port-rows.csv
+          --summary out/snowflake-port-summary.md
+
+      - name: Job summary
+        if: always()
+        run: |
+          if [ -f out/snowflake-port-summary.md ]; then
+            cat out/snowflake-port-summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No port summary (the run stopped before the first row)." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: snowflake-port
+          path: |
+            out/snowflake-port-rows.csv
+            out/snowflake-port-summary.md
+          if-no-files-found: warn
+          retention-days: 90

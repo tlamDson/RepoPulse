@@ -30,8 +30,8 @@ people as (
     select
         repo_name,
         count(*) as contributors,
-        count(*) filter (where weeks >= 2) as multi_week,
-        max(n)::double / sum(n) as top1_share
+        count(case when weeks >= 2 then 1 end) as multi_week,
+        cast(max(n) as double) / sum(n) as top1_share
     from per_actor
     group by repo_name
 ),
@@ -41,8 +41,8 @@ opened as (
         repo_name,
         item_number,
         case when type = 'IssuesEvent' then 'issue' else 'pull_request' end as item_type,
-        arg_min(actor_login, created_at) as opener,
-        arg_min(is_bot, created_at) as opener_is_bot,
+        min_by(actor_login, created_at) as opener,
+        min_by(is_bot, created_at) as opener_is_bot,
         min(created_at) as opened_at
     from ev
     where action = 'opened' and type in ('IssuesEvent', 'PullRequestEvent')
@@ -54,23 +54,24 @@ item_flags as (
     select
         o.repo_name,
         o.item_type,
-        bool_or(
+        -- "any row matches" as max(0/1) = 1: bool_or is DuckDB-only (Snowflake: boolor_agg).
+        max(case when
             x.type in (
                 'IssueCommentEvent', 'PullRequestReviewEvent', 'PullRequestReviewCommentEvent'
             )
             and not x.is_bot and x.actor_login <> o.opener
-        ) as responded,
-        bool_or(
+        then 1 else 0 end) = 1 as responded,
+        max(case when
             (o.item_type = 'issue' and x.type = 'IssuesEvent' and x.action = 'closed')
             or (
                 o.item_type = 'pull_request' and x.type = 'PullRequestEvent'
                 and x.action in ('closed', 'merged')
             )
-        ) as closed,
-        bool_or(
+        then 1 else 0 end) = 1 as closed,
+        max(case when
             o.item_type = 'pull_request' and x.type = 'PullRequestEvent'
             and (x.action = 'merged' or (x.action = 'closed' and x.pr_merged))
-        ) as merged
+        then 1 else 0 end) = 1 as merged
     from opened as o
     left join ev as x
         on x.repo_name = o.repo_name
@@ -84,10 +85,10 @@ items as (
     select
         repo_name,
         count(*) as opened,
-        count(*) filter (where responded) as responded,
-        count(*) filter (where closed) as closed,
-        count(*) filter (where item_type = 'pull_request') as prs_opened,
-        count(*) filter (where merged) as prs_merged
+        count(case when responded then 1 end) as responded,
+        count(case when closed then 1 end) as closed,
+        count(case when item_type = 'pull_request' then 1 end) as prs_opened,
+        count(case when merged then 1 end) as prs_merged
     from item_flags
     group by repo_name
 ),
@@ -100,12 +101,12 @@ components as (
     select
         s.repo_name,
         coalesce(
-            p.contributors::double / nullif(max(p.contributors) over (), 0), 0
+            cast(p.contributors as double) / nullif(max(p.contributors) over (), 0), 0
         ) as activity,
-        coalesce(p.multi_week::double / p.contributors, 0) as retention,
-        coalesce(i.prs_merged::double / nullif(i.prs_opened, 0), 0) as merge,
-        coalesce(i.responded::double / nullif(i.opened, 0), 0) as response,
-        coalesce(i.closed::double / nullif(i.opened, 0), 0) as close,
+        coalesce(cast(p.multi_week as double) / p.contributors, 0) as retention,
+        coalesce(cast(i.prs_merged as double) / nullif(i.prs_opened, 0), 0) as merge_rate,
+        coalesce(cast(i.responded as double) / nullif(i.opened, 0), 0) as response,
+        coalesce(cast(i.closed as double) / nullif(i.opened, 0), 0) as close_rate,
         coalesce(1 - p.top1_share, 0) as diversity
     from scored_repos as s
     left join people as p using (repo_name)
@@ -116,8 +117,8 @@ scores as (
     select
         *,
         100 * (
-            0.25 * activity + 0.15 * retention + 0.15 * merge + 0.20 * response
-            + 0.10 * close + 0.15 * diversity
+            0.25 * activity + 0.15 * retention + 0.15 * merge_rate + 0.20 * response
+            + 0.10 * close_rate + 0.15 * diversity
         ) as score
     from components
 )
@@ -128,9 +129,9 @@ select
     cast(r.category as varchar) as category,
     cast(round(s.activity, 4) as double) as activity_score,
     cast(round(s.retention, 4) as double) as retention_score,
-    cast(round(s.merge, 4) as double) as merge_score,
+    cast(round(s.merge_rate, 4) as double) as merge_score,
     cast(round(s.response, 4) as double) as response_score,
-    cast(round(s.close, 4) as double) as close_score,
+    cast(round(s.close_rate, 4) as double) as close_score,
     cast(round(s.diversity, 4) as double) as diversity_score,
     cast(round(s.score, 2) as double) as health_score
 from scores as s

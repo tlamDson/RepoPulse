@@ -47,6 +47,6 @@ select
     ) as valid_to,
     lead(valid_from) over (partition by actor_id order by version_number) is null as is_current,
     coalesce(
-        ends_with(lower(actor_login), '[bot]') or ends_with(lower(actor_login), '-bot'), false
+        right(lower(actor_login), 5) = '[bot]' or right(lower(actor_login), 4) = '-bot', false
     ) as is_bot
 from versions

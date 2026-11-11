@@ -1,0 +1,4 @@
+# Snowflake port (PR 13, docs/snowflake-port.md).
+# base_sha: head of develop before the port. Lines changed by the port =
+# added + deleted of `git diff --numstat <base_sha> HEAD -- transform` (binary files skipped).
+base_sha = "475c2bd05c52b89e4c3dc33c4d7d32e292cc629c"

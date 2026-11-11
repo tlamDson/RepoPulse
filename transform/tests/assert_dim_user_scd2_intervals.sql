@@ -5,7 +5,7 @@ with v as (
     select
         *,
         lead(valid_from) over (partition by actor_id order by version_number) as next_from,
-        count(*) filter (where is_current) over (partition by actor_id) as n_current,
+        count(case when is_current then 1 end) over (partition by actor_id) as n_current,
         row_number() over (partition by actor_id order by valid_from, version_number) as rn
     from {{ ref('dim_user') }}
 )
