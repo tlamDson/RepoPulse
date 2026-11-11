@@ -1372,7 +1372,17 @@ def _parser() -> argparse.ArgumentParser:
 _COMMANDS = {"faults": _cmd_faults, "check": _cmd_check, "gap": _cmd_gap, "alert": _cmd_alert}
 
 
+def _tolerant_output() -> None:
+    """Issue text is Vietnamese: never crash on a console without those letters (cp1252)."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="backslashreplace")
+        except (AttributeError, ValueError):
+            pass
+
+
 def main(argv: Sequence[str] | None = None) -> int:
+    _tolerant_output()
     args = _parser().parse_args(argv)
     try:
         cfg = load_config(args.config)

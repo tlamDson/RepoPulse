@@ -1076,6 +1076,20 @@ def test_cli_alert_dry_run_prints_and_never_calls_gh(tmp_path, monkeypatch, caps
     assert q.marker(volume_alert()) in capsys.readouterr().out
 
 
+def test_cli_alert_dry_run_survives_a_non_utf8_console(tmp_path, monkeypatch):
+    # Windows consoles default to cp1252, which has no Vietnamese letters of the template.
+    import io
+    import sys
+
+    stream = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
+    monkeypatch.setattr(sys, "stdout", stream)
+    report = tmp_path / "r.json"
+    report.write_text(json.dumps({"alerts": [volume_alert().to_dict()]}), encoding="utf-8")
+    code = q.main(["alert", "--report", str(report), "--run-url", RUN_URL, "--dry-run"])
+    stream.flush()
+    assert code == 0
+
+
 def test_cli_alert_uses_the_injected_gh(tmp_path, monkeypatch):
     gh = FakeGh()
     monkeypatch.setattr(q, "run_gh", gh)
