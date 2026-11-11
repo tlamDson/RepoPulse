@@ -49,7 +49,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - run: pip install -e ".[dev,spark]"
+      - run: pip install -e ".[dev,spark,dbt]"
       - run: pytest
 
   dbt:

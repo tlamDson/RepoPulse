@@ -1,0 +1,297 @@
+version: 2
+
+# Q1-Q6 marts. Column names, meaning and results are those of benchmarks/queries/qN.sql (the
+# definitions live there); tests/test_dbt_marts.py compares each mart with its query, row by row.
+# Actors are identified by the login of the dim_user version valid at the event, like the
+# baseline's actor.login.
+
+models:
+  - name: mart_daily_active_contributors
+    description: Q1 (q1.sql). Active human contributors per day and ISO week, per repo and category, new vs returning.
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: period
+        data_type: varchar
+        constraints:
+          - type: not_null
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [day, week]
+      - name: period_start
+        data_type: date
+        constraints:
+          - type: not_null
+      - name: scope
+        data_type: varchar
+        constraints:
+          - type: not_null
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [repo, category]
+      - name: scope_key
+        data_type: varchar
+        constraints:
+          - type: not_null
+      - name: active_contributors
+        data_type: bigint
+        constraints:
+          - type: not_null
+      - name: new_contributors
+        data_type: bigint
+        constraints:
+          - type: not_null
+      - name: returning_contributors
+        data_type: bigint
+        constraints:
+          - type: not_null
+
+  - name: mart_cohort_retention
+    description: Q2 (q2.sql). Cohort = ISO week of the first human PR opened on a seed repo; retained at exactly W+4 / W+12.
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: cohort_week
+        data_type: date
+        constraints:
+          - type: not_null
+        data_tests:
+          - unique
+      - name: cohort_size
+        data_type: bigint
+        constraints:
+          - type: not_null
+      - name: retained_w4
+        data_type: bigint
+        constraints:
+          - type: not_null
+      - name: retained_w12
+        data_type: bigint
+        constraints:
+          - type: not_null
+      - name: retention_w4_pct
+        data_type: double
+      - name: retention_w12_pct
+        data_type: double
+
+  - name: mart_contribution_funnel
+    description: Q3 (q3.sql). Fork -> PR opened -> PR merged per repo; hours to first merge p50/p90.
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: repo_name
+        data_type: varchar
+        constraints:
+          - type: not_null
+        data_tests:
+          - unique
+          - relationships:
+              arguments:
+                to: ref('dim_repo')
+                field: repo_name
+      - name: category
+        data_type: varchar
+        constraints:
+          - type: not_null
+      - name: forkers
+        data_type: bigint
+        constraints:
+          - type: not_null
+      - name: forkers_with_pr
+        data_type: bigint
+        constraints:
+          - type: not_null
+      - name: forkers_with_merge
+        data_type: bigint
+        constraints:
+          - type: not_null
+      - name: prs_opened
+        data_type: bigint
+        constraints:
+          - type: not_null
+      - name: prs_merged
+        data_type: bigint
+        constraints:
+          - type: not_null
+      - name: merge_hours_p50
+        data_type: double
+      - name: merge_hours_p90
+        data_type: double
+
+  - name: mart_responsiveness
+    description: Q4 (q4.sql). First human response time p50/p90 and close rate per repo and item type.
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: repo_name
+        data_type: varchar
+        constraints:
+          - type: not_null
+      - name: item_type
+        data_type: varchar
+        constraints:
+          - type: not_null
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [issue, pull_request]
+      - name: opened
+        data_type: bigint
+        constraints:
+          - type: not_null
+      - name: responded
+        data_type: bigint
+        constraints:
+          - type: not_null
+      - name: response_hours_p50
+        data_type: double
+      - name: response_hours_p90
+        data_type: double
+      - name: closed
+        data_type: bigint
+        constraints:
+          - type: not_null
+      - name: close_rate_pct
+        data_type: double
+
+  - name: mart_repo_concentration
+    description: Q5 (q5.sql). Bus factor (top-N human share) and bot share per repo.
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: repo_name
+        data_type: varchar
+        constraints:
+          - type: not_null
+        data_tests:
+          - unique
+      - name: category
+        data_type: varchar
+        constraints:
+          - type: not_null
+      - name: contributions
+        data_type: bigint
+        constraints:
+          - type: not_null
+      - name: bot_contributions
+        data_type: bigint
+        constraints:
+          - type: not_null
+      - name: bot_share_pct
+        data_type: double
+      - name: human_contributors
+        data_type: bigint
+        constraints:
+          - type: not_null
+      - name: top1_share_pct
+        data_type: double
+      - name: top2_share_pct
+        data_type: double
+      - name: top3_share_pct
+        data_type: double
+
+  - name: mart_repo_health_score
+    description: >
+      Q6 (q6.sql). Health score per repo from Q1-Q5 components; the formula is documented in
+      benchmarks/queries/q6.sql and docs/dbt-models.md.
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: health_rank
+        data_type: bigint
+        constraints:
+          - type: not_null
+        data_tests:
+          - unique
+      - name: repo_name
+        data_type: varchar
+        constraints:
+          - type: not_null
+        data_tests:
+          - unique
+      - name: category
+        data_type: varchar
+        constraints:
+          - type: not_null
+      - name: activity_score
+        data_type: double
+      - name: retention_score
+        data_type: double
+      - name: merge_score
+        data_type: double
+      - name: response_score
+        data_type: double
+      - name: close_score
+        data_type: double
+      - name: diversity_score
+        data_type: double
+      - name: health_score
+        data_type: double
+
+unit_tests:
+  - name: cohort_is_first_pr_week_and_retention_is_exact_w4_w12
+    description: >
+      Cohort = week of the first human PR opened (a later PR does not move it); retained only
+      when active in exactly W+4 / W+12 (W+5 does not count); bots and actors without a PR are
+      not in any cohort.
+    model: mart_cohort_retention
+    given:
+      - input: ref('int_events_enriched')
+        rows:
+          - {actor_login: alice, is_bot: false, event_type: PullRequestEvent, action: opened, event_week: "2026-01-05"}
+          - {actor_login: alice, is_bot: false, event_type: PullRequestEvent, action: opened, event_week: "2026-01-12"}
+          - {actor_login: alice, is_bot: false, event_type: IssueCommentEvent, action: created, event_week: "2026-02-02"}
+          - {actor_login: bob, is_bot: false, event_type: PullRequestEvent, action: opened, event_week: "2026-01-05"}
+          - {actor_login: bob, is_bot: false, event_type: IssuesEvent, action: opened, event_week: "2026-03-30"}
+          - {actor_login: carol, is_bot: false, event_type: PullRequestEvent, action: opened, event_week: "2026-01-12"}
+          - {actor_login: carol, is_bot: false, event_type: IssueCommentEvent, action: created, event_week: "2026-02-16"}
+          - {actor_login: carol, is_bot: false, event_type: ForkEvent, action: forked, event_week: "2026-02-09"}
+          - {actor_login: "x[bot]", is_bot: true, event_type: PullRequestEvent, action: opened, event_week: "2026-01-05"}
+          - {actor_login: dave, is_bot: false, event_type: IssueCommentEvent, action: created, event_week: "2026-01-05"}
+    expect:
+      rows:
+        - {cohort_week: "2026-01-05", cohort_size: 2, retained_w4: 1, retained_w12: 1,
+           retention_w4_pct: 50.0, retention_w12_pct: 50.0}
+        - {cohort_week: "2026-01-12", cohort_size: 1, retained_w4: 0, retained_w12: 0,
+           retention_w4_pct: 0.0, retention_w12_pct: 0.0}
+
+  - name: funnel_counts_forkers_prs_and_merge_hours
+    description: >
+      u1 forks then opens #1 (merged 2 h later via action merged); u2 opened #2 before forking
+      (counts as a PR, not as a forker with PR; merged 10 h later via closed + pr_merged); #3 never
+      merged; the bot PR #4 is excluded; org/b has only a fork; org/c has no events and is absent.
+      p50 = (2 + 10) / 2 = 6.0, p90 = 2 + 0.9 * 8 = 9.2.
+    model: mart_contribution_funnel
+    given:
+      - input: ref('dim_repo')
+        rows:
+          - {repo_key: org/a, repo_name: org/a, category: compute}
+          - {repo_key: org/b, repo_name: org/b, category: bi}
+          - {repo_key: org/c, repo_name: org/c, category: bi}
+      - input: ref('int_events_enriched')
+        rows:
+          - {repo_name: org/a, actor_login: u1, is_bot: false, event_type: ForkEvent, action: forked, created_at: "2026-01-01 00:00:00"}
+          - {repo_name: org/a, actor_login: u1, is_bot: false, event_type: PullRequestEvent, action: opened, pr_number: 1, created_at: "2026-01-01 01:00:00"}
+          - {repo_name: org/a, actor_login: m, is_bot: false, event_type: PullRequestEvent, action: merged, pr_number: 1, created_at: "2026-01-01 03:00:00"}
+          - {repo_name: org/a, actor_login: u2, is_bot: false, event_type: ForkEvent, action: forked, created_at: "2026-01-01 00:00:00"}
+          - {repo_name: org/a, actor_login: u2, is_bot: false, event_type: PullRequestEvent, action: opened, pr_number: 2, created_at: "2025-12-31 23:00:00"}
+          - {repo_name: org/a, actor_login: m, is_bot: false, event_type: PullRequestEvent, action: closed, pr_number: 2, pr_merged: true, created_at: "2026-01-01 09:00:00"}
+          - {repo_name: org/a, actor_login: u3, is_bot: false, event_type: PullRequestEvent, action: opened, pr_number: 3, created_at: "2026-01-02 00:00:00"}
+          - {repo_name: org/a, actor_login: m, is_bot: false, event_type: PullRequestEvent, action: closed, pr_number: 3, pr_merged: false, created_at: "2026-01-02 05:00:00"}
+          - {repo_name: org/a, actor_login: "x[bot]", is_bot: true, event_type: PullRequestEvent, action: opened, pr_number: 4, created_at: "2026-01-02 00:00:00"}
+          - {repo_name: org/a, actor_login: m, is_bot: false, event_type: PullRequestEvent, action: merged, pr_number: 4, created_at: "2026-01-02 01:00:00"}
+          - {repo_name: org/b, actor_login: u4, is_bot: false, event_type: ForkEvent, action: forked, created_at: "2026-01-03 00:00:00"}
+    expect:
+      rows:
+        - {repo_name: org/a, category: compute, forkers: 2, forkers_with_pr: 1, forkers_with_merge: 1,
+           prs_opened: 3, prs_merged: 2, merge_hours_p50: 6.0, merge_hours_p90: 9.2}
+        - {repo_name: org/b, category: bi, forkers: 1, forkers_with_pr: 0, forkers_with_merge: 0,
+           prs_opened: 0, prs_merged: 0, merge_hours_p50: null, merge_hours_p90: null}
