@@ -59,6 +59,10 @@ python -m repopulse.spark.job --source gharchive --date 2026-01-05 --hour 16 --h
 python -m repopulse.spark.export --lake-dir data/lake --out data/silver-export   # silver Delta -> parquet cho dbt (var silver_gharchive_parquet)
 python -m repopulse.pipeline {window,timed,counts,row,md-reset} --help   # helper của .github/workflows/pipeline.yml (incremental batch theo giờ); docs/pipeline.md
 python -m dbt.cli.main build --project-dir transform --profiles-dir transform --target ci --full-refresh   # dựng lại fct_events (staging giữ lịch sử); khi nào cần: docs/dbt-models.md
+python -m repopulse.quality faults --seed 42 --users 30 --days 2 --clean-runs 2 --git-sha <sha> --report out/dq-faults.json --out out/dq-fault-row.csv   # 6 lỗi simkit (simulated) qua Spark; exit 1 khi sót lỗi/báo động giả (cần PII_HASH_SALT, Java 17); docs/data-quality.md
+python -m repopulse.quality check --database ci.duckdb --report out/dq-report.json   # khối lượng + độ tươi của stg_gharchive_events (md:repopulse cần MOTHERDUCK_TOKEN); ngưỡng ở repopulse/quality.toml
+python -m repopulse.quality gap --ingest --report out/dq-gap.json   # giờ GH Archive thiếu đã biết phải bị bắt (giờ khai ở [volume.reference])
+python -m repopulse.quality alert --report out/dq-report.json --run-url <url> --dry-run   # Issue data-incident; bỏ --dry-run thì gọi gh (GH_TOKEN), một issue mở mỗi loại kiểm tra
 
 python -m repopulse.export_site --db ci.duckdb --runs runs.csv --out _site   # 6 mart public + runs.csv -> trang + CSV Tableau; thiếu mart/cột thì exit 1 (docs/dashboard.md)
 python -m http.server 8000 --bind 127.0.0.1 --directory _site                # xem thử trang local
