@@ -394,6 +394,37 @@ def test_reset_refuses_anything_but_a_smoke_database(name):
         pipeline.reset_smoke_database(name, connect=connect)
 
 
-def test_cli_md_reset_refuses_production_database(capsys):
-    assert pipeline.main(["md-reset", "--database", "repopulse"]) == 1
-    assert "repopulse" in capsys.readouterr().err
+@pytest.mark.parametrize("name", ["repopulse", "prod"])
+def test_cli_md_reset_refuses_production_database(name, monkeypatch, capsys):
+    # The CLI path takes duckdb.connect by attribute lookup; stub it so a broken guard turns this
+    # test red instead of dropping a real MotherDuck database.
+    targets: list[str] = []
+
+    def refuse(target, *args, **kwargs):
+        targets.append(target)
+        raise AssertionError("must not connect")
+
+    monkeypatch.setattr(duckdb, "connect", refuse)
+    assert pipeline.main(["md-reset", "--database", name]) == 1
+    assert name in capsys.readouterr().err
+    assert targets == []
+
+
+def test_cli_md_reset_uses_the_stubbed_connect(monkeypatch):
+    # Proof that the stub point above is the one the CLI really uses. Only repopulse_smoke here:
+    # if the stub were bypassed, the database touched is the throwaway smoke one.
+    log: list[str] = []
+    targets: list[str] = []
+
+    def connect(target, *args, **kwargs):
+        targets.append(target)
+        return FakeConnection(log)
+
+    monkeypatch.setattr(duckdb, "connect", connect)
+    assert pipeline.main(["md-reset", "--database", "repopulse_smoke"]) == 0
+    assert targets == ["md:"]
+    assert log == [
+        "DROP DATABASE IF EXISTS repopulse_smoke",
+        "CREATE DATABASE repopulse_smoke",
+        "close",
+    ]
