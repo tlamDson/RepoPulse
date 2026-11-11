@@ -29,10 +29,17 @@ seed repos_data_ecosystem ──► gold.dim_repo   │
    active_      cohort_  contrib-  responsiveness concentration  health_score
    contributors retention ution_funnel
    (Q1)         (Q2)     (Q3)      (Q4)           (Q5)           (Q6)
+
+gold.{dim_repo, dim_user, fct_events, 6 mart}
+                         │  pub_* (table, alias = tên gold)
+                         ▼
+     public.{dim_repo, 6 mart}            đi thẳng (toàn cột pii: none)
+     public.{dim_user, fct_events}        user_key / actor_id / actor_login che bằng mask_pii
 ```
 
-Schema trên DuckDB: `main` (seed), `main_staging`, `main_intermediate`, `main_gold` (dbt ghép
-`<schema target>_<schema tuỳ chỉnh>`).
+Schema trên DuckDB: `main` (seed), `main_staging`, `main_intermediate`, `main_gold`, `main_public`
+(dbt ghép `<schema target>_<schema tuỳ chỉnh>`). `main_public` là thứ duy nhất vai `public`
+(dashboard, Tableau Public) được đọc; nhãn PII, vai và cách che: `docs/governance.md`.
 
 ## Chọn nguồn bằng var
 
@@ -49,7 +56,7 @@ python -m dbt.cli.main build --project-dir transform --profiles-dir transform --
 Seed `fixture_silver_gharchive_events` là **fixture cho CI, không phải số đo**: 36 event viết tay
 (`tests/fixtures/gharchive_small` đã khử trùng theo `id` + `tests/fixtures/gharchive_scd2`) theo
 đúng cột của `silver/gharchive_events` (`docs/spark-jobs.md`). Sinh lại từ JSON bằng
-`silver_select_sql` trong `tests/test_dbt_marts.py`; test
+`silver_select_sql` trong `tests/dbt_helpers.py`; test
 `test_ci_seed_equals_silver_built_from_fixture_json` khẳng định seed bằng đúng dữ liệu đó (từng
 `event_id`, từng cột). Parquet mà pytest tạo có thêm `tests/fixtures/gharchive_parquet_only` (3
 event không có trong seed, gồm ca đổi login cùng giây), nên test phân biệt được đường đọc parquet
@@ -129,9 +136,14 @@ Khác biệt với baseline:
 | Loại | Ở đâu | Kiểm gì |
 |---|---|---|
 | Contract | `contract: {enforced: true}` cho `fct_events`, `dim_user`, `dim_repo` và 6 mart | Tên cột, kiểu, `not_null` |
-| Generic | `models/**/_*.yml` | `not_null`, `unique`, `relationships` (fct → dim, funnel → dim_repo), `accepted_values` |
+| Generic | `models/**/_*.yml` | `not_null`, `unique`, `relationships` (fct → dim, funnel → dim_repo, public fct → public dim_user), `accepted_values` |
+| Generic tự viết | `transform/tests/generic/` | `hashed_pii`: cột hash của staging và cột đã che ở public chỉ chứa SHA-256 hex 64 ký tự (silver quên băm thì build đỏ, model sau SKIP); `no_raw_email`: cột nhãn khác `none` ở gold/public không chứa email (`docs/governance.md`) |
 | Singular | `transform/tests/` | Khoảng hiệu lực SCD2 không hở, không chồng, đúng một phiên bản hiện tại; fct trỏ đúng phiên bản; fct đủ mọi event trên repo seed, mỗi event một lần |
 | Unit (`unit_tests:`) | `_gold.yml`, `_marts.yml` | SCD2 (đổi login → 2 phiên bản; `a → b → a` → 3; đổi login cùng giây → phiên bản độ dài 0), `fct_events` chọn phiên bản theo cận `valid_from` (`a → b → a`) và ở ca cùng giây, cohort Q2, funnel Q3 |
 | pytest | `tests/test_dbt_marts.py` | So khớp 6 mart với `qN.sql` từng dòng từng cột; vi phạm contract làm `dbt build` thoát mã khác 0; gold không có cột/giá trị email; build lại cùng đầu vào cho cùng số dòng |
+| pytest | `tests/test_governance.py` | Nhãn `meta.pii` đủ và đúng policy (`check`), không email thô ở gold/public (`scan`), silver chưa băm làm build đỏ, che cột ở public đúng công thức `hash_pii`, public = gold về số dòng và join |
+
+Build dùng chung cho hai file pytest là fixture session `built` trong `tests/conftest.py`; helper
+(`run_dbt`, `write_profiles`, `silver_select_sql`, …) ở `tests/dbt_helpers.py`.
 
 Không có số đo nào trong tài liệu này; số đo chỉ lấy từ `runs.csv`.

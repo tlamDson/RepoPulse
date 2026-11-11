@@ -4,6 +4,8 @@ version: 2
 # definitions live there); tests/test_dbt_marts.py compares each mart with its query, row by row.
 # Actors are identified by the login of the dim_user version valid at the event, like the
 # baseline's actor.login.
+# meta.pii: every mart column is an aggregate or a repo/category name, so pii: none
+# (transform/governance.yml, docs/governance.md).
 
 models:
   - name: mart_daily_active_contributors
@@ -13,6 +15,7 @@ models:
         enforced: true
     columns:
       - name: period
+        config: {meta: {pii: none}}
         data_type: varchar
         constraints:
           - type: not_null
@@ -21,10 +24,12 @@ models:
               arguments:
                 values: [day, week]
       - name: period_start
+        config: {meta: {pii: none}}
         data_type: date
         constraints:
           - type: not_null
       - name: scope
+        config: {meta: {pii: none}}
         data_type: varchar
         constraints:
           - type: not_null
@@ -33,18 +38,22 @@ models:
               arguments:
                 values: [repo, category]
       - name: scope_key
+        config: {meta: {pii: none}}
         data_type: varchar
         constraints:
           - type: not_null
       - name: active_contributors
+        config: {meta: {pii: none}}
         data_type: bigint
         constraints:
           - type: not_null
       - name: new_contributors
+        config: {meta: {pii: none}}
         data_type: bigint
         constraints:
           - type: not_null
       - name: returning_contributors
+        config: {meta: {pii: none}}
         data_type: bigint
         constraints:
           - type: not_null
@@ -56,26 +65,32 @@ models:
         enforced: true
     columns:
       - name: cohort_week
+        config: {meta: {pii: none}}
         data_type: date
         constraints:
           - type: not_null
         data_tests:
           - unique
       - name: cohort_size
+        config: {meta: {pii: none}}
         data_type: bigint
         constraints:
           - type: not_null
       - name: retained_w4
+        config: {meta: {pii: none}}
         data_type: bigint
         constraints:
           - type: not_null
       - name: retained_w12
+        config: {meta: {pii: none}}
         data_type: bigint
         constraints:
           - type: not_null
       - name: retention_w4_pct
+        config: {meta: {pii: none}}
         data_type: double
       - name: retention_w12_pct
+        config: {meta: {pii: none}}
         data_type: double
 
   - name: mart_contribution_funnel
@@ -85,6 +100,7 @@ models:
         enforced: true
     columns:
       - name: repo_name
+        config: {meta: {pii: none}}
         data_type: varchar
         constraints:
           - type: not_null
@@ -95,32 +111,40 @@ models:
                 to: ref('dim_repo')
                 field: repo_name
       - name: category
+        config: {meta: {pii: none}}
         data_type: varchar
         constraints:
           - type: not_null
       - name: forkers
+        config: {meta: {pii: none}}
         data_type: bigint
         constraints:
           - type: not_null
       - name: forkers_with_pr
+        config: {meta: {pii: none}}
         data_type: bigint
         constraints:
           - type: not_null
       - name: forkers_with_merge
+        config: {meta: {pii: none}}
         data_type: bigint
         constraints:
           - type: not_null
       - name: prs_opened
+        config: {meta: {pii: none}}
         data_type: bigint
         constraints:
           - type: not_null
       - name: prs_merged
+        config: {meta: {pii: none}}
         data_type: bigint
         constraints:
           - type: not_null
       - name: merge_hours_p50
+        config: {meta: {pii: none}}
         data_type: double
       - name: merge_hours_p90
+        config: {meta: {pii: none}}
         data_type: double
 
   - name: mart_responsiveness
@@ -130,10 +154,12 @@ models:
         enforced: true
     columns:
       - name: repo_name
+        config: {meta: {pii: none}}
         data_type: varchar
         constraints:
           - type: not_null
       - name: item_type
+        config: {meta: {pii: none}}
         data_type: varchar
         constraints:
           - type: not_null
@@ -142,22 +168,28 @@ models:
               arguments:
                 values: [issue, pull_request]
       - name: opened
+        config: {meta: {pii: none}}
         data_type: bigint
         constraints:
           - type: not_null
       - name: responded
+        config: {meta: {pii: none}}
         data_type: bigint
         constraints:
           - type: not_null
       - name: response_hours_p50
+        config: {meta: {pii: none}}
         data_type: double
       - name: response_hours_p90
+        config: {meta: {pii: none}}
         data_type: double
       - name: closed
+        config: {meta: {pii: none}}
         data_type: bigint
         constraints:
           - type: not_null
       - name: close_rate_pct
+        config: {meta: {pii: none}}
         data_type: double
 
   - name: mart_repo_concentration
@@ -167,34 +199,43 @@ models:
         enforced: true
     columns:
       - name: repo_name
+        config: {meta: {pii: none}}
         data_type: varchar
         constraints:
           - type: not_null
         data_tests:
           - unique
       - name: category
+        config: {meta: {pii: none}}
         data_type: varchar
         constraints:
           - type: not_null
       - name: contributions
+        config: {meta: {pii: none}}
         data_type: bigint
         constraints:
           - type: not_null
       - name: bot_contributions
+        config: {meta: {pii: none}}
         data_type: bigint
         constraints:
           - type: not_null
       - name: bot_share_pct
+        config: {meta: {pii: none}}
         data_type: double
       - name: human_contributors
+        config: {meta: {pii: none}}
         data_type: bigint
         constraints:
           - type: not_null
       - name: top1_share_pct
+        config: {meta: {pii: none}}
         data_type: double
       - name: top2_share_pct
+        config: {meta: {pii: none}}
         data_type: double
       - name: top3_share_pct
+        config: {meta: {pii: none}}
         data_type: double
 
   - name: mart_repo_health_score
@@ -206,34 +247,44 @@ models:
         enforced: true
     columns:
       - name: health_rank
+        config: {meta: {pii: none}}
         data_type: bigint
         constraints:
           - type: not_null
         data_tests:
           - unique
       - name: repo_name
+        config: {meta: {pii: none}}
         data_type: varchar
         constraints:
           - type: not_null
         data_tests:
           - unique
       - name: category
+        config: {meta: {pii: none}}
         data_type: varchar
         constraints:
           - type: not_null
       - name: activity_score
+        config: {meta: {pii: none}}
         data_type: double
       - name: retention_score
+        config: {meta: {pii: none}}
         data_type: double
       - name: merge_score
+        config: {meta: {pii: none}}
         data_type: double
       - name: response_score
+        config: {meta: {pii: none}}
         data_type: double
       - name: close_score
+        config: {meta: {pii: none}}
         data_type: double
       - name: diversity_score
+        config: {meta: {pii: none}}
         data_type: double
       - name: health_score
+        config: {meta: {pii: none}}
         data_type: double
 
 unit_tests:
