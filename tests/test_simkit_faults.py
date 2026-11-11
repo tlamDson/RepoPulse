@@ -22,6 +22,7 @@ from simkit import (
     simulate,
     to_jsonl,
 )
+from simkit.faults import BOT_EVENTS_RANGE, BOT_GAP_MS
 
 START = date(2026, 11, 1)
 ALL = {"duplicate": 4, "null": 3, "wrong_type": 3, "late": 4, "schema_drift": 3, "bot": 2}
@@ -192,6 +193,46 @@ def test_every_event_can_be_made_late_past_the_threshold(clean):
     assert all(d is not None and d > LATE_THRESHOLD for d in delays)
     assert all(validate(e) == [] for e in result.events)
     assert sorted(e["event_id"] for e in result.events) == sorted(e["event_id"] for e in clean)
+
+
+@pytest.mark.parametrize("seed", [1, 2, 3])
+def test_late_events_sit_where_they_arrive(clean, seed):
+    result = inject_faults(clean, {"late": len(clean) // 4}, seed=seed)
+    late = set(indices(result, "late"))
+    assert len(late) == len(clean) // 4
+    on_time = [i for i in range(len(result.events)) if i not in late]
+    moved = 0
+    for i in sorted(late):
+        occurred = parse_ts(result.events[i]["occurred_at"])
+        received = parse_ts(result.events[i]["received_at"])
+        before = [j for j in on_time if j < i]
+        after = [j for j in on_time if j > i]
+        if before:
+            assert parse_ts(result.events[before[-1]]["occurred_at"]) <= received
+        if after:
+            assert parse_ts(result.events[after[0]]["occurred_at"]) > received
+        # every on-time event that happened while this one was in flight comes before it
+        in_flight = [
+            j for j in on_time if occurred < parse_ts(result.events[j]["occurred_at"]) <= received
+        ]
+        assert all(j < i for j in in_flight)
+        moved += bool(in_flight)
+    assert moved > len(late) // 2
+
+
+def test_bot_burst_always_fits_in_one_minute():
+    assert BOT_EVENTS_RANGE[0] > BOT_EVENTS_PER_MINUTE
+    assert (BOT_EVENTS_RANGE[1] - 1) * BOT_GAP_MS[1] < 60_000
+
+
+def test_existing_duplicate_is_not_eligible(clean):
+    copy_of = copy.deepcopy(clean[5])
+    events = [*clean, copy_of]
+    with pytest.raises(ValueError, match="eligible"):
+        inject_faults(events, {"null": len(clean) + 1}, seed=1)
+    result = inject_faults(events, {"null": len(clean)}, seed=1)
+    assert len(clean) not in indices(result, "null")
+    assert result.events[-1] == copy_of
 
 
 def records_by_index(result):
