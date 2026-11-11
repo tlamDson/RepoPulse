@@ -15,7 +15,7 @@
   const fmtInt = nf({ maximumFractionDigits: 0 });
   const fmt1 = nf({ minimumFractionDigits: 1, maximumFractionDigits: 1 });
   const fmt2 = nf({ maximumFractionDigits: 2 });
-  const fmt3 = nf({ minimumFractionDigits: 3, maximumFractionDigits: 3 });
+  const fmt4 = nf({ maximumFractionDigits: 4 });
   const fmtCompact = nf({ notation: "compact", maximumFractionDigits: 1 });
   const FORMAT = {
     text: (v) => String(v),
@@ -23,7 +23,7 @@
     int: (v) => fmtInt.format(v),
     pct: (v) => fmt1.format(v) + "%",
     hours: (v) => fmt1.format(v) + " h",
-    score: (v) => fmt3.format(v),
+    score: (v) => fmt4.format(v),
     secs: (v) => fmt2.format(v) + " s",
   };
   const NUMERIC = new Set(["int", "pct", "hours", "score", "secs"]);
@@ -286,9 +286,17 @@
       root.append(svg("text", { class: "tick", x: m.left - 6, y: y + 4, "text-anchor": "end" }, fmtTick(v)));
     }
     root.append(svg("line", { class: "axis-line", x1: m.left, x2: width - m.right, y1: ys(0), y2: ys(0) }));
+    // Date ticks: evenly spaced in time, snapped to data days, never closer than minGap px.
+    const minGap = 72;
     const n = Math.min(x.length, Math.max(2, Math.floor(pw / 96)));
-    const tickIdx = new Set();
-    for (let k = 0; k < n; k += 1) tickIdx.add(n === 1 ? 0 : Math.round((k * (x.length - 1)) / (n - 1)));
+    const tickIdx = [];
+    for (let k = 0; k < n; k += 1) {
+      const target = n === 1 ? t0 : t0 + ((t1 - t0) * k) / (n - 1);
+      let best = 0;
+      for (let i = 1; i < t.length; i += 1) if (Math.abs(t[i] - target) < Math.abs(t[best] - target)) best = i;
+      const prev = tickIdx[tickIdx.length - 1];
+      if (prev === undefined || (best !== prev && xs(best) - xs(prev) >= minGap)) tickIdx.push(best);
+    }
     for (const i of tickIdx) {
       const anchor = x.length === 1 ? "middle" : i === 0 ? "start" : i === x.length - 1 ? "end" : "middle";
       root.append(svg("text", { class: "tick", x: xs(i), y: height - 6, "text-anchor": anchor }, xLabel(x[i])));
