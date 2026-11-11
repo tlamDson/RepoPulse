@@ -89,6 +89,35 @@ def test_cli_returns_zero_and_reports_rows(tmp_path, capsys):
     assert len(_read(runs)) == 2
 
 
+def test_recording_the_same_artifact_twice_adds_nothing(tmp_path):
+    runs = tmp_path / "runs.csv"
+    artifact = _artifact(tmp_path, GOOD)
+    assert record(artifact, runs) == 1
+    before = runs.read_bytes()
+    assert record(artifact, runs) == 0  # identical in every column -> skipped
+    assert runs.read_bytes() == before
+    assert len(_read(runs)) == 2
+
+
+def test_row_that_differs_in_one_column_is_still_appended(tmp_path):
+    runs = tmp_path / "runs.csv"
+    record(_artifact(tmp_path, GOOD), runs)
+    assert record(_artifact(tmp_path, GOOD.replace(",12.5,", ",12.6,")), runs) == 1
+    assert [r[4] for r in _read(runs)[1:]] == ["12.5", "12.6"]
+
+
+def test_cli_rerun_reports_skipped_duplicate_and_exits_zero(tmp_path, capsys):
+    runs = tmp_path / "runs.csv"
+    artifact = str(_artifact(tmp_path, GOOD))
+    assert main([artifact, "--runs-csv", str(runs)]) == 0
+    capsys.readouterr()
+    assert main([artifact, "--runs-csv", str(runs)]) == 0
+    out = capsys.readouterr().out
+    assert "appended 0 row(s)" in out
+    assert "skipped 1 duplicate row(s)" in out
+    assert len(_read(runs)) == 2
+
+
 def test_cli_returns_nonzero_on_invalid_row(tmp_path, capsys):
     runs = tmp_path / "runs.csv"
     code = main(
