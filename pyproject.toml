@@ -16,7 +16,10 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["repopulse*"]
+include = ["repopulse*", "eventspec*"]
+
+[tool.setuptools.package-data]
+eventspec = ["catalog/*.yaml", "schemas/*.json"]
 
 [tool.ruff]
 line-length = 100

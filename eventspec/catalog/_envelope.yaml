@@ -1,0 +1,47 @@
+# Envelope shared by every event of the SIMULATED trip-planner app (simulated data, not real
+# users and not GH Archive). Field spec keys: type, required, pii, and optionally enum, format,
+# description. See docs/eventspec.md.
+fields:
+  event_id:
+    type: string
+    required: false
+    pii: false
+    description: Producer-assigned unique id. When present and non-empty it is the dedup key.
+  event_name:
+    type: string
+    required: true
+    pii: false
+    description: Name of the event in this catalog.
+  event_version:
+    type: integer
+    required: true
+    pii: false
+    description: Schema version of the event payload (declared under versions).
+  occurred_at:
+    type: string
+    format: date-time
+    required: true
+    pii: false
+    description: When the action happened on the client, RFC 3339 with offset.
+  received_at:
+    type: string
+    format: date-time
+    required: false
+    pii: false
+    description: When the collector received the event (used to spot late arrivals).
+  user_id:
+    type: string
+    required: true
+    pii: false
+    description: Pseudonymous app user id (not an email).
+  session_id:
+    type: string
+    required: true
+    pii: false
+    description: App session the event belongs to.
+  simulated:
+    type: boolean
+    required: true
+    pii: false
+    enum: [true]
+    description: Always true - every event in this catalog is simulated.
