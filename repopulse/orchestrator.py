@@ -273,7 +273,8 @@ def decide_after_exit(
     """``stalled`` = reason when the loop killed a silent session; it beats a stale quota event."""
     result = parse_result(result_text)
     if result and result[0] == "ready":
-        number = _PR_NUMBER_RE.search(result[1])
+        # "#31" wins over a bare number ("ready PR 2 #31" is PR 31, not task 2)
+        number = _PR_HASH_RE.search(result[1]) or _PR_NUMBER_RE.search(result[1])
         if not number:
             return Decision("failed", f"RESULT: ready thiếu số PR ({result[1] or 'trống'})")
         return Decision("ready", number.group(1))
@@ -295,7 +296,8 @@ REQUIRED_CHECKS = ("Lint", "Unit Tests", "dbt build (DuckDB)")
 MAX_REVIEW_ROUNDS = 2
 
 _REVIEW_RE = re.compile(r"REVIEW:\s*(PASS|FAIL)\b[ \t]*(.*)")
-_PR_NUMBER_RE = re.compile(r"#?(\d+)")
+_PR_HASH_RE = re.compile(r"#(\d+)")
+_PR_NUMBER_RE = re.compile(r"(\d+)")
 
 
 def parse_review(text: str) -> tuple[str, str] | None:

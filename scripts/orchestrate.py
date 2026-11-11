@@ -5,9 +5,12 @@
     python scripts/orchestrate.py clean [--dry-run]
     python scripts/orchestrate.py quota
     python scripts/orchestrate.py report
+    python scripts/orchestrate.py daily [--date YYYY-MM-DD] [--no-send] [--force]
 
-The decision logic lives in ``repopulse/orchestrator.py`` (unit tested). This file only does I/O:
-git, gh, spawning ``claude`` and writing logs. It never reads secret values.
+The decision logic lives in ``repopulse/orchestrator.py`` and ``repopulse/daily_report.py``
+(unit tested). This file only does I/O: git, gh, spawning ``claude``, writing logs, sending the
+daily e-mail. It never reads repo secret values; the SMTP app password for the daily e-mail is
+taken from the environment (REPOPULSE_SMTP_*) and only handed to smtplib, never printed.
 """
 
 from __future__ import annotations
@@ -16,17 +19,33 @@ import argparse
 import json
 import os
 import shutil
+import smtplib
 import subprocess
 import sys
 import threading
 import time
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from repopulse.daily_report import (  # noqa: E402
+    append_metrics,
+    build_daily_report,
+    build_email,
+    daily_due,
+    denials_between,
+    metrics_row,
+    needs_lam,
+    read_metrics,
+    rows_between,
+    run_metrics,
+    send_email,
+    smtp_config,
+    utc_window,
+)
 from repopulse.orchestrator import (  # noqa: E402
     Decision,
     Gates,
@@ -69,6 +88,7 @@ PRS_TOML = ROOT / "scripts" / "prs.toml"
 POLL_S = 15
 REFRESH_S = 60
 MAX_FAILURES = 2
+METRICS = LOGS / "orchestrator-metrics.csv"
 
 
 # ---------- shell helpers ----------
@@ -456,6 +476,7 @@ def run(args: argparse.Namespace) -> int:
     pending_review: dict[str, str] = state.setdefault("pending_review", {})  # task -> PR number
     review_fails: dict[str, int] = state.setdefault("review_fails", {})
     develop_red = False
+    daily_tried = ""  # local date of this process's last daily-report attempt
     runs: dict[str, Run] = {}
     waiting: dict[str, tuple[int, str | None, str | None]] = {}  # at, session, review PR
     final: dict[str, Decision] = {}
@@ -570,8 +591,21 @@ def run(args: argparse.Namespace) -> int:
                 last_refresh = 0
             state["failures"] = failures
             save_state(state)
+            record_metrics(r, d)
             if d.kind == "merged":
                 clean(dry_run=False, active={str(x.path) for x in runs.values()})
+
+        today = date.today().isoformat()
+        if (
+            not args.dry_run
+            and daily_tried != today  # one attempt per day per process, sent or not
+            and daily_due(datetime.now(), daily_sent(), args.daily_hour)
+        ):
+            daily_tried = today
+            try:
+                send_daily(date.today(), *rolling_window(), send=True)
+            except Exception as exc:  # noqa: BLE001 - the report must never stop running sessions
+                log(f"daily: lỗi khi viết báo cáo ({type(exc).__name__}: {exc})")
 
         stopping = should_stop(STATE) or bool(stop_all)
         if args.hold_at_90 and not hold_new and any(r.warn for r in runs.values()):
@@ -716,6 +750,91 @@ def quota(_: argparse.Namespace) -> int:
     return 0
 
 
+def record_metrics(r: Run, d: Decision) -> None:
+    """One row per finished session in logs/orchestrator-metrics.csv; never breaks the loop."""
+    try:
+        row = metrics_row(
+            f"{datetime.now():%Y-%m-%d %H:%M:%S}",
+            r.task.id,
+            "review" if r.review_pr else "build",
+            d.kind,
+            d.reason,
+            run_metrics(attempt_lines(r)),
+        )
+        append_metrics(METRICS, row)
+    except Exception as exc:  # noqa: BLE001 - metrics must never stop running sessions
+        log(f"metrics: không ghi được ({type(exc).__name__}: {exc})")
+
+
+# ---------- daily report ----------
+
+DAILY_SENT = STATE / "daily-sent"  # own file: `daily` may run while `run` holds orchestrator.json
+
+
+def daily_sent() -> str | None:
+    return DAILY_SENT.read_text("utf-8").strip() if DAILY_SENT.exists() else None
+
+
+def calendar_window(day: date) -> tuple[datetime, datetime]:
+    """Aware local midnight of ``day`` and of the next day (each converted on its own: DST)."""
+    nxt = day + timedelta(days=1)
+    start = datetime(day.year, day.month, day.day).astimezone()
+    return start, datetime(nxt.year, nxt.month, nxt.day).astimezone()
+
+
+def rolling_window() -> tuple[datetime, datetime]:
+    """The 24 hours up to now, so sessions ending after the send hour are in tomorrow's mail."""
+    end = datetime.now().astimezone()
+    return end - timedelta(hours=24), end
+
+
+def send_daily(day: date, start: datetime, end: datetime, send: bool) -> bool:
+    """Write logs/daily-<day>.md for [start, end); e-mail it if ``send`` and SMTP is set.
+
+    Returns True only when the mail went out; only then is the day marked as sent, so setting
+    the SMTP variables later the same evening still gets that day's mail.
+    """
+    fmt = "%Y-%m-%d %H:%M:%S"
+    rows = rows_between(read_metrics(METRICS), start.strftime(fmt), end.strftime(fmt))
+    denials = denials_between(permission_log_lines(), *utc_window(start, end))
+    reports = sorted(LOGS.glob("run-*.md"), key=lambda p: p.stat().st_mtime)
+    todo = needs_lam(reports[-1].read_text("utf-8")) if reports else []
+    window = f"{start:%Y-%m-%d %H:%M} → {end:%Y-%m-%d %H:%M}"
+    subject, body = build_daily_report(day, rows, denials, todo, window=window)
+    LOGS.mkdir(exist_ok=True)
+    path = LOGS / f"daily-{day.isoformat()}.md"
+    path.write_text(body, "utf-8")
+    log(f"daily: {path}")
+    if not send:
+        return False
+    cfg = smtp_config(dict(os.environ))
+    if cfg is None:
+        log("daily: chưa đặt REPOPULSE_SMTP_USER / REPOPULSE_SMTP_APP_PASSWORD, chỉ ghi file")
+        return False
+    try:
+        send_email(build_email(subject, body, cfg), cfg)
+    except (OSError, smtplib.SMTPException) as exc:
+        log(f"daily: gửi mail lỗi ({type(exc).__name__}); chạy lại `daily --force`")
+        return False
+    log(f"daily: đã gửi mail tới {cfg['to']}")
+    STATE.mkdir(parents=True, exist_ok=True)
+    DAILY_SENT.write_text(day.isoformat(), "utf-8")
+    return True
+
+
+def daily(args: argparse.Namespace) -> int:
+    """``--date`` = that calendar day; without it, the 24 hours up to now (as the run loop)."""
+    day = date.fromisoformat(args.date) if args.date else date.today()
+    send = not args.no_send
+    if send and not args.force and daily_sent() == day.isoformat():
+        print(f"Báo cáo {day} đã gửi rồi; thêm --force để gửi lại.")
+        return 0
+    start, end = calendar_window(day) if args.date else rolling_window()
+    send_daily(day, start, end, send=send)
+    print(LOGS / f"daily-{day.isoformat()}.md")
+    return 0
+
+
 def report(_: argparse.Namespace) -> int:
     tasks = load_tasks(PRS_TOML)
     done = merged_task_ids(tasks, gh_prs())
@@ -743,6 +862,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="quá số phút này không có output stream (trừ lúc chờ quota reset) thì coi là "
         "treo: dừng phiên, lần sau thử lại kèm ngữ cảnh",
     )
+    r.add_argument(
+        "--daily-hour",
+        type=int,
+        default=22,
+        help="giờ local gửi báo cáo ngày qua email (một lần mỗi ngày, nếu đang chạy)",
+    )
     r.add_argument("--only", help="comma-separated task ids")
     r.add_argument(
         "--auto-approve-harness",
@@ -768,6 +893,11 @@ def build_parser() -> argparse.ArgumentParser:
     c.set_defaults(fn=lambda a: clean(a.dry_run) or 0)
     sub.add_parser("quota").set_defaults(fn=quota)
     sub.add_parser("report").set_defaults(fn=report)
+    dl = sub.add_parser("daily", help="ghi logs/daily-<ngày>.md và gửi email báo cáo ngày")
+    dl.add_argument("--date", help="YYYY-MM-DD, mặc định hôm nay (giờ local)")
+    dl.add_argument("--no-send", action="store_true", help="chỉ ghi file, không gửi mail")
+    dl.add_argument("--force", action="store_true", help="gửi lại dù hôm đó đã gửi")
+    dl.set_defaults(fn=daily)
     return p
 
 

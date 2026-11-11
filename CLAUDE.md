@@ -4,7 +4,7 @@ RepoPulse: data platform nhỏ đo "sức khoẻ" các dự án open source hệ
 
 **Đường đã chọn (bước thử 2026-11-11): dự phòng** — PySpark + Delta trên runner GitHub Actions, gold trên MotherDuck (khoá phiên bản DuckDB theo bản MotherDuck hỗ trợ). Databricks chưa kiểm được vì secret `DATABRICKS_TOKEN` không phải personal access token. Chi tiết và cách thử lại: `docs/probe-result.md`.
 
-Kế hoạch: `docs/plan.md`. Tiến độ: `python scripts/orchestrate.py report` (nguồn sự thật là PR đã merge). Việc chờ chủ repo: `docs/lam-checklist.md` và `logs/run-<ngày>.md`.
+Kế hoạch: `docs/plan.md`. Tiến độ: `python scripts/orchestrate.py report` (nguồn sự thật là PR đã merge). Việc chờ chủ repo: `docs/lam-checklist.md`, `logs/run-<ngày>.md` và email báo cáo ngày (`logs/daily-<ngày>.md`; số đo vận hành ở `logs/orchestrator-metrics.csv`, không phải `runs.csv`).
 
 Các rule chi tiết dưới đây áp dụng luôn, không chỉ khi được hỏi:
 
@@ -56,6 +56,7 @@ python -m repopulse.spark.job --source gharchive --date 2026-01-05 --hour 16 --h
 python scripts/orchestrate.py run --dry-run      # xem sẽ chạy việc nào
 python scripts/orchestrate.py run                # chạy headless, không cần người (mặc định 5 phiên)
 python scripts/orchestrate.py report             # tiến độ theo PR đã merge
+python scripts/orchestrate.py daily              # báo cáo ngày: logs/daily-<ngày>.md + email (tự gửi 22h khi đang chạy)
 python scripts/orchestrate.py quota              # quota gần nhất đọc từ log
 python scripts/orchestrate.py clean --dry-run    # worktree nào sẽ bị dọn
 ```

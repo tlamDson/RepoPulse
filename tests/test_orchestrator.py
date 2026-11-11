@@ -698,6 +698,20 @@ def test_decide_after_exit_ready_keeps_only_the_digits():
         assert (d.kind, d.reason) == ("ready", "31"), text
 
 
+def test_decide_after_exit_ready_prefers_the_hash_number():
+    # Review PR 25 (round 2): "ready PR 2 #31" must read the PR number, not the task id
+    d = decide_after_exit(0, None, "RESULT: ready PR 2 #31", now=0, max_wait_s=0)
+    assert (d.kind, d.reason) == ("ready", "31")
+
+
+def test_cli_has_daily_command_and_daily_hour():
+    parser = _load_cli().build_parser()
+    assert parser.parse_args(["run"]).daily_hour == 22
+    args = parser.parse_args(["daily", "--date", "2026-11-11", "--no-send"])
+    assert args.cmd == "daily" and args.date == "2026-11-11" and args.no_send is True
+    assert parser.parse_args(["daily"]).force is False
+
+
 def test_decide_after_exit_ready_without_pr_number_is_a_counted_failure():
     # Review PR 25: "ready" with no number put "" in pending_review, the next start was a build
     # session again (falsy review_pr) and the loop never ended.
