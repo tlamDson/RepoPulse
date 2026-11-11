@@ -210,6 +210,34 @@ def test_pull_request_uses_a_fixed_fake_salt_and_real_secret_otherwise():
     assert "secrets.PII_HASH_SALT" in salt
 
 
+def dbt_build_steps(data) -> list[dict]:
+    return [s for s in steps(data) if "dbt build" in s.get("run", "")]
+
+
+def test_every_dbt_build_step_gets_the_pii_salt():
+    # The public models mask identifiers with mask_pii (docs/governance.md): on any target but ci
+    # a missing PII_HASH_SALT is a compile error, so the scheduled build would never reach gold.
+    found = dbt_build_steps(load())
+    assert len(found) == 3, [s.get("name") for s in found]
+    for step in found:
+        assert step.get("env", {}).get("PII_HASH_SALT"), step.get("name")
+
+
+def test_dbt_masks_with_the_salt_silver_was_hashed_with():
+    data = load()
+    spark_salt = steps(data)[step_index(data, "python -m repopulse.spark.job")]["env"][
+        "PII_HASH_SALT"
+    ]
+    fake = re.search(r"'(not-a-secret[^']*)'", spark_salt).group(1)
+    for step in dbt_build_steps(data):
+        salt = step.get("env", {}).get("PII_HASH_SALT")
+        if "github.event_name == 'pull_request'" in step.get("if", ""):
+            # pull-request-only steps never see the real secret
+            assert salt == fake, step.get("name")
+        else:
+            assert salt == spark_salt, step.get("name")
+
+
 def test_missing_secrets_stop_scheduled_runs_early():
     data = load()
     s = steps(data)
