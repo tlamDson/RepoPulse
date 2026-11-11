@@ -104,10 +104,15 @@ def test_window_rejects_bad_records(records, match):
 # ---------------------------------------------------------------- build_row
 
 
-def test_row_is_valid_for_runs_csv():
+def test_row_is_valid_for_runs_csv(tmp_path):
     row = build()
     assert set(row) == set(COLUMNS)
-    assert validate_row(row) == row
+    # validate_row takes typed values (it rejects numeric strings) and returns CSV strings, so a
+    # row of CSV strings is checked through the artifact round trip the workflow uses.
+    artifact = tmp_path / "pipeline-row.csv"
+    pipeline.write_row(artifact, row)
+    (parsed,) = record_run.read_artifact(artifact)
+    assert validate_row(parsed) == row
 
 
 def test_row_fields():
