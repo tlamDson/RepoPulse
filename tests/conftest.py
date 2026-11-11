@@ -8,6 +8,9 @@ missing.
 ``lake`` / ``built``: one silver parquet + one ``dbt build`` of ``transform/`` per test run, shared
 by test_dbt_marts.py and test_governance.py (helpers in ``dbt_helpers.py``, imported lazily so a
 missing dbt extra only skips the dbt tests).
+
+``_no_motherduck`` (autouse): wraps ``duckdb.connect`` so any ``md:`` / ``motherduck:`` target
+raises ``AssertionError`` instead of reaching the real MotherDuck account; local targets pass.
 """
 
 from __future__ import annotations
@@ -99,6 +102,33 @@ def spark():
     session = configure_spark_with_delta_pip(builder).getOrCreate()
     yield session
     session.stop()
+
+
+_MOTHERDUCK_PREFIXES = ("md:", "motherduck:")
+
+
+@pytest.fixture(autouse=True)
+def _no_motherduck(monkeypatch):
+    """Unit tests never call the real MotherDuck; inject a fake ``connect`` instead."""
+    if sys.modules.get("duckdb", ...) is None:
+        return
+    try:
+        import duckdb
+    except ImportError:
+        return
+
+    real_connect = duckdb.connect
+
+    def guarded_connect(database=":memory:", *args, **kwargs):
+        if str(database).strip().lower().startswith(_MOTHERDUCK_PREFIXES):
+            raise AssertionError(
+                f"unit test tried to connect to MotherDuck ({database!r}); unit tests must not "
+                "call real services: inject a fake connect or monkeypatch duckdb.connect"
+            )
+        return real_connect(database, *args, **kwargs)
+
+    guarded_connect.blocks_motherduck = True
+    monkeypatch.setattr(duckdb, "connect", guarded_connect)
 
 
 @pytest.fixture(scope="session")
