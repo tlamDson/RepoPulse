@@ -273,7 +273,7 @@ def test_read_proc_io_returns_none_without_the_file(tmp_path):
 
 def test_read_proc_io_returns_counters_and_the_size_of_its_own_read(tmp_path):
     path = tmp_path / "io"
-    path.write_text(PROC_IO_SAMPLE, encoding="ascii")
+    path.write_bytes(PROC_IO_SAMPLE.encode("ascii"))  # no \r\n translation on Windows
     counters, size = query_opt.read_proc_io(path)
     assert counters["rchar"] == 323934931
     assert size == len(PROC_IO_SAMPLE.encode("ascii"))
@@ -470,7 +470,8 @@ def test_every_layout_gives_exactly_the_naive_results(prepared, variant):
         )
         assert run[f"{q}_rows"] == len(expected["rows"])
         assert run[f"{q}_seconds"] >= 0
-    assert run["total_seconds"] >= sum(run[f"{q}_seconds"] for q in QUERIES)
+    # every value is rounded to 6 decimals on its own
+    assert run["total_seconds"] >= sum(run[f"{q}_seconds"] for q in QUERIES) - 1e-5
 
 
 def test_view_keeps_the_raw_column_types(prepared):
