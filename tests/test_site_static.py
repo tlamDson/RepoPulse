@@ -21,6 +21,7 @@ SITE = ROOT / "site"
 INDEX = SITE / "index.html"
 SECTIONS = (*export_site.MART_COLUMNS, "runs")
 RESOURCE_ATTRS = {"src", "href", "srcset", "action", "data", "poster", "formaction"}
+SVG_NAMESPACE = "http://www.w3.org/2000/svg"
 EXTERNAL = re.compile(r"^\s*(?:[a-z][a-z0-9+.-]*:|//)", re.IGNORECASE)
 
 
@@ -125,7 +126,10 @@ def test_no_inline_script_or_style_in_html():
 
 
 def test_no_url_in_scripts_or_styles():
-    for text in (js_text(), css_text()):
+    # The SVG namespace is an XML name that createElementNS needs; the browser never fetches it.
+    js = js_text()
+    assert js.count(SVG_NAMESPACE) <= 1
+    for text in (js.replace(SVG_NAMESPACE, ""), css_text()):
         assert "http://" not in text
         assert "https://" not in text
         assert "//cdn" not in text

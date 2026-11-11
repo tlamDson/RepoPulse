@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>RepoPulse: health of open-source data projects</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="page-head">
+    <h1>RepoPulse</h1>
+    <p class="lede">Health of open-source data projects (Spark, dbt, DuckDB, Airflow, Kafka and
+      their neighbours), measured from public GitHub events.</p>
+    <dl class="facts">
+      <div>
+        <dt>Source</dt>
+        <dd><a href="https://www.gharchive.org/">GH Archive</a>: public GitHub events, real data</dd>
+      </div>
+      <div>
+        <dt>Updated</dt>
+        <dd id="generated-at">loading…</dd>
+      </div>
+      <div>
+        <dt>Latest data day</dt>
+        <dd id="latest-data-date">loading…</dd>
+      </div>
+      <div>
+        <dt>Built from commit</dt>
+        <dd id="git-sha">–</dd>
+      </div>
+    </dl>
+    <p class="note">The gold tables are refreshed by an hourly incremental batch (not real-time)
+      and this page is rebuilt after each successful run. Every number on it is read from the
+      exported data files; nothing is typed by hand. This page shows no simulated data: a section
+      built from the simulated app event stream would carry the label "simulated".</p>
+    <p class="status" id="page-status" role="status"></p>
+    <nav class="toc" aria-label="Sections">
+      <a href="#q1">Q1 Active contributors</a>
+      <a href="#q2">Q2 Retention</a>
+      <a href="#q3">Q3 Contribution funnel</a>
+      <a href="#q4">Q4 Responsiveness</a>
+      <a href="#q5">Q5 Concentration</a>
+      <a href="#q6">Q6 Health score</a>
+      <a href="#runs">Runs</a>
+    </nav>
+  </header>
+
+  <main>
+    <section id="q1" data-mart="mart_daily_active_contributors" aria-labelledby="q1-title">
+      <h2 id="q1-title">Q1 · Daily active contributors</h2>
+      <p class="desc">Human contributors active each day, per repo category (pull requests,
+        reviews, issues and comments; bots excluded). The table lists the same values; repo-level
+        and weekly rows are in the CSV.</p>
+      <p class="status" data-role="status" role="status"></p>
+      <div class="chart" data-role="chart"></div>
+      <div class="table-wrap" data-role="table"></div>
+      <p class="download"><a href="tableau/mart_daily_active_contributors.csv" download>Download CSV (Tableau)</a></p>
+    </section>
+
+    <section id="q2" data-mart="mart_cohort_retention" aria-labelledby="q2-title">
+      <h2 id="q2-title">Q2 · Cohort retention</h2>
+      <p class="desc">Cohort = ISO week of a contributor's first pull request on a tracked repo.
+        Share of the cohort active again exactly at week W+4 and W+12.</p>
+      <p class="status" data-role="status" role="status"></p>
+      <div class="chart" data-role="chart"></div>
+      <div class="table-wrap" data-role="table"></div>
+      <p class="download"><a href="tableau/mart_cohort_retention.csv" download>Download CSV (Tableau)</a></p>
+    </section>
+
+    <section id="q3" data-mart="mart_contribution_funnel" aria-labelledby="q3-title">
+      <h2 id="q3-title">Q3 · Contribution funnel</h2>
+      <p class="desc">Fork, then pull request opened, then merged, per repo. The chart shows the
+        repos with the most pull requests opened; the table lists every repo.</p>
+      <p class="status" data-role="status" role="status"></p>
+      <div class="chart" data-role="chart"></div>
+      <div class="table-wrap" data-role="table"></div>
+      <p class="download"><a href="tableau/mart_contribution_funnel.csv" download>Download CSV (Tableau)</a></p>
+    </section>
+
+    <section id="q4" data-mart="mart_responsiveness" aria-labelledby="q4-title">
+      <h2 id="q4-title">Q4 · Responsiveness</h2>
+      <p class="desc">Median hours to the first human response on issues and pull requests, per
+        repo. The chart shows the repos with the most opened items; the table lists every repo.</p>
+      <p class="status" data-role="status" role="status"></p>
+      <div class="chart" data-role="chart"></div>
+      <div class="table-wrap" data-role="table"></div>
+      <p class="download"><a href="tableau/mart_responsiveness.csv" download>Download CSV (Tableau)</a></p>
+    </section>
+
+    <section id="q5" data-mart="mart_repo_concentration" aria-labelledby="q5-title">
+      <h2 id="q5-title">Q5 · Contributor concentration</h2>
+      <p class="desc">Share of human contributions made by the single most active contributor
+        (bus factor). The chart shows the repos with the most contributions; the table lists every
+        repo.</p>
+      <p class="status" data-role="status" role="status"></p>
+      <div class="chart" data-role="chart"></div>
+      <div class="table-wrap" data-role="table"></div>
+      <p class="download"><a href="tableau/mart_repo_concentration.csv" download>Download CSV (Tableau)</a></p>
+    </section>
+
+    <section id="q6" data-mart="mart_repo_health_score" aria-labelledby="q6-title">
+      <h2 id="q6-title">Q6 · Repo health score</h2>
+      <p class="desc">Composite score from the Q1 to Q5 components, ranked. The chart shows the
+        top of the ranking; the table lists every repo and component.</p>
+      <p class="status" data-role="status" role="status"></p>
+      <div class="chart" data-role="chart"></div>
+      <div class="table-wrap" data-role="table"></div>
+      <p class="download"><a href="tableau/mart_repo_health_score.csv" download>Download CSV (Tableau)</a></p>
+    </section>
+
+    <section id="runs" data-mart="runs" aria-labelledby="runs-title">
+      <h2 id="runs-title">Runs (runs.csv)</h2>
+      <p class="desc">Every measured run: benchmarks, scale tests and dbt builds. Times are only
+        comparable between rows of the same data date and query set.</p>
+      <p class="status" data-role="status" role="status"></p>
+      <div class="chart" data-role="chart"></div>
+      <div class="table-wrap" data-role="table"></div>
+      <p class="download"><a href="tableau/runs.csv" download>Download CSV (Tableau)</a></p>
+    </section>
+  </main>
+
+  <footer class="page-foot">
+    <p>Code and method: <a href="https://github.com/tlamdson/RepoPulse">RepoPulse on GitHub</a>.
+      This page loads nothing from other sites: no fonts, no analytics, no cookies.</p>
+  </footer>
+  <div class="tooltip" id="tooltip" role="tooltip" hidden></div>
+</body>
+</html>
