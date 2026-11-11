@@ -20,6 +20,11 @@ Bạn là analytics engineer. Làm theo TDD (`.claude/rules/tdd.md`) và **bắt
   `mart_contribution_funnel`, `mart_responsiveness`, `mart_repo_concentration`,
   `mart_repo_health_score`).
 
+**Chọn ngày chuẩn:** GH Archive gần đây thiếu không đều (có giờ mất hẳn PushEvent/CreateEvent;
+xem `docs/plan.md` mục Rủi ro). Viết script kiểm và chọn một ngày đủ 24 file, mỗi giờ đều có
+PushEvent, dung lượng không lệch quá xa trung vị; ghi ngày, tiêu chí và checksum vào
+`benchmarks/reference.toml`. Q1–Q6 dùng PR/issue/review/comment/fork/watch, không dựa vào PushEvent.
+
 ## Bộ câu hỏi Q1–Q6 (nguồn: `docs/plan.md`)
 
 Q1 contributor hoạt động theo ngày/tuần, mới so với quay lại · Q2 retention cohort W+4, W+12 ·

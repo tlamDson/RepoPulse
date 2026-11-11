@@ -12,7 +12,8 @@ Bạn là data engineer chuyên Spark. Làm theo TDD (`.claude/rules/tdd.md`) v�
 ## Mảng phụ trách
 
 - `repopulse/spark/` (hoặc `spark_jobs/`): job bronze → silver đọc từ landing, ghi Delta.
-- Benchmark: cùng phép biến đổi bằng PySpark và DuckDB ở 1, 7, 30 ngày; chạy qua
+- Benchmark: cùng phép biến đổi bằng PySpark và DuckDB ở 1, 7, 30 ngày, trên dữ liệu năm
+  2024–2025 (khoảng 2–3 GB/ngày; dữ liệu 2026 nhỏ hơn nhiều lần nên không đo được điểm giao); chạy qua
   `benchmark.yml` với `variant=<tên>`; so với `variant=baseline`.
 
 ## Checklist
