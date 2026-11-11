@@ -1,20 +1,44 @@
-# RepoPulse · Câu mở đầu cho phiên Claude Code
+# RepoPulse · Cách chạy
 
-Mở phiên từ thư mục repo, gõ `D:` viết hoa:
+Mở terminal từ thư mục repo, gõ `D:` viết hoa:
 
 ```
 cd D:\Desktop\RepoPulse
-claude --permission-mode auto --model fable --effort high
+pip install -e ".[dev,dbt]"
 ```
 
-## Chạy S0.4 (kiểm harness bằng PR mẫu)
+## Chạy headless qua đêm (cách chính)
 
-> Thực thi bước S0.4 trong `docs/plan.md`: kiểm harness bằng PR mẫu `feature/runs-log` (module ghi `runs.csv`), đi hết vòng mini-plan → subagent Opus viết test đỏ rồi code trong worktree → CI → subagent Opus khác review có mutation → merge. Ghi kết quả từng mục kiểm vào `docs/harness-check.md`, cập nhật `docs/progress.md`, rồi dừng chờ tôi xem. Không làm PR 2 khi tôi chưa đồng ý.
+```
+python scripts/orchestrate.py run --dry-run                          # xem sẽ chạy việc nào, bị chặn ở đâu
+python scripts/orchestrate.py run --parallel 2 --auto-approve-harness # chạy, rồi đi chỗ khác
+```
 
-## Chạy giai đoạn 1 (sau khi đã xem `docs/harness-check.md`)
+- Script đọc `scripts/prs.toml`, chạy tối đa 2 phiên `claude -p` song song, mỗi việc một worktree
+  `.claude/worktrees/pr-<id>`. Không phiên nào chờ người: lệnh cần hỏi bị từ chối và ghi log.
+- `--auto-approve-harness`: nếu S0.4 merge xanh và log không có lệnh bị từ chối ngoài dự kiến, coi
+  như harness đã duyệt và chạy tiếp từ PR B. Bỏ cờ này nếu muốn tự xem `docs/harness-check.md` trước.
+- Thiếu secret cloud: làm hết việc không cần cloud (S0.4, B, 2, 3, 4, 5, 6, 12) rồi dừng ở `probe`.
+- Hết quota: phiên tự chờ limit 5 giờ; nếu phiên thoát vì limit thì script ngủ tới giờ reset rồi
+  `--resume` đúng phiên đó. Limit tuần quá 30 giờ thì dừng và báo.
+- Release `develop → main` tự động sau B, 7, 11, 14 khi CI xanh.
 
-> Điều phối giai đoạn 1 theo `docs/plan.md`. Bạn là phiên chính: ở checkout chính, không vào worktree, không sửa file được git theo dõi ngoài `docs/`. Đọc `docs/progress.md`, `gh pr list`, `git worktree list` trước. Với mỗi PR: viết kế hoạch ngắn có mục test phải đỏ; giao subagent Opus (effort medium, worktree riêng) viết test đỏ rồi code và mở PR; theo dõi CI bằng `gh pr checks --watch`; giao `code-reviewer` (model opus, effort medium) review có bằng chứng và mutation; CI xanh cộng review PASS thì squash-merge. Việc nhẹ giao Sonnet (effort high). Bắt đầu từ bước thử số 1 nếu secret đã có, không thì làm PR 2 và PR 3 trước. Dừng khi mọi việc còn lại chờ tôi, và in checklist.
+**Dừng:** tạo file `.claude/state/STOP`. Việc đang chạy làm nốt rồi script dừng.
 
-## Mở phiên mới để làm tiếp
+**Sáng ra xem:** `logs/run-<ngày>.md` (việc cần Lam, kết quả từng việc, tiến độ, danh sách lệnh bị
+hỏi/bị từ chối). Log chi tiết từng việc: `logs/pr-<id>.jsonl`.
 
-> Tiếp tục RepoPulse: đọc `docs/progress.md` và `docs/plan.md`, đối chiếu `gh pr list` và `git worktree list`, rồi làm tiếp.
+```
+python scripts/orchestrate.py report         # tiến độ theo PR đã merge
+python scripts/orchestrate.py quota          # quota gần nhất
+python scripts/orchestrate.py clean --dry-run
+```
+
+## Mở phiên tay (khi cần sửa harness hoặc xem lại)
+
+```
+claude --permission-mode auto --settings .claude/auto-mode.json --model fable --effort high
+```
+
+> Tiếp tục RepoPulse: chạy `python scripts/orchestrate.py report`, đọc `logs/` mới nhất và
+> `docs/plan.md`, đối chiếu `gh pr list` và `git worktree list`, rồi báo việc còn lại.

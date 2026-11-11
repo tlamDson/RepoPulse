@@ -19,13 +19,17 @@ Bước thử số 1 (`docs/plan.md`) quyết định đường chính (Databric
 ## Layout
 
 ```
-repopulse/        package Python chính (ghi runs.csv, tiện ích chung)
+repopulse/        package Python chính (runs.csv, orchestrator.py = lõi thuần của orchestrator)
 eventspec/        catalog event YAML → JSON Schema, hàm kiểm event       (PR 2)
 simkit/           sinh dữ liệu mô phỏng có seed, chèn lỗi biết trước     (PR 3)
+benchmarks/       ngày dữ liệu chuẩn, pipeline ngây thơ, queries/q1..q6  (PR B)
 tests/            pytest; fixtures/ chứa dữ liệu mẫu nhỏ
-transform/        project dbt (dbt_project.yml, profiles.yml, models/)
-.github/workflows CI (ci.yml), pipeline theo lịch (PR 7), deploy Pages (PR 11)
+transform/        project dbt (dbt_project.yml, profiles.yml, models/, seeds/)
+scripts/          orchestrate.py (CLI headless), prs.toml (DAG việc → agent → cổng)
+.github/workflows CI (ci.yml), benchmark (PR B), pipeline theo lịch (PR 7), deploy Pages (PR 11)
+.claude/          rules, agents, hooks/log_permission.py, auto-mode.json; state/ và worktrees/ không commit
 docs/             plan, progress, checklist, harness-check
+logs/             log stream-json mỗi PR, báo cáo mỗi lần chạy (không commit)
 runs.csv          sổ số đo, mỗi lần chạy một dòng
 ```
 
@@ -42,7 +46,7 @@ Cập nhật sơ đồ này khi thêm thư mục mới.
 
 ## Secret
 
-`DATABRICKS_HOST`, `DATABRICKS_TOKEN`, `MOTHERDUCK_TOKEN` — chủ repo tự thêm bằng `gh secret set` hoặc trên web. Agent không đọc `.env`, không in giá trị secret, không chạy `gh secret` (lệnh này ở nhóm `ask`). Biến mới thêm vào `.env.example` với giá trị rỗng.
+`DATABRICKS_HOST`, `DATABRICKS_TOKEN`, `DATABRICKS_HTTP_PATH`, `MOTHERDUCK_TOKEN`, `SNOWFLAKE_*` — chủ repo tự thêm bằng `gh secret set` hoặc trên web. Agent không đọc `.env`, không in giá trị secret, không chạy `gh secret` (lệnh này ở nhóm `ask`). Biến mới thêm vào `.env.example` với giá trị rỗng.
 
 ## Cạm bẫy đã biết
 
@@ -50,6 +54,11 @@ Cập nhật sơ đồ này khi thêm thư mục mới.
 - **Đĩa runner 14 GB**: mỗi lần chạy chỉ xử lý vài giờ dữ liệu, lọc loại event trước khi lưu.
 - **Snowflake trial 30 ngày**: chỉ đăng ký khi tới PR 13.
 - **Windows**: mở phiên với `D:` viết hoa (xem `developer-guide.md`). Hook `ruff format` cần `ruff` đã cài trong Python mà lệnh `python` trỏ tới; chưa cài thì hook bỏ qua im lặng.
+- **Spark trên Windows**: PySpark cần JDK 17 (máy đang có Java 24, không hỗ trợ) và ghi Delta cần `winutils`. Test Spark đánh dấu `@pytest.mark.spark`, tự skip local khi thiếu, luôn chạy trên CI Linux.
+- **Auto mode bỏ qua allow rule rộng** (`Bash(python *)`, `npm *`, `npx *`, allow `Agent`/`Monitor`); allow rule phải cụ thể. `autoMode` không đọc từ `.claude/settings*.json` — nằm ở `.claude/auto-mode.json`, nạp bằng `--settings`.
+- **Ghi vào `.claude/` (ngoài `worktrees/`) là đường dẫn được bảo vệ**: allow rule không mở được, auto mode chặn tự sửa cấu hình. Thay đổi harness do chủ repo duyệt.
+- **Quota**: stream-json có `rate_limit_event` (`status: rejected`, `resetsAt` epoch giây); `errorCode: credits_required` thì chờ cũng vô ích. Orchestrator đặt `CLAUDE_CODE_RETRY_WATCHDOG=1` để limit 5 giờ được chờ ngay trong phiên, và `--resume <session_id>` khi phiên thoát vì limit. `autoContinueAtUsageLimit` không áp dụng cho `-p`.
+- **Mutation trên file chưa commit**: `git checkout --` không hoàn tác được file chưa được theo dõi; chỉ thử mutation trên file đã commit.
 
 ## Nợ kỹ thuật
 

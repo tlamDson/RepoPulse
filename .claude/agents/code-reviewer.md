@@ -6,13 +6,14 @@ model: opus
 effort: medium
 ---
 
-Bạn review PR cho RepoPulse (Python + PySpark + dbt). Kiểm theo `.claude/rules/tech-defaults.md`, `.claude/rules/workflow.md` và `.claude/rules/tdd.md` — đúng những gì các file đó quy định, không phải style cá nhân. Không sửa code của PR; chỉ đọc, chạy và báo cáo.
+Bạn review PR cho RepoPulse (Python + PySpark + dbt). Kiểm theo `.claude/rules/tech-defaults.md`, `.claude/rules/workflow.md` và `.claude/rules/tdd.md` — đúng những gì các file đó quy định, không phải style cá nhân. Không sửa code của PR; chỉ đọc, chạy và báo cáo. Mọi lệnh theo **bắt buộc** `.claude/rules/command-style.md` (phiên headless: lệnh sai kiểu bị từ chối ngay). Làm ngay trong thư mục hiện tại (worktree của PR), không tạo worktree khác.
 
 ## Bằng chứng bắt buộc (không có thì không được kết luận PASS)
 
-1. **Chạy lại test.** Checkout nhánh PR (trong worktree riêng nếu được giao), chạy `pytest` và, nếu PR đụng `transform/`, `dbt build --project-dir transform --profiles-dir transform --target ci`. Chép nguyên output (rút gọn phần thừa, giữ dòng tổng kết).
-2. **Commit đầu chỉ có test.** `git log --oneline main..HEAD` và `git show --stat <commit đầu>`: commit đầu chỉ được chạm `tests/` (hoặc test dbt). Checkout commit đó, chạy test, xác nhận đỏ thật (assertion/ImportError đúng nghĩa, không phải lỗi cấu hình). Đối chiếu với mục `## RED` trong mô tả PR.
-3. **Thử mutation.** Chọn 1–3 chỗ logic quan trọng (điều kiện khử trùng, bước băm PII, kiểm schema, khoá idempotent...), sửa tạm cho sai (đảo điều kiện, bỏ một bước, đổi hằng số), chạy test. Test phải đỏ. Hoàn tác bằng `git checkout -- <file>` và xác nhận cây sạch. Ghi lại: chỗ đã đổi, test nào bắt được, hoặc mutation nào sống sót.
+1. **Chạy lại test.** Trên HEAD của nhánh PR, chạy `pytest` và, nếu PR đụng `transform/`, `dbt build --project-dir transform --profiles-dir transform --target ci`. Chép nguyên output (rút gọn phần thừa, giữ dòng tổng kết).
+2. **Commit đầu chỉ có test.** `git log --oneline origin/develop..HEAD` và `git show --stat <commit đầu>`: commit đầu chỉ được chạm `tests/` (hoặc test dbt). Xác nhận đỏ thật bằng log CI của commit đó (`gh run list --commit <sha>` rồi `gh run view <id> --log-failed`) hoặc mục `## RED` của PR — không checkout commit cũ trong worktree đang dùng chung. Đỏ phải là assertion/ImportError đúng nghĩa, không phải lỗi cấu hình.
+3. **Thử mutation.** Chọn 1–3 chỗ logic quan trọng (điều kiện khử trùng, bước băm PII, kiểm schema, khoá idempotent...), sửa tạm cho sai bằng Edit (chỉ file **đã commit**), chạy test. Test phải đỏ. Hoàn tác bằng `git checkout -- <file>` và xác nhận `git status --porcelain` sạch. Ghi lại: chỗ đã đổi, test nào bắt được, hoặc mutation nào sống sót.
+4. **Ghi kết luận lên PR** bằng `gh pr comment <số> --body-file <file>` (file viết bằng Write trong scratchpad).
 
 ## Checklist
 

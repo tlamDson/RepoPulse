@@ -8,6 +8,25 @@ RepoPulse là một data platform nhỏ đo "sức khoẻ" của các dự án o
 - **Xử lý:** pipeline batch ELT chạy theo lịch: làm sạch và băm PII bằng PySpark + Delta Lake, dựng star schema bằng dbt, có test, contract và cảnh báo bất thường.
 - **Đầu ra:** các metric như contributor hoạt động hằng ngày, retention theo cohort, funnel fork → PR → merge; một dashboard công khai; và sổ số đo `runs.csv` ghi lại mọi lần chạy.
 
+## Kết quả dự án: trả lời câu hỏi gì
+
+Gold và dashboard tập trung vào khoảng 50–150 **repo hệ data** (Spark, dbt, DuckDB, Airflow, Kafka, Trino, Delta, Iceberg, Polars, pandas…), danh sách ở seed `transform/seeds/repos_data_ecosystem.csv` kèm `category` (compute, orchestration, storage-format, warehouse, streaming, dataframe, bi). Ingest vẫn xử lý toàn bộ event GH Archive để có số quy mô (M1).
+
+Bộ query cố định Q1–Q6 vừa là câu hỏi dự án trả lời, vừa là bộ đo tốc độ dùng lại ở mọi lần đo:
+
+| Q | Câu hỏi | Mart |
+|---|---|---|
+| Q1 | Mỗi ngày, mỗi tuần có bao nhiêu contributor hoạt động trên mỗi repo và mỗi category? Người mới so với người quay lại? | `mart_daily_active_contributors` |
+| Q2 | Retention theo cohort: trong nhóm có PR đầu tiên ở tuần W, bao nhiêu % còn hoạt động ở W+4, W+12? | `mart_cohort_retention` |
+| Q3 | Funnel fork → mở PR → PR merge; thời gian tới lần merge đầu p50/p90 | `mart_contribution_funnel` |
+| Q4 | Thời gian tới phản hồi đầu tiên cho issue/PR p50/p90; tỉ lệ đóng | `mart_responsiveness` |
+| Q5 | Bus factor: top 1–3 contributor chiếm bao nhiêu % đóng góp; tỉ lệ bot | `mart_repo_concentration` |
+| Q6 | Xếp hạng sức khoẻ các repo hệ data (điểm tổng hợp từ Q1–Q5, công thức ghi trong README) | `mart_repo_health_score` |
+
+**Giá trị cho DE/DA.** DE: mỗi kỹ thuật (incremental, partition, Spark so với DuckDB, data contract, cảnh báo chất lượng) có số trước/sau đo trên cùng bộ Q1–Q6 và cùng ngày dữ liệu. DA: định nghĩa metric, cohort, funnel, dashboard công khai.
+
+**Baseline đo trước tiên (PR B, ngay sau S0.4).** Một ngày GH Archive cố định (24 file, ngày và checksum ghi trong `benchmarks/reference.toml`), pipeline ngây thơ `benchmarks/naive_duckdb.py` (DuckDB đọc thẳng `*.json.gz`, full refresh, không partition, không khử trùng) tính Q1–Q6 bằng `benchmarks/queries/q1.sql`…`q6.sql`. Đo tổng thời gian, thời gian từng query, peak RAM, dữ liệu đọc, số dòng; 5 lần lấy median; workflow `benchmark.yml` trên runner chuẩn; ghi `runs.csv` với `variant=baseline`. PR 5, 7, 10, 12 chạy lại đúng workflow này với `variant=<tên>`, README so mỗi biến thể với baseline.
+
 Làm theo hai giai đoạn. Giai đoạn 1 chạy hoàn toàn trên dịch vụ cloud miễn phí và GitHub Actions, không cần Docker trên máy. Giai đoạn 2 chạy trên máy, thêm phần cloud miễn phí không làm được: Kafka, Trino/Hive, Airflow và thử chịu lỗi.
 
 ## Những gì đã kiểm về dịch vụ cloud miễn phí (2026-11-10)
@@ -56,7 +75,7 @@ Repo tạo bằng `gh`; harness `.claude` lấy từ TravelPlan rồi chỉnh ch
 ### S0.1 Tạo repo
 
 - `gh repo create tlamDson/RepoPulse --public --clone` vào `D:\Desktop\RepoPulse`, kèm mô tả và topics.
-- Một nhánh `main`, không có `develop`. Lý do: workflow chạy theo lịch của GitHub Actions chỉ chạy trên nhánh mặc định, nên pipeline phải nằm trên `main`.
+- Git flow như TravelPlan: feature → `develop` (squash), release `develop` → `main` (merge commit). `main` là nhánh mặc định vì workflow chạy theo lịch chỉ chạy trên nhánh mặc định; pipeline bắt đầu chạy sau release. Orchestrator tự release ở các mốc sau PR B, 7, 11, 14 khi CI xanh (cập nhật 2026-11-11, thay cho "chỉ một nhánh `main`").
 - Cấu hình repo: chỉ cho squash merge, tự xoá nhánh sau merge.
 - File gốc: `README.md`, `LICENSE` (MIT), `.gitignore` (Python, dbt, `.env`, `.claude/settings.local.json`, `.claude/worktrees/`), `.gitattributes`, `.env.example`, `pyproject.toml` có khoá phiên bản.
 
@@ -127,6 +146,7 @@ Chỗ nào không đạt thì sửa harness rồi chạy lại phần đó. Lam 
 |---|---|---|---|
 | S0 | (subplan ở trên) | Tạo repo, DevOps, harness, PR mẫu `feature/runs-log` | Test của module `runs.csv` |
 | 1 | (bước thử, không PR) | Sau khi Lam thêm secret: từ GitHub Actions chạy thử đẩy file lên Volume, chạy một job serverless, `dbt debug` tới SQL warehouse; trong notebook thử tải `data.gharchive.org`. Ghi kết quả vào `docs/progress.md`, chọn đường chính hay đường dự phòng | — |
+| B | `feature/baseline-naive` | Ngày dữ liệu chuẩn + checksum, pipeline ngây thơ DuckDB, bộ query Q1–Q6, `benchmark.yml` (5 lần, median), ghi `runs.csv` `variant=baseline` | Parser kết quả đo đúng schema `runs.csv`; checksum sai thì dừng; Q1–Q6 trên fixture nhỏ ra đúng số tính tay |
 | 2 | `feature/event-spec` | `eventspec/`: catalog event dạng YAML sinh JSON Schema; hàm kiểm event; quy tắc khoá chống trùng | Event thiếu trường bắt buộc bị từ chối; event trùng khoá bị nhận diện |
 | 3 | `feature/simkit-generator` | `simkit/`: sinh người dùng mô phỏng theo persona, có seed; chèn 6 loại lỗi dữ liệu biết trước (trùng, null, sai kiểu, đến muộn, đổi schema, bot) | Cùng seed ra cùng dữ liệu; số lỗi chèn đúng bằng số yêu cầu |
 | 4 | `feature/ingest-gharchive` | Tải file theo giờ, lọc loại event, idempotent theo (ngày, giờ), đẩy lên vùng landing; workflow cron | Chạy lại cùng giờ không sinh bản ghi trùng |
@@ -152,13 +172,13 @@ Một PR ở **repo TravelPlan** (tuỳ chọn, làm riêng bên đó) để có
 | ID | Số đo | Điều kiện | Baseline |
 |---|---|---|---|
 | M1 | Số event và dung lượng đã xử lý | Đếm ở bronze, silver, gold | Số quy mô |
-| M2 | Thời gian build khi thêm một ngày dữ liệu | Median 5 lần | Full refresh |
+| M2 | Thời gian build khi thêm một ngày dữ liệu | Median 5 lần | Full refresh (`variant=baseline`) |
 | M3 | Độ tươi dữ liệu p50/p95 | ≥168 lần chạy theo lịch. Chạy trên cloud nên tự tích luỹ, không cần máy Lam | Mục tiêu đặt trước |
 | M4 | Số lỗi chèn vào bị bắt; số báo động giả | 6 loại lỗi; N lần chạy sạch | Không có test: 0 |
 | M5 | Điểm giao nhau Spark và DuckDB | 1, 7, 30 ngày; 3 lần mỗi mức | DuckDB |
 | M7 | Port sang Snowflake: số dòng sửa, thời gian | Cùng `dbt build` | Bản chính |
 | M9 | Tỉ lệ event bị loại vì sai schema; tỉ lệ trùng | Event mô phỏng (ghi rõ là mô phỏng) và event thật nếu có | Trước khi có spec |
-| M10 | p50 thời gian query và lượng dữ liệu quét | N query dashboard, 10 lần | Bảng chưa partition |
+| M10 | p50 thời gian query và lượng dữ liệu quét | Bộ Q1–Q6, 10 lần | Bảng chưa partition (`variant=baseline`) |
 
 ## Giai đoạn 2 (trên máy, khi RAM rảnh): chia ba đợt
 
@@ -191,6 +211,8 @@ Giai đoạn 2 là phần mở rộng. Bỏ cũng không ảnh hưởng kết qu
 - Thêm secret chỉ đọc tới Mongo staging nếu muốn có event thật của TravelPlan.
 
 ## Cách chạy
+
+**Cập nhật 2026-11-11:** chạy headless bằng `scripts/orchestrate.py` (DAG ở `scripts/prs.toml`, mỗi PR một phiên `claude -p` trong worktree riêng, tối đa 2 song song, agent chuyên trách theo mảng, tự chờ quota, tự release). Cách dùng: `docs/kickoff.md`. Mô tả cũ bên dưới giữ để tham khảo vai trò.
 
 - **Phiên chính Fable (effort high):** viết kế hoạch ngắn cho từng PR có mục test phải đỏ, giao việc, quyết định merge, ghi `docs/progress.md`.
 - **Subagent Opus (effort medium):** mỗi PR một agent trong worktree riêng, viết test đỏ rồi code; một agent Opus khác review có bằng chứng.

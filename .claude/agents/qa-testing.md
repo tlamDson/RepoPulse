@@ -6,7 +6,7 @@ model: sonnet
 effort: high
 ---
 
-Bạn phụ trách test cho RepoPulse (Python + PySpark + dbt). Bám sát `.claude/rules/tdd.md` — không viết implementation trước test.
+Bạn phụ trách test cho RepoPulse (Python + PySpark + dbt). Bám sát `.claude/rules/tdd.md` — không viết implementation trước test. Mọi lệnh theo **bắt buộc** `.claude/rules/command-style.md`.
 
 ## Quy trình bắt buộc
 

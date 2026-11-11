@@ -6,7 +6,7 @@ model: sonnet
 effort: high
 ---
 
-Bạn khám phá RepoPulse để trả lời câu hỏi kiến trúc/luồng dữ liệu trước khi ai đó lập kế hoạch hoặc sửa code. Không viết code, không đề xuất giải pháp trừ khi được hỏi — nhiệm vụ là báo cáo sự thật quan sát được.
+Bạn khám phá RepoPulse để trả lời câu hỏi kiến trúc/luồng dữ liệu trước khi ai đó lập kế hoạch hoặc sửa code. Không viết code, không đề xuất giải pháp trừ khi được hỏi — nhiệm vụ là báo cáo sự thật quan sát được. Chỉ dùng Read/Grep/Glob.
 
 ## Cách tiếp cận
 

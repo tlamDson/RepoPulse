@@ -4,9 +4,12 @@
     "allow": [
       "Bash(git *)",
       "Bash(gh *)",
-      "Bash(python *)",
-      "Bash(pip *)",
-      "Bash(uv *)",
+      "Bash(python -m pytest*)",
+      "Bash(python -m ruff *)",
+      "Bash(python -m pip install -e *)",
+      "Bash(python scripts/*)",
+      "Bash(python benchmarks/*)",
+      "Bash(pip install -e *)",
       "Bash(pytest)",
       "Bash(pytest *)",
       "Bash(ruff *)",
@@ -14,8 +17,8 @@
       "Bash(dbt *)",
       "Bash(databricks *)",
       "Bash(duckdb *)",
-      "Bash(npm *)",
-      "Bash(npx *)",
+      "Bash(npm ci)",
+      "Bash(npm test)",
       "Bash(curl http://localhost*)",
       "Bash(curl -s http://localhost*)",
       "Bash(curl http://127.0.0.1*)",
@@ -35,6 +38,9 @@
       "Bash(git push origin main)",
       "Bash(git push origin main *)",
       "Bash(git push origin HEAD:main*)",
+      "Bash(git push origin develop)",
+      "Bash(git push origin develop *)",
+      "Bash(git push origin HEAD:develop*)",
       "Bash(git push --force*)",
       "Bash(git push -f*)",
       "Bash(git push * --force*)",
@@ -57,30 +63,48 @@
         ]
       }
     ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/log_permission.py\" 2>/dev/null || true",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "shell": "powershell",
+            "command": "if ($env:REPOPULSE_TASK) { exit 0 }; (New-Object Media.SoundPlayer 'C:\\Windows\\Media\\Windows Exclamation.wav').PlaySync()",
+            "async": true,
+            "timeout": 10,
+            "statusMessage": "permission chime"
+          }
+        ]
+      }
+    ],
+    "PermissionDenied": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/log_permission.py\" 2>/dev/null || true",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [
           {
             "type": "command",
             "shell": "powershell",
-            "command": "(New-Object Media.SoundPlayer 'C:\\Windows\\Media\\chimes.wav').PlaySync()",
+            "command": "if ($env:REPOPULSE_TASK) { exit 0 }; (New-Object Media.SoundPlayer 'C:\\Windows\\Media\\chimes.wav').PlaySync()",
             "async": true,
             "timeout": 10,
             "statusMessage": "done chime"
-          }
-        ]
-      }
-    ],
-    "PermissionRequest": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "shell": "powershell",
-            "command": "(New-Object Media.SoundPlayer 'C:\\Windows\\Media\\Windows Exclamation.wav').PlaySync()",
-            "async": true,
-            "timeout": 10,
-            "statusMessage": "permission chime"
           }
         ]
       }
@@ -92,7 +116,7 @@
           {
             "type": "command",
             "shell": "powershell",
-            "command": "(New-Object Media.SoundPlayer 'C:\\Windows\\Media\\Windows Exclamation.wav').PlaySync()",
+            "command": "if ($env:REPOPULSE_TASK) { exit 0 }; (New-Object Media.SoundPlayer 'C:\\Windows\\Media\\Windows Exclamation.wav').PlaySync()",
             "async": true,
             "timeout": 10,
             "statusMessage": "needs-input chime"

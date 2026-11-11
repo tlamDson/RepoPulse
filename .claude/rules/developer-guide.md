@@ -1,27 +1,25 @@
-# Developer Guide — Git, Worktree, Commit, PR
+# Developer Guide — Git Flow, Worktree, Commit, PR
 
-> Quy ước đóng góp code cho RepoPulse. Quy trình test nằm ở `.claude/rules/tdd.md`.
+> Quy ước đóng góp code cho RepoPulse. Quy trình test: `.claude/rules/tdd.md`. Kiểu lệnh:
+> `.claude/rules/command-style.md`.
 
-## Nhánh
+## Git Flow
 
-`main ← <type>/<mô-tả> (PR, squash merge)`. Một nhánh dài hạn duy nhất là `main`, không có `develop`: workflow chạy theo lịch (`schedule`) và `workflow_dispatch` của GitHub Actions chỉ được nhận diện trên nhánh mặc định, nên pipeline phải sống trên `main`. Nhánh feature tự xoá sau merge.
+`develop ← <type>/<mô-tả>` (PR, **squash**), `main ← develop` (PR release, **merge commit**). Không push thẳng lên `develop` hay `main`.
 
-**Branch types:** `feature/`, `fix/`, `test/`, `docs/`, `chore/`. Chữ thường, phân tách bằng `-`, mô tả cụ thể phạm vi (`feature/ingest-gharchive`, không `feature/update`).
+- **`main` là nhánh mặc định** của GitHub. Workflow chạy theo lịch (`schedule`) chỉ chạy trên `main`, và `workflow_dispatch` chỉ thấy file workflow có trên `main`. Vì vậy pipeline/cron chỉ bắt đầu chạy sau release; mốc release ghi ở `scripts/prs.toml` (`release_after`): sau PR B (baseline), PR 7 (cron), PR 11 (Pages), PR 14.
+- **Nhánh feature rẽ từ `origin/develop` mới nhất**, tự xoá sau merge.
+- **Branch types:** `feature/`, `fix/`, `test/`, `docs/`, `chore/`. Chữ thường, phân tách bằng `-`, mô tả cụ thể phạm vi (`feature/ingest-gharchive`, không `feature/update`).
 
 ## Worktree
 
-Subagent viết code **luôn** làm trong worktree riêng, gọi `EnterWorktree` trước khi sửa file đầu tiên. Lý do: nhiều phiên chạy song song trên cùng thư mục thì `git checkout`/`git reset` của phiên này âm thầm xoá thay đổi chưa commit của phiên kia.
+Mỗi việc viết code có một worktree riêng dưới `.claude/worktrees/`. Lý do: nhiều phiên chạy song song trên cùng thư mục thì `git checkout`/`git reset` của phiên này âm thầm xoá thay đổi chưa commit của phiên kia.
 
-`EnterWorktree` rẽ từ `origin/main`, đúng nhánh gốc của repo này, nên chỉ cần đổi tên nhánh:
-
-```bash
-git fetch origin main
-git branch -m <type>/<mô-tả-kebab-case>
-```
-
-Worktree mới không có môi trường Python: `pip install -e ".[dev,dbt]"` (hoặc tạo `.venv` riêng). Không copy `.env` vào worktree trừ khi task thật sự cần gọi dịch vụ ngoài.
-
-Cạm bẫy Windows: mở phiên bằng `cd D:\Desktop\RepoPulse` (chữ `D:` viết hoa). Đường dẫn `d:` và `D:` lệch nhau có thể làm Claude Code coi là hai project khác nhau (memory, settings, worktree).
+- **Chạy headless:** `scripts/orchestrate.py` tạo `.claude/worktrees/pr-<id>` từ `origin/develop` và chạy phiên PR trong đó. Phiên và subagent không tạo worktree con.
+- **Phiên tay:** `git worktree add .claude/worktrees/<tên> -b <type>/<mô-tả> origin/develop`. Không dùng `EnterWorktree` (nó rẽ từ nhánh mặc định `main`, sai gốc).
+- **Dọn:** `python scripts/orchestrate.py clean` (hoặc `/wt-clean`) xoá worktree có PR đã merge, cây sạch, không còn phiên chạy trong đó. Không tự `rm -rf` worktree.
+- Worktree mới không có môi trường Python riêng: dùng chung `pip install -e ".[dev,dbt]"` đã cài. Không copy `.env` vào worktree.
+- Cạm bẫy Windows: mở terminal bằng `cd D:\Desktop\RepoPulse` (chữ `D:` viết hoa). Đường dẫn `d:` và `D:` lệch nhau làm Claude Code coi là hai project khác nhau (memory, settings).
 
 ## Commit Messages
 
@@ -33,11 +31,11 @@ add runs.csv append with schema check
 fix late-event window off-by-one in silver dedup
 ```
 
-Không commit: `.env`/credentials/tokens, `.venv/`, `transform/target/`, file `*.duckdb`, dữ liệu thô (`data/raw/`, `*.json.gz`, `*.parquet`), file không liên quan task.
+Không commit: `.env`/credentials/tokens, `.venv/`, `transform/target/`, `*.duckdb`, dữ liệu thô (`data/raw/`, `*.json.gz`, `*.parquet`), `logs/`, `.claude/state/`, file không liên quan task.
 
 ## Pull Requests
 
-Target luôn là `main`. Title `<type>: <short description>` (< 72 ký tự): `feat:`, `fix:`, `test:`, `docs:`, `chore:`, `refactor:`. Mô tả theo `.github/pull_request_template.md`:
+Feature target `develop`; chỉ PR release target `main`. Title `<type>: <short description>` (< 72 ký tự): `feat:`, `fix:`, `test:`, `docs:`, `chore:`, `refactor:`, `release:`. Mô tả theo `.github/pull_request_template.md`, thêm mục `## Giả định` khi chạy headless:
 
 ```markdown
 ## Summary
@@ -46,6 +44,9 @@ Target luôn là `main`. Title `<type>: <short description>` (< 72 ký tự): `f
 
 ## RED
 <output test đỏ thật, chép từ lần chạy trên commit chỉ có test>
+
+## Giả định
+- <quyết định nhỏ đã tự chọn>
 
 ## Test plan
 - [ ] pytest pass locally
@@ -56,24 +57,21 @@ Target luôn là `main`. Title `<type>: <short description>` (< 72 ký tự): `f
 
 ### Điều kiện merge
 
-| Điều kiện | Ghi chú |
-|---|---|
-| CI xanh cả 3 job | `Lint`, `Unit Tests`, `dbt build (DuckDB)` |
-| `code-reviewer` kết luận PASS | Ghi kết luận và bằng chứng vào PR (comment) |
-| Không phải PR harness/settings | PR sửa `.claude/settings.json` để chủ repo duyệt |
+| Target | Cách merge | Điều kiện |
+|---|---|---|
+| `develop` | `gh pr merge <số> --squash --delete-branch` | CI xanh cả 3 job + `code-reviewer` PASS (ghi comment trên PR) |
+| `main` | `gh pr merge <số> --merge` (PR `develop → main`) | CI của PR release xanh; chỉ ở mốc `release_after` |
+| PR sửa `.claude/settings.json`, `.claude/auto-mode.json`, hook | Chủ repo tự merge | Chủ repo duyệt |
 
-```bash
-gh pr checks <số-PR> --watch
-gh pr merge <số-PR> --squash --delete-branch   # không bao giờ thêm --admin
-```
+Không bao giờ thêm `--admin`.
 
-**Trước khi push thêm commit vào PR đã mở**, chạy `gh pr view <số-PR> --json state` — PR đã `MERGED`/`CLOSED` thì push không trigger CI; tạo nhánh mới từ `main` cho phần việc còn lại.
+**Trước khi push thêm commit vào PR đã mở**, chạy `gh pr view <số> --json state` — PR đã `MERGED`/`CLOSED` thì push không trigger CI; tạo nhánh mới từ `origin/develop` cho phần việc còn lại.
 
-Nhánh bị tụt sau `main`: `gh pr update-branch <số-PR>`, không rebase, không force push.
+Nhánh bị tụt sau `develop`: `gh pr update-branch <số>`, không rebase, không force push.
 
 ### Sửa `.github/workflows/ci.yml` — đừng làm mất required check
 
-Tên ba job (`Lint`, `Unit Tests`, `dbt build (DuckDB)`) **chính là** định danh required status check của `main`. Vì vậy:
+Tên ba job (`Lint`, `Unit Tests`, `dbt build (DuckDB)`) **chính là** định danh required status check của `develop` và `main`. Vì vậy:
 
 - **Không đổi tên** ba job này. Cần thêm việc thì thêm job mới tên khác.
 - **Không thêm `paths:` vào `on: pull_request`** — workflow không chạy, check treo ở _Expected_, PR không merge được.

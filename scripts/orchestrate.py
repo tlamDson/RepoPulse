@@ -37,6 +37,7 @@ from repopulse.orchestrator import (  # noqa: E402
     clean_plan,
     decide_after_exit,
     harness_auto_approved,
+    harness_file_approved,
     load_tasks,
     merged_task_ids,
     next_ready,
@@ -109,7 +110,7 @@ def permission_log_lines() -> list[str]:
 
 def harness_approved(done: set[str], auto: bool) -> bool:
     text = sh(["git", "show", "origin/develop:docs/harness-check.md"])
-    if "Lam đã duyệt" in text:
+    if harness_file_approved(text):
         return True
     return auto and "S0.4" in done and harness_auto_approved(permission_log_lines(), "S0.4")
 
@@ -523,6 +524,9 @@ def report(_: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    for stream in (sys.stdout, sys.stderr):  # Windows consoles default to cp1252
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("run")

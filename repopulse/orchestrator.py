@@ -326,6 +326,14 @@ def should_stop(state_dir: Path) -> bool:
     return (Path(state_dir) / "STOP").exists()
 
 
+APPROVAL_RE = re.compile(r"^Lam đã duyệt\b", re.MULTILINE)
+
+
+def harness_file_approved(text: str) -> bool:
+    """True only when a line *starts* with the marker (the template mentions it mid-sentence)."""
+    return bool(APPROVAL_RE.search(text or ""))
+
+
 def harness_auto_approved(log_lines: Iterable[str], task_id: str) -> bool:
     for line in log_lines:
         entry = parse_stream_line(line)

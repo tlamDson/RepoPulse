@@ -1,0 +1,26 @@
+{
+  "autoMode": {
+    "environment": [
+      "This is the RepoPulse repository (github.com/tlamDson/RepoPulse), a personal open-source data engineering project owned by the user. Its git remote origin and the GitHub repo tlamDson/RepoPulse are trusted.",
+      "Sessions run unattended through scripts/orchestrate.py: each PR runs in its own git worktree under .claude/worktrees/pr-<id> inside this repository, branched from origin/develop.",
+      "Downloading public hourly files from https://data.gharchive.org/ (GH Archive) and installing pinned Python packages from PyPI are normal parts of this project."
+    ],
+    "allow": [
+      "$defaults",
+      "Creating, editing and deleting files inside this repository's .claude/worktrees/ directory and inside Claude's own scratchpad or temp directory is routine work and always allowed.",
+      "Committing and pushing branches named feature/*, fix/*, test/*, docs/*, chore/* or release/* to origin, and opening pull requests into develop or main on tlamDson/RepoPulse, is the normal workflow and always allowed.",
+      "Squash-merging a pull request into develop with `gh pr merge <n> --squash --delete-branch` is allowed when all three CI checks (Lint, Unit Tests, dbt build (DuckDB)) are green and the code-reviewer agent concluded PASS.",
+      "Merging the develop -> main release pull request with `gh pr merge <n> --merge` is allowed when its CI checks are green; the repository owner authorised automatic releases.",
+      "Temporarily editing a committed source file to run a mutation test and then restoring it with `git checkout -- <file>` is a routine review step and always allowed.",
+      "Running pytest, ruff, dbt (DuckDB target ci), python scripts/*.py and python benchmarks/*.py inside this repository or its worktrees, and writing test or review evidence files there, is routine and always allowed.",
+      "Triggering this repository's own workflows with `gh workflow run` and reading run results with `gh run view` / `gh run list` is routine and always allowed.",
+      "Posting review comments on this repository's pull requests with `gh pr comment` is routine and always allowed."
+    ],
+    "hard_deny": [
+      "$defaults",
+      "Never run `gh secret` commands and never read, print or copy the contents of .env files or token values.",
+      "Never push directly to the develop or main branches, never force-push, and never use `gh pr merge --admin` or change branch protection.",
+      "Never edit .claude/settings.json, .claude/settings.local.json, .claude/auto-mode.json or files under .claude/hooks/ during an unattended session."
+    ]
+  }
+}
