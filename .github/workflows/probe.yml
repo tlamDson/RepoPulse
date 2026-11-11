@@ -1,0 +1,98 @@
+name: Cloud probe
+
+# Bước thử số 1 (docs/plan.md): GitHub Actions có điều khiển được Databricks Free Edition không
+# (token, Volume, job serverless, SQL warehouse, dbt debug), hay phải dùng đường dự phòng
+# (runner + MotherDuck). Kết quả: artifact `probe-result` (probe-result.json + probe-result.md)
+# và Job summary; chỉ có pass/fail/skipped, không có số đo.
+#
+# Trigger:
+# - workflow_dispatch chỉ hiện trong tab Actions khi file này đã có trên `main` (sau release).
+# - Vì vậy thêm `push` giới hạn đúng nhánh `docs/probe-result` để chạy được ngay trong PR này.
+#   Không dùng `pull_request`. Sau khi merge, nhánh bị xoá nên trigger push không còn chạy.
+#
+# Secret thiếu thì check tương ứng ra `skipped`, workflow vẫn xanh. Secret chỉ vào qua `env:`;
+# không bước nào in giá trị. Artifact được che host/token/warehouse path trước khi ghi.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [docs/probe-result]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: probe-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    name: Cloud probe
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+      MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      # MotherDuck từ chối client DuckDB mới hơn bản extension của nó hỗ trợ (lần chạy đầu:
+      # "latest supported version is v1.5.6"), nên khoá duckdb ở đúng bản đó cho bước thử.
+      - name: Install
+        run: pip install -e ".[dbt]" dbt-databricks "duckdb==1.5.6"
+
+      - name: Run probe checks
+        env:
+          DATABRICKS_HTTP_PATH: ${{ secrets.DATABRICKS_HTTP_PATH }}
+        run: >-
+          python -m repopulse.probe
+          --json-out probe-result.json
+          --markdown-out probe-result.md
+          --no-step-summary
+          --github-env
+
+      # PROBE_HTTP_PATH do bước trên ghi vào $GITHUB_ENV (đã ::add-mask::), lấy từ
+      # DATABRICKS_HTTP_PATH hoặc tự tìm qua API warehouses.
+      - name: dbt debug (Databricks)
+        id: dbt_databricks
+        if: env.DATABRICKS_HOST != '' && env.DATABRICKS_TOKEN != '' && env.PROBE_HTTP_PATH != ''
+        continue-on-error: true
+        env:
+          DATABRICKS_HTTP_PATH: ${{ env.PROBE_HTTP_PATH }}
+        run: dbt debug --project-dir transform --profiles-dir transform --target databricks
+
+      - name: dbt debug (MotherDuck)
+        id: dbt_motherduck
+        if: env.MOTHERDUCK_TOKEN != ''
+        continue-on-error: true
+        run: dbt debug --project-dir transform --profiles-dir transform --target motherduck
+
+      - name: Merge dbt debug outcomes into the report
+        if: always()
+        env:
+          DBT_DATABRICKS_OUTCOME: ${{ steps.dbt_databricks.outcome }}
+          DBT_MOTHERDUCK_OUTCOME: ${{ steps.dbt_motherduck.outcome }}
+        run: >-
+          python -m repopulse.probe merge-dbt
+          --json probe-result.json
+          --markdown-out probe-result.md
+          --databricks "$DBT_DATABRICKS_OUTCOME"
+          --motherduck "$DBT_MOTHERDUCK_OUTCOME"
+
+      - name: Upload probe result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: probe-result
+          path: |
+            probe-result.json
+            probe-result.md
+          if-no-files-found: error
+          retention-days: 30

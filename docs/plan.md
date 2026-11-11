@@ -230,7 +230,7 @@ Vì mọi thứ nặng chạy trên GitHub Actions và Databricks, máy Lam ch�
 
 ## Kiểm chứng
 
-- **Bước 1 (bước thử)** quyết định đường chính hay dự phòng; kết quả ghi vào `docs/progress.md` trước khi làm PR 4.
+- **Bước 1 (bước thử)** quyết định đường chính hay dự phòng; kết quả ghi vào `docs/progress.md` trước khi làm PR 4. Cập nhật 2026-11-11: bước thử làm qua PR `docs/probe-result`, kết quả ở [`probe-result.md`](probe-result.md) — chọn **đường dự phòng**; Databricks chưa kiểm được vì token đang lưu không phải personal access token.
 - Mỗi PR: CI xanh (lint, test, `dbt build` trên DuckDB), có output test đỏ trong mô tả PR, review PASS.
 - Pipeline: workflow theo lịch chạy xanh nhiều ngày liền; `runs.csv` tăng dòng; trang GitHub Pages cập nhật.
 - Chạy lại cùng một giờ dữ liệu không sinh bản ghi trùng.
