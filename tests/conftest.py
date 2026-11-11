@@ -4,6 +4,10 @@
 partition). On CI (``CI`` is set) a missing pyspark/delta/Java is an error, never a skip. Locally
 the Spark tests skip with a reason when pyspark, delta-spark, Java 17 or (Windows) winutils is
 missing.
+
+``lake`` / ``built``: one silver parquet + one ``dbt build`` of ``transform/`` per test run, shared
+by test_dbt_marts.py and test_governance.py (helpers in ``dbt_helpers.py``, imported lazily so a
+missing dbt extra only skips the dbt tests).
 """
 
 from __future__ import annotations
@@ -95,3 +99,19 @@ def spark():
     session = configure_spark_with_delta_pip(builder).getOrCreate()
     yield session
     session.stop()
+
+
+@pytest.fixture(scope="session")
+def lake(tmp_path_factory) -> dict:
+    """Silver parquet built from the JSON fixtures, a DuckDB path and a ci profile, all in tmp."""
+    import dbt_helpers
+
+    return dbt_helpers.make_lake(tmp_path_factory.mktemp("dbt_marts"))
+
+
+@pytest.fixture(scope="session")
+def built(lake) -> dict:
+    """One ``dbt build`` of transform/ on ``lake``; check ``built["proc"]`` before using the DB."""
+    import dbt_helpers
+
+    return dbt_helpers.build_lake(lake)
