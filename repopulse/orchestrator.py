@@ -1,0 +1,363 @@
+"""Pure core of the headless orchestrator.
+
+Everything here is side-effect free so it can be unit tested. Process spawning, git and gh
+calls live in ``scripts/orchestrate.py``.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import tomllib
+from collections.abc import Iterable
+from dataclasses import dataclass
+from pathlib import Path
+
+RESUME_GRACE_S = 60
+WARN_UTILIZATION = 0.9
+EXPECTED_DENIALS = ("gh secret",)
+
+# ---------- tasks ----------
+
+
+@dataclass(frozen=True)
+class Task:
+    id: str
+    branch: str
+    agent: str
+    deps: tuple[str, ...] = ()
+    needs: tuple[str, ...] = ()
+    release_after: bool = False
+    optional: bool = False
+    title: str = ""
+
+
+def load_tasks(path: Path) -> list[Task]:
+    data = tomllib.loads(Path(path).read_text(encoding="utf-8"))
+    tasks = [
+        Task(
+            id=str(t["id"]),
+            branch=t["branch"],
+            agent=t["agent"],
+            deps=tuple(str(d) for d in t.get("deps", ())),
+            needs=tuple(t.get("needs", ())),
+            release_after=bool(t.get("release_after", False)),
+            optional=bool(t.get("optional", False)),
+            title=t.get("title", ""),
+        )
+        for t in data.get("task", [])
+    ]
+    known = {t.id for t in tasks}
+    for t in tasks:
+        missing = [d for d in t.deps if d not in known]
+        if missing:
+            raise ValueError(f"task {t.id} depends on unknown task(s): {', '.join(missing)}")
+    return tasks
+
+
+# ---------- gates ----------
+
+
+@dataclass(frozen=True)
+class Gates:
+    secrets: frozenset[str]
+    harness_approved: bool
+
+
+@dataclass(frozen=True)
+class Gate:
+    kind: str  # "block" | "skip"
+    reason: str
+
+
+def _has_cloud(secrets: frozenset[str]) -> bool:
+    databricks = {"DATABRICKS_HOST", "DATABRICKS_TOKEN"} <= secrets
+    return databricks or "MOTHERDUCK_TOKEN" in secrets
+
+
+def _need_reason(need: str, gates: Gates) -> str | None:
+    if need == "cloud" and not _has_cloud(gates.secrets):
+        return "cần secret DATABRICKS_HOST + DATABRICKS_TOKEN hoặc MOTHERDUCK_TOKEN"
+    if need == "snowflake" and not any(s.startswith("SNOWFLAKE_") for s in gates.secrets):
+        return "cần secret SNOWFLAKE_* (đăng ký Snowflake trial)"
+    if need == "harness" and not gates.harness_approved:
+        return "chờ duyệt harness (docs/harness-check.md chưa có 'Lam đã duyệt')"
+    return None
+
+
+def gate_for(task: Task, gates: Gates) -> Gate | None:
+    reasons = [r for n in task.needs if (r := _need_reason(n, gates))]
+    if not reasons:
+        return None
+    return Gate("skip" if task.optional else "block", "; ".join(reasons))
+
+
+# ---------- scheduling ----------
+
+
+def next_ready(
+    tasks: list[Task],
+    done: set[str],
+    running: set[str],
+    gates: Gates,
+    slots: int,
+) -> tuple[list[Task], dict[str, str], list[Task]]:
+    """Return (ready to start, blocked id -> reason, skipped optional tasks).
+
+    Skipped optional tasks count as satisfied for their dependants.
+    """
+    satisfied = set(done)
+    skipped: list[Task] = []
+    blocked: dict[str, str] = {}
+    ready: list[Task] = []
+    changed = True
+    while changed:  # skips can unlock later tasks, so iterate to a fixed point
+        changed = False
+        for t in tasks:
+            if t.id in satisfied or t.id in running or t in ready or t.id in blocked:
+                continue
+            if not all(d in satisfied for d in t.deps):
+                continue
+            gate = gate_for(t, gates)
+            if gate and gate.kind == "skip":
+                skipped.append(t)
+                satisfied.add(t.id)
+                changed = True
+            elif gate:
+                blocked[t.id] = gate.reason
+            else:
+                ready.append(t)
+    free = max(0, slots - len(running))
+    return ready[:free], blocked, skipped
+
+
+def merged_task_ids(tasks: list[Task], prs: Iterable[dict]) -> set[str]:
+    merged = {p["headRefName"] for p in prs if p.get("state") == "MERGED"}
+    return {t.id for t in tasks if t.branch in merged}
+
+
+def releases_due(tasks: list[Task], done: set[str], released: set[str]) -> list[str]:
+    return [t.id for t in tasks if t.release_after and t.id in done and t.id not in released]
+
+
+# ---------- stream-json, quota, result ----------
+
+
+def parse_stream_line(line: str) -> dict | None:
+    line = line.strip()
+    if not line:
+        return None
+    try:
+        obj = json.loads(line)
+    except json.JSONDecodeError:
+        return None
+    return obj if isinstance(obj, dict) else None
+
+
+def rate_limit_action(event: dict | None) -> tuple[str, int | str | None]:
+    """Map a stream event to ("none"|"warn"|"wait"|"stop", detail)."""
+    if not event or event.get("type") != "rate_limit_event":
+        return ("none", None)
+    info = event.get("rate_limit_info") or {}
+    status = info.get("status")
+    if status == "rejected":
+        if info.get("errorCode"):
+            return ("stop", f"usage limit: {info['errorCode']}")
+        return ("wait", info.get("resetsAt"))
+    if status == "allowed_warning" and (info.get("utilization") or 0) >= WARN_UTILIZATION:
+        return ("warn", info.get("utilization"))
+    return ("none", None)
+
+
+_RESULT_RE = re.compile(r"RESULT:\s*(merged|failed|blocked)\b[ \t]*(.*)")
+
+
+def parse_result(text: str) -> tuple[str, str] | None:
+    found = _RESULT_RE.findall(text or "")
+    if not found:
+        return None
+    status, reason = found[-1]
+    return status, reason.strip()
+
+
+@dataclass(frozen=True)
+class Decision:
+    kind: str  # merged | failed | blocked | resume_at | stop
+    reason: str = ""
+    at: int | None = None
+
+
+def decide_after_exit(
+    returncode: int,
+    last_rate_event: dict | None,
+    result_text: str,
+    now: int,
+    max_wait_s: int,
+) -> Decision:
+    result = parse_result(result_text)
+    if result and result[0] == "merged":
+        return Decision("merged", result[1])
+    action, detail = rate_limit_action(last_rate_event)
+    if action == "stop":
+        return Decision("stop", str(detail))
+    if action == "wait":
+        if not isinstance(detail, int):
+            return Decision("stop", "usage limit without reset time")
+        at = detail + RESUME_GRACE_S
+        if at - now > max_wait_s:
+            return Decision("stop", f"usage limit resets at {detail}, beyond max wait")
+        return Decision("resume_at", "usage limit", at=at)
+    if result:
+        return Decision(result[0], result[1])
+    return Decision("failed", f"exit {returncode}, no RESULT line")
+
+
+# ---------- command and prompt ----------
+
+
+def build_command(repo_root: Path, prompt: str, resume: str | None) -> list[str]:
+    cmd = [
+        "claude",
+        "-p",
+        prompt,
+        "--model",
+        "fable",
+        "--effort",
+        "high",
+        "--permission-mode",
+        "auto",
+        "--permission-prompts",
+        "none",
+        "--settings",
+        str(Path(repo_root) / ".claude" / "auto-mode.json"),
+        "--output-format",
+        "stream-json",
+        "--verbose",
+    ]
+    if resume:
+        cmd += ["--resume", resume]
+    return cmd
+
+
+def build_prompt(task: Task) -> str:
+    label = f"PR {task.id}" if task.id[0].isdigit() else f"việc {task.id}"
+    about = task.title or task.branch
+    return f"""Bạn là phiên điều phối headless cho {label} của RepoPulse ({about}).
+Thư mục hiện tại là worktree riêng của việc này, nhánh `{task.branch}` rẽ từ `origin/develop`.
+Đọc trước: CLAUDE.md, docs/plan.md (mục của {label}), .claude/rules/command-style.md.
+Kiểm `gh pr list --head {task.branch} --state all`: nếu PR đã mở thì làm tiếp từ đó.
+
+Quy trình:
+1. Viết kế hoạch ngắn (5-10 dòng) có mục "test phải đỏ".
+2. Giao agent `{task.agent}` (subagent, KHÔNG dùng isolation worktree, làm ngay trong thư mục này)
+   viết test đỏ, commit riêng, rồi code tới khi xanh. Dán nguyên văn .claude/rules/command-style.md
+   vào brief của agent.
+3. Push, mở PR vào `develop` theo .github/pull_request_template.md (có ## RED và ## Giả định).
+4. Chờ CI: `gh pr checks <số> --watch --interval 30` (foreground), lặp tới khi xong.
+   CI đỏ thì sửa và push lại.
+5. Giao agent `code-reviewer` review có bằng chứng. FAIL thì sửa rồi review lại (tối đa 2 vòng).
+6. CI xanh cả 3 job và review PASS: `gh pr merge <số> --squash --delete-branch`.
+
+Luật: không hỏi người dùng; mọi giả định ghi vào mục ## Giả định của PR. Không sửa gì trong
+.claude/ ngoài worktrees/. Không đọc .env, không chạy gh secret. Bị từ chối quyền thì đổi cách
+theo command-style; vẫn không được thì dừng.
+
+Dòng cuối cùng của câu trả lời PHẢI là một trong:
+RESULT: merged <số PR>
+RESULT: failed <lý do ngắn>
+RESULT: blocked <việc cần chủ repo làm>
+"""
+
+
+# ---------- worktrees ----------
+
+
+@dataclass(frozen=True)
+class Worktree:
+    path: str
+    branch: str | None
+    dirty: bool
+
+
+@dataclass(frozen=True)
+class CleanAction:
+    path: str
+    branch: str | None
+    action: str  # remove | keep
+    reason: str
+
+
+def parse_worktree_porcelain(text: str) -> list[tuple[str, str | None]]:
+    out: list[tuple[str, str | None]] = []
+    path: str | None = None
+    branch: str | None = None
+    for line in text.splitlines() + [""]:
+        if line.startswith("worktree "):
+            path, branch = line[len("worktree ") :].strip(), None
+        elif line.startswith("branch "):
+            branch = line[len("branch ") :].strip().removeprefix("refs/heads/")
+        elif not line.strip() and path is not None:
+            out.append((path, branch))
+            path, branch = None, None
+    return out
+
+
+def clean_plan(
+    worktrees: list[Worktree], pr_states: dict[str, str], active: set[str]
+) -> list[CleanAction]:
+    plan = []
+    for w in worktrees:
+        state = pr_states.get(w.branch or "", "NONE")
+        if w.path in active:
+            plan.append(CleanAction(w.path, w.branch, "keep", "đang chạy"))
+        elif w.dirty:
+            plan.append(CleanAction(w.path, w.branch, "keep", "còn thay đổi chưa commit"))
+        elif state != "MERGED":
+            plan.append(CleanAction(w.path, w.branch, "keep", f"PR {state}"))
+        else:
+            plan.append(CleanAction(w.path, w.branch, "remove", "PR đã merge"))
+    return plan
+
+
+# ---------- stop file, harness gate, progress ----------
+
+
+def should_stop(state_dir: Path) -> bool:
+    return (Path(state_dir) / "STOP").exists()
+
+
+def harness_auto_approved(log_lines: Iterable[str], task_id: str) -> bool:
+    for line in log_lines:
+        entry = parse_stream_line(line)
+        if not entry or entry.get("task") != task_id or entry.get("event") != "PermissionDenied":
+            continue
+        if not any(e in str(entry.get("input", "")) for e in EXPECTED_DENIALS):
+            return False
+    return True
+
+
+def render_progress(
+    tasks: list[Task],
+    done: set[str],
+    running: set[str],
+    blocked: dict[str, str],
+    skipped: set[str],
+) -> str:
+    rows = ["| Việc | Nhánh | Trạng thái | Ghi chú |", "|---|---|---|---|"]
+    for t in tasks:
+        if t.id in done:
+            status, note = "merged", ""
+        elif t.id in running:
+            status, note = "running", ""
+        elif t.id in skipped:
+            status, note = "skipped", _need_reason_text(t)
+        elif t.id in blocked:
+            status, note = "blocked", blocked[t.id]
+        else:
+            status, note = "pending", ""
+        rows.append(f"| {t.id} | `{t.branch}` | {status} | {note} |")
+    return "\n".join(rows) + "\n"
+
+
+def _need_reason_text(task: Task) -> str:
+    return "thiếu: " + ", ".join(task.needs) if task.needs else ""
