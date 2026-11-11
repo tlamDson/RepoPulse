@@ -951,3 +951,14 @@ def test_reader_keeps_the_highest_quota_peak_a_session_reported(tasks, tmp_path:
     cli._reader(run, tmp_path / "pr.jsonl")
     assert run.peak == 0.75
     assert run.session_id == "s1"
+
+
+def _t(needs, optional=False):
+    from repopulse.orchestrator import Task
+
+    return Task(id="x", branch="feature/x", agent="a", needs=tuple(needs), optional=optional)
+
+
+def test_unknown_need_blocks_instead_of_passing_silently():
+    g = gate_for(_t(["clod"]), CLOUD)
+    assert g is not None and g.kind == "block" and "clod" in g.reason
