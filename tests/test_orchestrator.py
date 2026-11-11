@@ -582,12 +582,30 @@ def test_develop_ci_state_maps_latest_run():
 def test_develop_ci_pending_keeps_previous_verdict():
     from repopulse.orchestrator import develop_ci_blocks
 
-    # red blocks new work; pending keeps whatever we knew before; green/unknown release it
+    # red blocks new work; pending/unknown keep whatever we knew before; only green releases it
     assert develop_ci_blocks("red", previously_blocked=False) is True
     assert develop_ci_blocks("pending", previously_blocked=True) is True
     assert develop_ci_blocks("pending", previously_blocked=False) is False
     assert develop_ci_blocks("green", previously_blocked=True) is False
-    assert develop_ci_blocks("unknown", previously_blocked=True) is False
+
+
+def test_develop_ci_unknown_does_not_clear_a_red_flag():
+    # a gh error or a cancelled run says nothing new: a red develop stays red until green
+    from repopulse.orchestrator import develop_ci_blocks
+
+    assert develop_ci_blocks("unknown", previously_blocked=True) is True
+    assert develop_ci_blocks("unknown", previously_blocked=False) is False
+
+
+def test_failure_context_keeps_only_the_five_latest_texts():
+    from repopulse.orchestrator import failure_context
+
+    lines = [
+        _line({"type": "assistant", "message": {"content": [{"type": "text", "text": f"t{i}"}]}})
+        for i in range(8)
+    ]
+    ctx = failure_context(lines)
+    assert ctx.splitlines() == ["t3", "t4", "t5", "t6", "t7"]
 
 
 # ---------- stall detection (#6) ----------
@@ -597,7 +615,27 @@ def test_is_stalled_after_silence_limit():
     from repopulse.orchestrator import is_stalled
 
     assert is_stalled(last_output=1000, now=1000 + 1799, limit_s=1800, last_rate=None) is False
+    assert is_stalled(last_output=1000, now=1000 + 1800, limit_s=1800, last_rate=None) is False
     assert is_stalled(last_output=1000, now=1000 + 1801, limit_s=1800, last_rate=None) is True
+
+
+def test_decide_after_exit_stalled_session_fails_even_with_stale_rejected_event():
+    # Review PR 24: a stalled run whose last_rate is an old "rejected" event must not be
+    # resumed as if it hit the usage limit; it is a failure with the stall as its reason.
+    stale = {
+        "type": "rate_limit_event",
+        "rate_limit_info": {"status": "rejected", "resetsAt": 1000},
+    }
+    d = decide_after_exit(
+        -15, stale, "", now=5000, max_wait_s=6 * 3600, stalled="treo 30 phút không có output"
+    )
+    assert d.kind == "failed"
+    assert d.reason == "treo 30 phút không có output"
+
+
+def test_decide_after_exit_stalled_but_merged_is_still_merged():
+    d = decide_after_exit(0, None, "RESULT: merged 24", now=0, max_wait_s=0, stalled="treo")
+    assert d.kind == "merged"
 
 
 def test_is_stalled_not_while_waiting_for_quota_reset():
@@ -610,7 +648,7 @@ def test_is_stalled_not_while_waiting_for_quota_reset():
     # silent because the in-session watchdog waits for the reset: not a stall
     assert is_stalled(last_output=1000, now=9000, limit_s=1800, last_rate=rejected) is False
     # reset passed long ago and still silent: stalled
-    assert is_stalled(last_output=1000, now=10_000 + 1801, limit_s=1800, last_rate=rejected)
+    assert is_stalled(last_output=1000, now=10_000 + 1801, limit_s=1800, last_rate=rejected) is True
 
 
 # ---------- CLI defaults ----------
