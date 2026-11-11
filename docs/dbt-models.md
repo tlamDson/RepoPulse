@@ -49,7 +49,11 @@ python -m dbt.cli.main build --project-dir transform --profiles-dir transform --
 Seed `fixture_silver_gharchive_events` là **fixture cho CI, không phải số đo**: 36 event viết tay
 (`tests/fixtures/gharchive_small` đã khử trùng theo `id` + `tests/fixtures/gharchive_scd2`) theo
 đúng cột của `silver/gharchive_events` (`docs/spark-jobs.md`). Sinh lại từ JSON bằng
-`silver_select_sql` trong `tests/test_dbt_marts.py`.
+`silver_select_sql` trong `tests/test_dbt_marts.py`; test
+`test_ci_seed_equals_silver_built_from_fixture_json` khẳng định seed bằng đúng dữ liệu đó (từng
+`event_id`, từng cột). Parquet mà pytest tạo có thêm `tests/fixtures/gharchive_parquet_only` (3
+event không có trong seed, gồm ca đổi login cùng giây), nên test phân biệt được đường đọc parquet
+với đường đọc seed; baseline chạy trên cùng các dòng raw với parquet.
 
 Đọc thẳng bảng Delta silver và nối vào pipeline theo lịch là PR 7. Lưu ý cho PR 7: Spark ghi
 `created_at` dạng timestamp UTC; staging ép về `timestamp` không múi giờ, nên phiên DuckDB đọc
@@ -73,16 +77,27 @@ login của `dim_user`.
 Dựng từ lịch sử event (gaps-and-islands), tất định, **không** dùng dbt snapshot (snapshot phụ thuộc
 thời điểm chạy, không idempotent khi chạy bù):
 
-1. Xếp event của mỗi `actor_id` theo (`created_at`, `event_id`).
+1. Xếp event của mỗi `actor_id` theo (`created_at`, `event_id`). `event_id` là varchar nên hoà
+   `created_at` được phân theo thứ tự chuỗi (`'10' < '9'`), không theo số; vẫn tất định.
 2. Một phiên bản mới bắt đầu khi `actor_login` khác event liền trước (so sánh null-safe). `a → b → a`
    cho 3 phiên bản.
 3. `valid_from` = event đầu của phiên bản; `valid_to` = `valid_from` của phiên bản kế tiếp (nửa mở
    `[valid_from, valid_to)`), `NULL` cho phiên bản hiện tại; `is_current = valid_to IS NULL`.
 4. `is_bot`: login kết thúc bằng `[bot]` hoặc `-bot` (không phân biệt hoa thường), như `q1.sql`.
+5. **Đổi login trong cùng một giây** (event login `a` rồi event login `b` của cùng actor, cùng
+   `created_at` = `t`): phiên bản `a` có `valid_from = valid_to = t` (phiên bản độ dài 0). Phiên
+   bản độ dài 0 có hiệu lực đúng tại thời điểm `[t, t]`, không phải khoảng rỗng `[t, t)`; mọi
+   phiên bản khác vẫn nửa mở. Không dời mốc thời gian, không gộp phiên bản, nên `dim_user` vẫn chỉ
+   phụ thuộc event. Singular test `assert_fct_events_user_version_matches_event` áp đúng luật này;
+   `assert_dim_user_scd2_intervals` vốn đã chấp nhận `valid_to = valid_from`.
 
 `fct_events.user_key` là phiên bản của cùng `actor_id`, cùng login với event, có `valid_from` lớn
-nhất `<=` `created_at`. Vì baseline đếm theo `actor.login`, mart dùng login của phiên bản có hiệu
-lực lúc event, nên kết quả khớp baseline cả khi actor đổi tên.
+nhất `<=` `created_at` (hoà thì lấy `version_number` lớn nhất). Ở ca đổi login cùng giây, event `a`
+chỉ khớp phiên bản `a` độ dài 0, event `b` khớp phiên bản `b`. Giới hạn đã biết: nếu cùng một giây
+có `a → b → a`, event `a` đầu tiên trỏ phiên bản `a` sau (cũng bắt đầu tại `t`, cùng login) thay vì
+phiên bản đầu; vẫn tất định, vẫn qua singular test và không đổi mart (mart đếm theo login). Vì
+baseline đếm theo `actor.login`, mart dùng login của phiên bản có hiệu lực lúc event, nên kết quả
+khớp baseline cả khi actor đổi tên.
 
 ## Mart
 
@@ -98,9 +113,16 @@ lực lúc event, nên kết quả khớp baseline cả khi actor đổi tên.
 Công thức điểm sức khoẻ (thành phần, trọng số, làm tròn, thứ tự xếp hạng) ghi ở đầu
 `benchmarks/queries/q6.sql`; `mart_repo_health_score` dùng nguyên công thức đó.
 
-Khác biệt duy nhất với baseline: baseline không khử trùng (dòng raw trùng `id` đếm hai lần, ảnh
-hưởng Q5/Q6), còn silver giữ một dòng mỗi `event_id`. Test so khớp chạy baseline trên đầu vào đã
-khử trùng.
+Khác biệt với baseline:
+
+1. **Khử trùng.** Baseline không khử trùng (dòng raw trùng `id` đếm hai lần, ảnh hưởng Q5/Q6), còn
+   silver giữ một dòng mỗi `event_id`. Test so khớp chạy baseline trên đầu vào đã khử trùng.
+2. **`actor_login` NULL.** Baseline tính `ends_with(lower(NULL), …)` ra NULL nên `NOT is_bot` loại
+   event đó khỏi mọi tập "human" (forkers, cohort, `per_actor` của Q5/Q6, `opener_is_bot`), nhưng Q5
+   vẫn đếm nó trong `contributions`. Mart coi event đó là human vì `dim_user.is_bot` coalesce về
+   `false`, nên nó lọt vào cohort Q2, `prs_opened` của Q3, `human_contributors`/top-N của Q5 và
+   activity/diversity của Q6. Silver chỉ bắt buộc `actor.id`, nhưng GH Archive thực tế luôn có
+   `actor.login`. Ca này **chưa có test** và fixture không có event login NULL.
 
 ## Test
 
@@ -109,7 +131,7 @@ khử trùng.
 | Contract | `contract: {enforced: true}` cho `fct_events`, `dim_user`, `dim_repo` và 6 mart | Tên cột, kiểu, `not_null` |
 | Generic | `models/**/_*.yml` | `not_null`, `unique`, `relationships` (fct → dim, funnel → dim_repo), `accepted_values` |
 | Singular | `transform/tests/` | Khoảng hiệu lực SCD2 không hở, không chồng, đúng một phiên bản hiện tại; fct trỏ đúng phiên bản; fct đủ mọi event trên repo seed, mỗi event một lần |
-| Unit (`unit_tests:`) | `_gold.yml`, `_marts.yml` | SCD2 (đổi login → 2 phiên bản; `a → b → a` → 3), cohort Q2, funnel Q3 |
+| Unit (`unit_tests:`) | `_gold.yml`, `_marts.yml` | SCD2 (đổi login → 2 phiên bản; `a → b → a` → 3; đổi login cùng giây → phiên bản độ dài 0), `fct_events` chọn phiên bản theo cận `valid_from` (`a → b → a`) và ở ca cùng giây, cohort Q2, funnel Q3 |
 | pytest | `tests/test_dbt_marts.py` | So khớp 6 mart với `qN.sql` từng dòng từng cột; vi phạm contract làm `dbt build` thoát mã khác 0; gold không có cột/giá trị email; build lại cùng đầu vào cho cùng số dòng |
 
 Không có số đo nào trong tài liệu này; số đo chỉ lấy từ `runs.csv`.

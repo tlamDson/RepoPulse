@@ -44,6 +44,8 @@ models:
       snapshot): a new version starts whenever actor_login differs from the previous event of
       the same actor_id (order created_at, event_id). valid_from = first event of the version,
       valid_to = valid_from of the next version (half-open), NULL for the current version.
+      Two logins in the same second give a zero-length version (valid_from = valid_to), valid
+      only at that instant.
     config:
       contract:
         enforced: true
