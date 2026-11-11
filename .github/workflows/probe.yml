@@ -43,8 +43,10 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
 
+      # MotherDuck từ chối client DuckDB mới hơn bản extension của nó hỗ trợ (lần chạy đầu:
+      # "latest supported version is v1.5.6"), nên khoá duckdb ở đúng bản đó cho bước thử.
       - name: Install
-        run: pip install -e ".[dbt]" dbt-databricks
+        run: pip install -e ".[dbt]" dbt-databricks "duckdb==1.5.6"
 
       - name: Run probe checks
         env:

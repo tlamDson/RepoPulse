@@ -38,6 +38,7 @@ FAIL = "fail"
 SKIPPED = "skipped"
 STATUSES = (PASS, FAIL, SKIPPED)
 
+SECRET_SHAPE = "databricks_secret_shape"
 AUTH = "databricks_auth"
 VOLUME = "databricks_volume_upload"
 JOB = "databricks_serverless_job"
@@ -144,11 +145,19 @@ class Redactor:
         return self._PAT.sub("dapi" + self.MASK, out)
 
 
+def _with_scheme(raw: str) -> str:
+    return raw if "://" in raw else "https://" + raw
+
+
 def _normalise_host(raw: str) -> str:
-    host = raw.strip().rstrip("/")
-    if host and "://" not in host:
-        host = "https://" + host
-    return host
+    """Keep only ``scheme://hostname``: a pasted browser URL may carry a path or ``?o=``."""
+    host = raw.strip()
+    if not host:
+        return ""
+    parts = urlsplit(_with_scheme(host))
+    if not parts.netloc:
+        return _with_scheme(host).rstrip("/")
+    return f"{parts.scheme}://{parts.netloc}"
 
 
 @dataclass(frozen=True)
@@ -157,6 +166,7 @@ class Secrets:
     token: str = ""
     http_path: str = ""
     motherduck_token: str = ""
+    host_raw: str = ""
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> Secrets:
@@ -168,6 +178,7 @@ class Secrets:
             token=get("DATABRICKS_TOKEN"),
             http_path=get("DATABRICKS_HTTP_PATH"),
             motherduck_token=get("MOTHERDUCK_TOKEN"),
+            host_raw=get("DATABRICKS_HOST"),
         )
 
     def missing(self, names: Sequence[str]) -> list[str]:
@@ -175,7 +186,8 @@ class Secrets:
 
     def redactor(self) -> Redactor:
         netloc = urlsplit(self.host).netloc if self.host else ""
-        return Redactor([self.host, netloc, self.token, self.motherduck_token, self.http_path])
+        values = [self.host_raw, self.host, netloc, self.token, self.motherduck_token]
+        return Redactor([*values, self.http_path])
 
 
 @dataclass
@@ -303,6 +315,49 @@ def _check(name: str, needs: Sequence[str] = _DATABRICKS_NEEDS):
 
 
 # --- Databricks checks --------------------------------------------------------
+
+_WORKSPACE_DOMAINS = (".databricks.com", ".azuredatabricks.net")
+
+
+def _quoted(value: str) -> bool:
+    return value[:1] in ("'", '"') or value[-1:] in ("'", '"')
+
+
+def _shape_problems(host_raw: str, token: str) -> list[str]:
+    """Describe what looks wrong with the two secrets, never quoting their values."""
+    problems = []
+    if _quoted(host_raw):
+        problems.append("DATABRICKS_HOST is wrapped in quotes")
+    else:
+        parts = urlsplit(_with_scheme(host_raw))
+        if parts.path not in ("", "/") or parts.query or parts.fragment:
+            problems.append(
+                "DATABRICKS_HOST has a path or query after the hostname "
+                "(the probe only uses scheme and hostname)"
+            )
+        name = (parts.hostname or "").lower()
+        if name.startswith("accounts."):
+            problems.append("DATABRICKS_HOST is the account console, not a workspace URL")
+        elif not name.endswith(_WORKSPACE_DOMAINS):
+            problems.append("DATABRICKS_HOST is not a Databricks workspace hostname")
+    if _quoted(token):
+        problems.append("DATABRICKS_TOKEN is wrapped in quotes")
+    elif any(ch.isspace() for ch in token):
+        problems.append("DATABRICKS_TOKEN contains whitespace")
+    elif not token.startswith("dapi"):
+        problems.append(
+            "DATABRICKS_TOKEN does not start with dapi, so it is not a personal access token"
+        )
+    return problems
+
+
+@_check(SECRET_SHAPE)
+def check_secret_shape(ctx: ProbeContext) -> tuple[str, str]:
+    """Info only, no network: tells a mistyped secret apart from a refusal by the platform."""
+    problems = _shape_problems(ctx.secrets.host_raw or ctx.secrets.host, ctx.secrets.token)
+    if problems:
+        return FAIL, "; ".join(problems)
+    return PASS, "host is a workspace URL and the token has the personal access token prefix"
 
 
 @_check(AUTH)
@@ -506,6 +561,7 @@ def check_motherduck(ctx: ProbeContext) -> tuple[str, str]:
 
 
 CHECKS: tuple[Callable[[ProbeContext], CheckResult], ...] = (
+    check_secret_shape,
     check_auth,
     check_volume,
     check_serverless_job,
