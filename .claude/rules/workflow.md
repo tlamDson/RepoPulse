@@ -25,10 +25,10 @@ Mỗi PR là một phiên `claude -p --permission-mode auto --permission-prompts
 2. **Không tạo worktree con.** Phiên PR và mọi subagent làm ngay trong worktree của PR; không dùng `isolation: "worktree"`, không `EnterWorktree`.
 3. **Giao việc cho agent chuyên trách** ghi ở cột `agent` của `scripts/prs.toml`, dán nguyên văn `.claude/rules/command-style.md` vào brief.
 4. **Chờ CI** bằng `gh pr checks <số> --watch --interval 30` foreground, timeout 600000, lặp tới khi xong. CI đỏ thì sửa và push lại.
-5. **Review** bằng `code-reviewer`; FAIL thì sửa rồi review lại, tối đa 2 vòng.
+5. **Review độc lập, không tự review.** Phiên PR dừng khi CI xanh (`RESULT: ready <số>`), không gọi `code-reviewer`, không merge. Script chạy một phiên `claude -p --agent code-reviewer` mới (Opus, medium, không thấy ngữ cảnh phiên viết code), phiên này đăng comment và kết thúc bằng `REVIEW: PASS` | `REVIEW: FAIL <finding>`. PASS: script tự kiểm 3 check bắt buộc rồi `gh pr merge --squash`. FAIL: phiên PR chạy lại kèm kết luận review; tối đa 2 vòng review rồi dừng.
 6. **Bị từ chối quyền** thì làm theo mục "Bị từ chối thì sao" của `command-style.md`.
 7. **Không sửa `docs/progress.md`** trong PR feature (chạy song song sẽ conflict); script tự sinh lại tiến độ.
-8. **Dòng cuối cùng** của phiên luôn là `RESULT: merged <số PR>` | `RESULT: failed <lý do>` | `RESULT: blocked <việc cần chủ repo>`. Script đọc dòng này để đi tiếp.
+8. **Dòng cuối cùng** của phiên PR luôn là `RESULT: ready <số PR>` | `RESULT: failed <lý do>` | `RESULT: blocked <việc cần chủ repo>`. Script đọc dòng này để đi tiếp (`RESULT: merged` chỉ còn được hiểu cho phiên cũ).
 
 Mọi lần bị hỏi/bị từ chối được hook `log_permission.py` ghi vào `.claude/state/permission-log.jsonl`; báo cáo mỗi đêm ở `logs/run-<ngày>.md`.
 
