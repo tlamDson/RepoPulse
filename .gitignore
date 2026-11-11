@@ -39,6 +39,7 @@ derby.log
 data/raw/
 data/landing/
 data/lake/
+data/simulated/
 *.parquet
 *.json.gz
 

@@ -47,6 +47,7 @@ from repopulse.orchestrator import (  # noqa: E402
     rate_limit_action,
     releases_due,
     render_progress,
+    scheduling_sets,
     should_exit,
     should_stop,
     trust_keys,
@@ -448,8 +449,8 @@ def run(args: argparse.Namespace) -> int:
                 runs[tid] = start(task, resume=sid)
 
         # new work
-        exclude = set(final) | set(waiting)
-        ready, blk, skp = next_ready(tasks, done | exclude, set(runs), gates, args.parallel)
+        sched_done, held = scheduling_sets(done, final, waiting)
+        ready, blk, skp = next_ready(tasks, sched_done, set(runs), gates, args.parallel, held=held)
         blocked.update(blk)
         skipped |= {t.id for t in skp}
         if keep is not None:

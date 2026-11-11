@@ -1,8 +1,8 @@
 # eventspec — catalog event của app mô phỏng (simulated)
 
 `eventspec/` mô tả event của một app lập kế hoạch du lịch **mô phỏng** (simulated). Không có
-người dùng thật; dữ liệu do `simkit` (PR 3) sinh theo catalog này. Đây **không** phải dữ liệu GH
-Archive.
+người dùng thật; dữ liệu do `simkit` (PR 3, xem `docs/simkit.md`) sinh theo catalog này, kèm các
+lỗi chèn biết trước. Đây **không** phải dữ liệu GH Archive.
 
 ## Định dạng catalog
 

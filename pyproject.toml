@@ -17,7 +17,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["repopulse*", "eventspec*"]
+include = ["repopulse*", "eventspec*", "simkit*"]
 
 [tool.setuptools.package-data]
 eventspec = ["catalog/*.yaml", "schemas/*.json"]
@@ -30,7 +30,7 @@ target-version = "py311"
 select = ["E", "F", "I", "B", "UP"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["repopulse", "benchmarks", "eventspec"]
+known-first-party = ["repopulse", "benchmarks", "eventspec", "simkit"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
