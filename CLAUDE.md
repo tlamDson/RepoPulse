@@ -44,6 +44,9 @@ python benchmarks/record_run.py <benchmark-row.csv>   # gộp dòng từ artifac
 
 python -m eventspec.generate                     # sinh lại eventspec/schemas/ từ catalog (docs/eventspec.md)
 
+python -m repopulse.ingest --date 2026-01-05 --hour 15 --hours 2   # ingest GH Archive vào data/landing/gharchive
+python -m repopulse.ingest --summary out/ingest-summary.json      # giờ (now UTC - 2h); --force để làm lại
+
 python scripts/orchestrate.py run --dry-run      # xem sẽ chạy việc nào
 python scripts/orchestrate.py run --parallel 2   # chạy headless, không cần người
 python scripts/orchestrate.py report             # tiến độ theo PR đã merge
