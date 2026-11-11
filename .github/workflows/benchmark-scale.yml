@@ -1,0 +1,100 @@
+name: Benchmark scale
+
+# Spark vs DuckDB on the naive pipeline (load raw events + Q1-Q6) at 1, 7 and 30 days of real
+# GH Archive data (window and levels in benchmarks/scale.toml). Preparing the data (download,
+# filter, slim, delete raw) is not timed and is cached; the prepared data is saved right after
+# preparing so a failed benchmark step does not force a new download.
+# Output: artifact `benchmark-scale` with out/scale-rows.csv (runs.csv format, up to 6 rows)
+# plus the manifest. Merge it with `python benchmarks/record_run.py out/scale-rows.csv`.
+# Not a required check, so `paths:` on pull_request is fine here (unlike ci.yml).
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [develop, main]
+    paths:
+      - ".github/workflows/benchmark-scale.yml"
+      - "benchmarks/scale*"
+      - "benchmarks/spark_naive.py"
+      - "benchmarks/queries/**"
+      - "benchmarks/queries_spark/**"
+      - "benchmarks/naive_duckdb.py"
+      - "benchmarks/measure.py"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: benchmark-scale-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scale:
+    name: Benchmark scale (Spark vs DuckDB)
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    env:
+      GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - run: pip install -e ".[dev,spark]"
+
+      - name: Disk before
+        run: df -h .
+
+      - name: Restore prepared data
+        id: data-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: data/scale/gharchive
+          key: scale-gharchive-${{ hashFiles('benchmarks/scale.toml', 'benchmarks/scale_prepare.py', 'benchmarks/download.py') }}
+
+      - name: Prepare data (download, filter, slim, delete raw; not timed)
+        run: python benchmarks/scale_prepare.py
+
+      - name: Save prepared data
+        if: steps.data-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: data/scale/gharchive
+          key: ${{ steps.data-cache.outputs.cache-primary-key }}
+
+      - name: Run benchmark
+        run: >-
+          python benchmarks/scale_bench.py
+          --git-sha "$GIT_SHA"
+          --out out/scale-rows.csv
+          --summary out/scale-summary.md
+
+      - name: Job summary
+        if: always()
+        run: |
+          df -h .
+          if [ -f out/scale-summary.md ]; then
+            cat out/scale-summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No benchmark summary (the run stopped before the benchmark)." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: benchmark-scale
+          path: |
+            out/scale-rows.csv
+            out/scale-summary.md
+            data/scale/gharchive/manifest.json
+          if-no-files-found: warn
+          retention-days: 90

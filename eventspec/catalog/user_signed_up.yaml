@@ -1,0 +1,43 @@
+name: user_signed_up
+description: A simulated user creates an account in the simulated trip-planner app.
+dedup_fields: [user_id]
+versions:
+  - version: 1
+    fields:
+      email:
+        type: string
+        format: email
+        required: true
+        pii: true
+      signup_method:
+        type: string
+        enum: [email, google, apple]
+        required: true
+        pii: false
+      country:
+        type: string
+        required: false
+        pii: false
+        description: Free-text country name typed by the user.
+  # v2: country (free text) replaced by country_code; marketing_opt_in added and required.
+  - version: 2
+    fields:
+      email:
+        type: string
+        format: email
+        required: true
+        pii: true
+      signup_method:
+        type: string
+        enum: [email, google, apple]
+        required: true
+        pii: false
+      country_code:
+        type: string
+        required: false
+        pii: false
+        description: ISO 3166-1 alpha-2 country code.
+      marketing_opt_in:
+        type: boolean
+        required: true
+        pii: false

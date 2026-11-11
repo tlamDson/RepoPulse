@@ -1,0 +1,379 @@
+version: 2
+
+# meta.pii on every column: class of transform/governance.yml (docs/governance.md). Columns
+# labelled other than none carry no_raw_email; the public schema re-exposes them masked.
+
+models:
+  - name: dim_repo
+    description: >
+      One row per data-ecosystem repo of the seed repos_data_ecosystem. repo_key is the lower-cased
+      repo_name: events match it case-insensitively, as the baseline queries do.
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: repo_key
+        config: {meta: {pii: none}}
+        data_type: varchar
+        constraints:
+          - type: not_null
+        data_tests:
+          - unique
+      - name: repo_name
+        description: Seed spelling (owner/name), the name reported by the marts.
+        config: {meta: {pii: none}}
+        data_type: varchar
+        constraints:
+          - type: not_null
+        data_tests:
+          - unique
+      - name: category
+        config: {meta: {pii: none}}
+        data_type: varchar
+        constraints:
+          - type: not_null
+        data_tests:
+          - accepted_values:
+              arguments:
+                values:
+                  - compute
+                  - orchestration
+                  - storage-format
+                  - warehouse
+                  - streaming
+                  - dataframe
+                  - bi
+
+  - name: dim_user
+    description: >
+      SCD2 per actor_id built from event history (gaps-and-islands, deterministic, no dbt
+      snapshot): a new version starts whenever actor_login differs from the previous event of
+      the same actor_id (order created_at, event_id). valid_from = first event of the version,
+      valid_to = valid_from of the next version (half-open), NULL for the current version.
+      Two logins in the same second give a zero-length version (valid_from = valid_to), valid
+      only at that instant.
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: user_key
+        description: "'<actor_id>-<version_number>'"
+        config: {meta: {pii: public_identifier}}
+        data_type: varchar
+        constraints:
+          - type: not_null
+        data_tests:
+          - unique
+          - no_raw_email
+      - name: actor_id
+        config: {meta: {pii: public_identifier}}
+        data_type: bigint
+        constraints:
+          - type: not_null
+        data_tests:
+          - no_raw_email
+      - name: actor_login
+        config: {meta: {pii: public_identifier}}
+        data_type: varchar
+        data_tests:
+          - no_raw_email
+      - name: version_number
+        config: {meta: {pii: none}}
+        data_type: bigint
+        constraints:
+          - type: not_null
+      - name: valid_from
+        config: {meta: {pii: none}}
+        data_type: timestamp
+        constraints:
+          - type: not_null
+      - name: valid_to
+        config: {meta: {pii: none}}
+        data_type: timestamp
+      - name: is_current
+        config: {meta: {pii: none}}
+        data_type: boolean
+        constraints:
+          - type: not_null
+      - name: is_bot
+        description: Login ends with '[bot]' or '-bot', case-insensitive (benchmarks/queries/q1.sql).
+        config: {meta: {pii: none}}
+        data_type: boolean
+        constraints:
+          - type: not_null
+
+  - name: fct_events
+    description: >
+      One row per GH Archive event on a seed repo (grain event_id). user_key points at the
+      dim_user version valid at created_at; repo_key at dim_repo. Commit author email/name
+      hashes from silver are not carried into gold. Incremental (delete+insert on event_id):
+      each run recomputes every fact of the actors with staging rows newer than max(loaded_at),
+      because a late event can shift their dim_user versions.
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: event_id
+        config: {meta: {pii: none}}
+        data_type: varchar
+        constraints:
+          - type: not_null
+        data_tests:
+          - unique
+      - name: event_type
+        config: {meta: {pii: none}}
+        data_type: varchar
+        constraints:
+          - type: not_null
+      - name: action
+        config: {meta: {pii: none}}
+        data_type: varchar
+      - name: created_at
+        config: {meta: {pii: none}}
+        data_type: timestamp
+        constraints:
+          - type: not_null
+      - name: event_date
+        config: {meta: {pii: none}}
+        data_type: date
+        constraints:
+          - type: not_null
+      - name: event_week
+        description: ISO week (Monday start) of created_at.
+        config: {meta: {pii: none}}
+        data_type: date
+        constraints:
+          - type: not_null
+      - name: user_key
+        config: {meta: {pii: public_identifier}}
+        data_type: varchar
+        constraints:
+          - type: not_null
+        data_tests:
+          - no_raw_email
+          - relationships:
+              arguments:
+                to: ref('dim_user')
+                field: user_key
+      - name: actor_id
+        config: {meta: {pii: public_identifier}}
+        data_type: bigint
+        constraints:
+          - type: not_null
+        data_tests:
+          - no_raw_email
+      - name: repo_key
+        config: {meta: {pii: none}}
+        data_type: varchar
+        constraints:
+          - type: not_null
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_repo')
+                field: repo_key
+      - name: repo_id
+        config: {meta: {pii: none}}
+        data_type: bigint
+      - name: pr_number
+        config: {meta: {pii: none}}
+        data_type: bigint
+      - name: issue_number
+        config: {meta: {pii: none}}
+        data_type: bigint
+      - name: item_number
+        description: coalesce(pr_number, issue_number), the issue/PR number used by Q4 and Q6.
+        config: {meta: {pii: none}}
+        data_type: bigint
+      - name: pr_merged
+        config: {meta: {pii: none}}
+        data_type: boolean
+      - name: is_late
+        config: {meta: {pii: none}}
+        data_type: boolean
+      - name: loaded_at
+        description: >
+          Load marker copied from stg_gharchive_events (start of the dbt run that first staged the
+          event, UTC). Not a business column: the incremental run uses max(loaded_at) of this
+          table as its watermark to find touched actors.
+        config: {meta: {pii: none}}
+        data_type: timestamp
+        constraints:
+          - type: not_null
+
+unit_tests:
+  - name: dim_user_login_change_starts_new_version
+    description: A rename yields 2 versions with touching, non-overlapping validity; bots flagged.
+    model: dim_user
+    given:
+      - input: ref('stg_gharchive_events')
+        rows:
+          - {event_id: "1", actor_id: 1, actor_login: old, created_at: "2026-01-01 10:00:00"}
+          - {event_id: "2", actor_id: 1, actor_login: old, created_at: "2026-01-02 10:00:00"}
+          - {event_id: "3", actor_id: 1, actor_login: new, created_at: "2026-01-03 10:00:00"}
+          - {event_id: "4", actor_id: 1, actor_login: new, created_at: "2026-01-04 10:00:00"}
+          - {event_id: "5", actor_id: 2, actor_login: Build-Bot, created_at: "2026-01-02 12:00:00"}
+    expect:
+      rows:
+        - {user_key: "1-1", actor_id: 1, actor_login: old, version_number: 1,
+           valid_from: "2026-01-01 10:00:00", valid_to: "2026-01-03 10:00:00",
+           is_current: false, is_bot: false}
+        - {user_key: "1-2", actor_id: 1, actor_login: new, version_number: 2,
+           valid_from: "2026-01-03 10:00:00", valid_to: null, is_current: true, is_bot: false}
+        - {user_key: "2-1", actor_id: 2, actor_login: Build-Bot, version_number: 1,
+           valid_from: "2026-01-02 12:00:00", valid_to: null, is_current: true, is_bot: true}
+
+  - name: dim_user_login_change_back_is_a_third_version
+    description: >
+      a -> b -> a gives 3 versions (islands, not distinct logins); input order does not matter,
+      ties on created_at are broken by event_id.
+    model: dim_user
+    given:
+      - input: ref('stg_gharchive_events')
+        rows:
+          - {event_id: "13", actor_id: 7, actor_login: a, created_at: "2026-01-05 00:00:00"}
+          - {event_id: "11", actor_id: 7, actor_login: a, created_at: "2026-01-01 00:00:00"}
+          - {event_id: "12", actor_id: 7, actor_login: b, created_at: "2026-01-03 00:00:00"}
+          - {event_id: "14", actor_id: 7, actor_login: a, created_at: "2026-01-05 00:00:00"}
+    expect:
+      rows:
+        - {user_key: "7-1", actor_login: a, valid_from: "2026-01-01 00:00:00",
+           valid_to: "2026-01-03 00:00:00", is_current: false}
+        - {user_key: "7-2", actor_login: b, valid_from: "2026-01-03 00:00:00",
+           valid_to: "2026-01-05 00:00:00", is_current: false}
+        - {user_key: "7-3", actor_login: a, valid_from: "2026-01-05 00:00:00",
+           valid_to: null, is_current: true}
+
+  - name: dim_user_same_second_login_change_is_zero_length_version
+    description: >
+      Login a then b in the same second (tie broken by event_id): version 1 is the zero-length
+      [t, t], version 2 starts at the same t and stays current.
+    model: dim_user
+    given:
+      - input: ref('stg_gharchive_events')
+        rows:
+          - {event_id: "22", actor_id: 8, actor_login: b, created_at: "2026-01-01 10:00:00"}
+          - {event_id: "21", actor_id: 8, actor_login: a, created_at: "2026-01-01 10:00:00"}
+          - {event_id: "23", actor_id: 8, actor_login: b, created_at: "2026-01-01 11:00:00"}
+    expect:
+      rows:
+        - {user_key: "8-1", actor_login: a, version_number: 1, valid_from: "2026-01-01 10:00:00",
+           valid_to: "2026-01-01 10:00:00", is_current: false}
+        - {user_key: "8-2", actor_login: b, version_number: 2, valid_from: "2026-01-01 10:00:00",
+           valid_to: null, is_current: true}
+
+  - name: fct_events_user_version_respects_valid_from_after_login_reuse
+    description: >
+      Actor 7 goes a -> b -> a: an event with login a before the rename points at version 1,
+      not at the later version 3 that reuses the login; b points at 2, the last a at 3.
+    model: fct_events
+    overrides:
+      macros:
+        is_incremental: false
+    given:
+      - input: ref('stg_gharchive_events')
+        rows:
+          - {event_id: "11", actor_id: 7, actor_login: a, repo_name: apache/spark,
+             event_type: IssueCommentEvent, created_at: "2026-01-01 00:00:00"}
+          - {event_id: "15", actor_id: 7, actor_login: a, repo_name: apache/spark,
+             event_type: IssueCommentEvent, created_at: "2026-01-02 00:00:00"}
+          - {event_id: "12", actor_id: 7, actor_login: b, repo_name: apache/spark,
+             event_type: IssueCommentEvent, created_at: "2026-01-03 00:00:00"}
+          - {event_id: "14", actor_id: 7, actor_login: a, repo_name: apache/spark,
+             event_type: IssueCommentEvent, created_at: "2026-01-05 00:00:00"}
+      - input: ref('dim_repo')
+        rows:
+          - {repo_key: apache/spark, repo_name: apache/spark, category: compute}
+      - input: ref('dim_user')
+        rows:
+          - {user_key: "7-1", actor_id: 7, actor_login: a, version_number: 1,
+             valid_from: "2026-01-01 00:00:00", valid_to: "2026-01-03 00:00:00"}
+          - {user_key: "7-2", actor_id: 7, actor_login: b, version_number: 2,
+             valid_from: "2026-01-03 00:00:00", valid_to: "2026-01-05 00:00:00"}
+          - {user_key: "7-3", actor_id: 7, actor_login: a, version_number: 3,
+             valid_from: "2026-01-05 00:00:00", valid_to: null}
+    expect:
+      rows:
+        - {event_id: "11", user_key: "7-1"}
+        - {event_id: "15", user_key: "7-1"}
+        - {event_id: "12", user_key: "7-2"}
+        - {event_id: "14", user_key: "7-3"}
+
+  - name: fct_events_same_second_login_change_points_at_own_login_version
+    description: >
+      Login a then b in the same second: each event points at the version of its own login,
+      the a event at the zero-length version 1.
+    model: fct_events
+    overrides:
+      macros:
+        is_incremental: false
+    given:
+      - input: ref('stg_gharchive_events')
+        rows:
+          - {event_id: "21", actor_id: 8, actor_login: a, repo_name: apache/spark,
+             event_type: IssueCommentEvent, created_at: "2026-01-01 10:00:00"}
+          - {event_id: "22", actor_id: 8, actor_login: b, repo_name: apache/spark,
+             event_type: IssueCommentEvent, created_at: "2026-01-01 10:00:00"}
+      - input: ref('dim_repo')
+        rows:
+          - {repo_key: apache/spark, repo_name: apache/spark, category: compute}
+      - input: ref('dim_user')
+        rows:
+          - {user_key: "8-1", actor_id: 8, actor_login: a, version_number: 1,
+             valid_from: "2026-01-01 10:00:00", valid_to: "2026-01-01 10:00:00"}
+          - {user_key: "8-2", actor_id: 8, actor_login: b, version_number: 2,
+             valid_from: "2026-01-01 10:00:00", valid_to: null}
+    expect:
+      rows:
+        - {event_id: "21", user_key: "8-1"}
+        - {event_id: "22", user_key: "8-2"}
+
+  - name: fct_events_incremental_recomputes_every_fact_of_touched_actors
+    description: >
+      Incremental run. Actor 7 gets a late event (loaded after the newest loaded_at of the
+      table) on a repo outside the seed, which makes 'old' version 1: both earlier facts of actor
+      7 are emitted again with user_key 7-2 although neither is new. Actor 9 has nothing new and
+      is not emitted; the out-of-seed event itself never becomes a fact.
+    model: fct_events
+    overrides:
+      macros:
+        is_incremental: true
+    given:
+      # format sql: dict rows for `this` need the table to exist already (not true on a fresh CI DB)
+      - input: this
+        format: sql
+        rows: |
+          select * from (values
+              ('31', 7, '7-1', timestamp '2026-01-10 00:00:00'),
+              ('32', 7, '7-1', timestamp '2026-01-10 00:00:00'),
+              ('41', 9, '9-1', timestamp '2026-01-10 00:00:00')
+          ) as t (event_id, actor_id, user_key, loaded_at)
+      - input: ref('stg_gharchive_events')
+        rows:
+          - {event_id: "30", actor_id: 7, actor_login: old, repo_name: someone/elsewhere,
+             event_type: WatchEvent, created_at: "2025-12-31 00:00:00",
+             loaded_at: "2026-01-11 00:00:00"}
+          - {event_id: "31", actor_id: 7, actor_login: a, repo_name: apache/spark,
+             event_type: IssueCommentEvent, created_at: "2026-01-01 00:00:00",
+             loaded_at: "2026-01-10 00:00:00"}
+          - {event_id: "32", actor_id: 7, actor_login: a, repo_name: apache/spark,
+             event_type: IssueCommentEvent, created_at: "2026-01-02 00:00:00",
+             loaded_at: "2026-01-10 00:00:00"}
+          - {event_id: "41", actor_id: 9, actor_login: z, repo_name: apache/spark,
+             event_type: IssueCommentEvent, created_at: "2026-01-02 00:00:00",
+             loaded_at: "2026-01-10 00:00:00"}
+      - input: ref('dim_repo')
+        rows:
+          - {repo_key: apache/spark, repo_name: apache/spark, category: compute}
+      - input: ref('dim_user')
+        rows:
+          - {user_key: "7-1", actor_id: 7, actor_login: old, version_number: 1,
+             valid_from: "2025-12-31 00:00:00", valid_to: "2026-01-01 00:00:00"}
+          - {user_key: "7-2", actor_id: 7, actor_login: a, version_number: 2,
+             valid_from: "2026-01-01 00:00:00", valid_to: null}
+          - {user_key: "9-1", actor_id: 9, actor_login: z, version_number: 1,
+             valid_from: "2026-01-02 00:00:00", valid_to: null}
+    expect:
+      rows:
+        - {event_id: "31", user_key: "7-2", loaded_at: "2026-01-10 00:00:00"}
+        - {event_id: "32", user_key: "7-2", loaded_at: "2026-01-10 00:00:00"}

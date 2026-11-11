@@ -1,13 +1,16 @@
 """Headless orchestrator: runs RepoPulse PRs with `claude -p`, unattended.
 
     python scripts/orchestrate.py run --dry-run
-    python scripts/orchestrate.py run --parallel 2 [--only ID] [--auto-approve-harness]
+    python scripts/orchestrate.py run [--parallel 5] [--only ID] [--auto-approve-harness]
     python scripts/orchestrate.py clean [--dry-run]
     python scripts/orchestrate.py quota
     python scripts/orchestrate.py report
+    python scripts/orchestrate.py daily [--date YYYY-MM-DD] [--no-send] [--force]
 
-The decision logic lives in ``repopulse/orchestrator.py`` (unit tested). This file only does I/O:
-git, gh, spawning ``claude`` and writing logs. It never reads secret values.
+The decision logic lives in ``repopulse/orchestrator.py`` and ``repopulse/daily_report.py``
+(unit tested). This file only does I/O: git, gh, spawning ``claude``, writing logs, sending the
+daily e-mail. It never reads repo secret values; the SMTP app password for the daily e-mail is
+taken from the environment (REPOPULSE_SMTP_*) and only handed to smtplib, never printed.
 """
 
 from __future__ import annotations
@@ -16,17 +19,33 @@ import argparse
 import json
 import os
 import shutil
+import smtplib
 import subprocess
 import sys
 import threading
 import time
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from repopulse.daily_report import (  # noqa: E402
+    append_metrics,
+    build_daily_report,
+    build_email,
+    daily_due,
+    denials_between,
+    metrics_row,
+    needs_lam,
+    read_metrics,
+    rows_between,
+    run_metrics,
+    send_email,
+    smtp_config,
+    utc_window,
+)
 from repopulse.orchestrator import (  # noqa: E402
     Decision,
     Gates,
@@ -34,12 +53,20 @@ from repopulse.orchestrator import (  # noqa: E402
     Worktree,
     build_command,
     build_prompt,
+    build_review_command,
+    build_review_prompt,
     clean_plan,
     decide_after_exit,
+    decide_after_review,
+    develop_ci_blocks,
+    develop_ci_state,
+    failure_context,
     harness_auto_approved,
     harness_file_approved,
+    is_stalled,
     load_tasks,
     mark_trusted,
+    merge_ready,
     merged_task_ids,
     next_ready,
     parse_stream_line,
@@ -47,6 +74,8 @@ from repopulse.orchestrator import (  # noqa: E402
     rate_limit_action,
     releases_due,
     render_progress,
+    review_next,
+    scheduling_sets,
     should_exit,
     should_stop,
     trust_keys,
@@ -59,6 +88,7 @@ PRS_TOML = ROOT / "scripts" / "prs.toml"
 POLL_S = 15
 REFRESH_S = 60
 MAX_FAILURES = 2
+METRICS = LOGS / "orchestrator-metrics.csv"
 
 
 # ---------- shell helpers ----------
@@ -104,6 +134,31 @@ def gh_secret_names() -> frozenset[str]:
         return frozenset(s["name"] for s in json.loads(out or "[]"))
     except json.JSONDecodeError:
         return frozenset()
+
+
+def gh_develop_ci() -> str:
+    """green | red | pending | unknown for the newest CI run on a push to develop."""
+    out = sh(
+        [
+            "gh",
+            "run",
+            "list",
+            "--workflow",
+            "ci.yml",
+            "--branch",
+            "develop",
+            "--event",
+            "push",
+            "--limit",
+            "1",
+            "--json",
+            "status,conclusion,headSha",
+        ]
+    )
+    try:
+        return develop_ci_state(json.loads(out or "[]"))
+    except json.JSONDecodeError:
+        return "unknown"
 
 
 def permission_log_lines() -> list[str]:
@@ -206,7 +261,26 @@ class Run:
     last_rate: dict | None = None
     result_text: str = ""
     warn: bool = False
+    stalled: bool = False
+    last_output: float = 0.0
+    log_offset: int = 0  # where this attempt starts in logs/pr-<id>.jsonl
+    review_pr: str | None = None  # set = independent review session of this PR number
+    review_sha: str = ""  # HEAD the review session saw; the merge must be exactly this commit
     reader: threading.Thread | None = field(default=None, repr=False)
+
+
+def task_log(task: Task) -> Path:
+    return LOGS / f"pr-{task.id}.jsonl"
+
+
+def attempt_lines(run: Run) -> list[str]:
+    """Stream lines written by this attempt only (the log file is appended across attempts)."""
+    p = task_log(run.task)
+    if not p.exists():
+        return []
+    with p.open("rb") as fh:
+        fh.seek(run.log_offset)
+        return fh.read().decode("utf-8", errors="replace").splitlines()
 
 
 def _reader(run: Run, logfile: Path) -> None:
@@ -214,6 +288,7 @@ def _reader(run: Run, logfile: Path) -> None:
         for line in run.proc.stdout:  # type: ignore[union-attr]
             fh.write(line)
             fh.flush()
+            run.last_output = time.time()
             ev = parse_stream_line(line)
             if not ev:
                 continue
@@ -226,11 +301,23 @@ def _reader(run: Run, logfile: Path) -> None:
                 run.result_text = str(ev.get("result", ""))
 
 
-def start(task: Task, resume: str | None = None) -> Run:
+def start(
+    task: Task,
+    resume: str | None = None,
+    previous_failure: str | None = None,
+    review_pr: str | None = None,
+) -> Run:
+    """Start the PR (build) session, or with ``review_pr`` a fresh independent review session."""
     path = ensure_worktree(task)
     ensure_trusted([path])  # re-check: a running claude may have rewritten ~/.claude.json
-    prompt = "Tiếp tục đúng việc đang dở." if resume else build_prompt(task)
-    cmd = build_command(ROOT, prompt, resume)
+    if resume:
+        prompt = "Tiếp tục đúng việc đang dở."
+    elif review_pr:
+        prompt = build_review_prompt(task, review_pr)
+    else:
+        prompt = build_prompt(task, previous_failure=previous_failure)
+    builder = build_review_command if review_pr else build_command
+    cmd = builder(ROOT, prompt, resume)
     cmd[0] = shutil.which("claude") or "claude"
     env = dict(os.environ)
     env.update(
@@ -240,6 +327,8 @@ def start(task: Task, resume: str | None = None) -> Run:
         CLAUDE_CODE_RETRY_WATCHDOG_MAX_USAGE_LIMIT_WAIT_MS=str(6 * 3600 * 1000),
     )
     LOGS.mkdir(exist_ok=True)
+    logfile = task_log(task)
+    offset = logfile.stat().st_size if logfile.exists() else 0
     proc = subprocess.Popen(
         cmd,
         cwd=path,
@@ -251,13 +340,38 @@ def start(task: Task, resume: str | None = None) -> Run:
         encoding="utf-8",
         errors="replace",
     )
-    run = Run(task, proc, path, time.time())
-    run.reader = threading.Thread(
-        target=_reader, args=(run, LOGS / f"pr-{task.id}.jsonl"), daemon=True
-    )
+    now = time.time()
+    run = Run(task, proc, path, now, last_output=now, log_offset=offset, review_pr=review_pr)
+    if review_pr:
+        run.review_sha = sh(["git", "-C", str(path), "rev-parse", "HEAD"]).strip()
+    run.reader = threading.Thread(target=_reader, args=(run, logfile), daemon=True)
     run.reader.start()
-    log(f"start {task.id} ({task.branch}) in {path}" + (f" resume={resume}" if resume else ""))
+    kind = f"review PR #{review_pr}" if review_pr else "build"
+    note = f" resume={resume}" if resume else (" (thử lại có ngữ cảnh)" if previous_failure else "")
+    log(f"start {task.id} [{kind}] ({task.branch}) in {path}{note}")
     return run
+
+
+def merge_pr(pr: str, head_sha: str) -> str | None:
+    """Merge after an independent PASS, only if the required checks pass and the PR head is
+    still the commit that was reviewed. Returns an error."""
+    if not head_sha:
+        return f"không biết commit đã review của PR #{pr}"
+    out = sh(["gh", "pr", "checks", pr, "--json", "name,bucket"])
+    try:
+        checks = json.loads(out or "[]")
+    except json.JSONDecodeError:
+        return f"không đọc được check của PR #{pr}"
+    ok, why = merge_ready(checks)
+    if not ok:
+        return f"CI chưa xanh ({why})"
+    # --delete-branch also tries the local branch, which fails while the worktree holds it;
+    # the merge itself is judged by the PR state below, the worktree is removed by clean().
+    sh(["gh", "pr", "merge", pr, "--squash", "--delete-branch", "--match-head-commit", head_sha])
+    state = sh(["gh", "pr", "view", pr, "--json", "state"])
+    if '"MERGED"' not in state:
+        return f"merge PR #{pr} thất bại"
+    return None
 
 
 # ---------- release develop -> main ----------
@@ -358,8 +472,13 @@ def run(args: argparse.Namespace) -> int:
     state = load_state()
     released = set(state["released"])
     failures: dict[str, int] = state.get("failures", {})
+    last_failure: dict[str, str] = state.setdefault("last_failure", {})
+    pending_review: dict[str, str] = state.setdefault("pending_review", {})  # task -> PR number
+    review_fails: dict[str, int] = state.setdefault("review_fails", {})
+    develop_red = False
+    daily_tried = ""  # local date of this process's last daily-report attempt
     runs: dict[str, Run] = {}
-    waiting: dict[str, tuple[int, str | None]] = {}
+    waiting: dict[str, tuple[int, str | None, str | None]] = {}  # at, session, review PR
     final: dict[str, Decision] = {}
     blocked: dict[str, str] = {}
     skipped: set[str] = set()
@@ -381,6 +500,18 @@ def run(args: argparse.Namespace) -> int:
             sh(["git", "fetch", "origin", "--prune"])
             done = merged_task_ids(tasks, gh_prs())
             gates = Gates(gh_secret_names(), harness_approved(done, args.auto_approve_harness))
+            red = develop_ci_blocks(gh_develop_ci(), develop_red)
+            if red != develop_red:
+                log(
+                    "CI trên develop đỏ: không mở việc mới, không release"
+                    if red
+                    else "CI trên develop xanh lại: mở việc tiếp"
+                )
+            develop_red = red
+            if develop_red:
+                blocked["develop-ci"] = "CI trên develop đỏ sau lần merge gần nhất: cần sửa"
+            else:
+                blocked.pop("develop-ci", None)
             last_refresh = now
 
         # finished runs
@@ -389,33 +520,92 @@ def run(args: argparse.Namespace) -> int:
                 if now - r.started > args.task_hours * 3600:
                     log(f"{tid}: quá {args.task_hours}h, dừng tiến trình")
                     r.proc.terminate()
+                elif not r.stalled and is_stalled(
+                    r.last_output, now, args.stall_minutes * 60, r.last_rate
+                ):
+                    log(f"{tid}: {args.stall_minutes:g} phút không có output, coi là treo, dừng")
+                    r.stalled = True
+                    r.proc.terminate()
                 continue
             r.reader.join(timeout=10)
-            d = decide_after_exit(
-                r.proc.returncode, r.last_rate, r.result_text, int(now), args.max_wait_hours * 3600
+            decide = decide_after_review if r.review_pr else decide_after_exit
+            d = decide(
+                r.proc.returncode,
+                r.last_rate,
+                r.result_text,
+                int(now),
+                args.max_wait_hours * 3600,
+                stalled=f"treo {args.stall_minutes:g} phút không có output" if r.stalled else None,
             )
             del runs[tid]
-            log(f"{tid}: {d.kind} {d.reason}")
+            phase = f"review #{r.review_pr}" if r.review_pr else "build"
+            log(f"{tid} [{phase}]: {d.kind} {d.reason}")
             hold_new = hold_new or (args.hold_at_90 and r.warn)
-            if d.kind == "resume_at":
-                waiting[tid] = (d.at or int(now), r.session_id)
+            if d.kind == "pass":
+                # an independent session said PASS: the orchestrator merges, not the author
+                err = merge_pr(r.review_pr or "", r.review_sha)
+                pending_review.pop(tid, None)
+                if err:
+                    log(f"{tid}: review PASS nhưng không merge được: {err}")
+                    last_refresh = 0  # re-read gh: if the merge did land, the task counts as done
+                    failures[tid] = failures.get(tid, 0) + 1
+                    last_failure[tid] = f"Review PASS nhưng orchestrator không merge được: {err}"
+                    if failures[tid] >= MAX_FAILURES:
+                        final[tid] = Decision("failed", err)
+                else:
+                    d = Decision("merged", r.review_pr or "")
+            elif d.kind == "fail":
+                action = review_next(d, review_fails.get(tid, 0))
+                review_fails[tid] = review_fails.get(tid, 0) + 1
+                pending_review.pop(tid, None)
+                if action == "fix":
+                    last_failure[tid] = (
+                        f"Review độc lập FAIL (vòng {review_fails[tid]}) PR #{r.review_pr}: "
+                        f"{d.reason}\nChi tiết ở comment review trên PR.\n"
+                        f"{failure_context(attempt_lines(r))}"
+                    )
+                else:
+                    final[tid] = Decision(
+                        "failed", f"review FAIL {review_fails[tid]} vòng: {d.reason}"
+                    )
+            elif d.kind == "ready":
+                pending_review[tid] = d.reason  # next start of this task is its review
+            elif d.kind == "resume_at":
+                waiting[tid] = (d.at or int(now), r.session_id, r.review_pr)
             elif d.kind == "stop":
                 stop_all = d.reason
                 final[tid] = d
             elif d.kind == "failed":
+                # a crashed/stalled review keeps pending_review, so the retry is a review again
                 failures[tid] = failures.get(tid, 0) + 1
+                last_failure[tid] = f"Lý do: {d.reason}\n{failure_context(attempt_lines(r))}"
                 if failures[tid] >= MAX_FAILURES:
                     final[tid] = d
             elif d.kind == "blocked":
                 final[tid] = d
-            else:
+            if d.kind == "merged":
                 done.add(tid)
                 final[tid] = d
+                last_failure.pop(tid, None)
+                review_fails.pop(tid, None)
                 last_refresh = 0
             state["failures"] = failures
             save_state(state)
+            record_metrics(r, d)
             if d.kind == "merged":
                 clean(dry_run=False, active={str(x.path) for x in runs.values()})
+
+        today = date.today().isoformat()
+        if (
+            not args.dry_run
+            and daily_tried != today  # one attempt per day per process, sent or not
+            and daily_due(datetime.now(), daily_sent(), args.daily_hour)
+        ):
+            daily_tried = today
+            try:
+                send_daily(date.today(), *rolling_window(), send=True)
+            except Exception as exc:  # noqa: BLE001 - the report must never stop running sessions
+                log(f"daily: lỗi khi viết báo cáo ({type(exc).__name__}: {exc})")
 
         stopping = should_stop(STATE) or bool(stop_all)
         if args.hold_at_90 and not hold_new and any(r.warn for r in runs.values()):
@@ -428,7 +618,7 @@ def run(args: argparse.Namespace) -> int:
             for t in releases_due(tasks, done, released | release_failed)
             if keep is None or t in keep
         ]
-        if due and not runs and not args.dry_run:
+        if due and not runs and not args.dry_run and not develop_red:
             err = release(due[0])
             if err:
                 blocked[f"release-{due[0]}"] = err
@@ -441,30 +631,42 @@ def run(args: argparse.Namespace) -> int:
             continue
 
         # resume after usage-limit reset
-        for tid, (at, sid) in list(waiting.items()):
+        for tid, (at, sid, review_pr) in list(waiting.items()):
             if time.time() >= at and len(runs) < args.parallel and not stopping:
                 del waiting[tid]
                 task = next(t for t in tasks if t.id == tid)
-                runs[tid] = start(task, resume=sid)
+                runs[tid] = start(task, resume=sid, review_pr=review_pr)
 
         # new work
-        exclude = set(final) | set(waiting)
-        ready, blk, skp = next_ready(tasks, done | exclude, set(runs), gates, args.parallel)
+        sched_done, held = scheduling_sets(done, final, waiting)
+        ready, blk, skp = next_ready(tasks, sched_done, set(runs), gates, args.parallel, held=held)
         blocked.update(blk)
         skipped |= {t.id for t in skp}
         if keep is not None:
             ready = [t for t in ready if t.id in keep]
         if args.dry_run:
             print(render_progress(tasks, done, set(runs), blocked, skipped))
+            if develop_red:
+                print("CI trên develop đang đỏ: chạy thật sẽ KHÔNG mở việc nào dưới đây.")
             for t in ready:
-                print(f"SẼ CHẠY {t.id}: cwd={worktree_path(t)}")
-                print("  " + " ".join(build_command(ROOT, "<prompt>", None)))
+                pr = pending_review.get(t.id)
+                builder = build_review_command if pr else build_command
+                print(
+                    f"SẼ CHẠY {t.id}"
+                    + (f" [review #{pr}]" if pr else "")
+                    + f": cwd={worktree_path(t)}"
+                )
+                print("  " + " ".join(builder(ROOT, "<prompt>", None)))
             if not ready:
                 print("Không có việc nào sẵn sàng. Bị chặn: " + json.dumps(blk, ensure_ascii=False))
             return 0
-        if not stopping and not hold_new:
+        if not stopping and not hold_new and not develop_red:
             for t in ready:
-                runs[t.id] = start(t)
+                runs[t.id] = start(
+                    t,
+                    previous_failure=last_failure.get(t.id),
+                    review_pr=pending_review.get(t.id),
+                )
 
         if should_exit(
             len(runs), len(waiting), refresh_pending=last_refresh == 0, stopping=stopping
@@ -548,6 +750,91 @@ def quota(_: argparse.Namespace) -> int:
     return 0
 
 
+def record_metrics(r: Run, d: Decision) -> None:
+    """One row per finished session in logs/orchestrator-metrics.csv; never breaks the loop."""
+    try:
+        row = metrics_row(
+            f"{datetime.now():%Y-%m-%d %H:%M:%S}",
+            r.task.id,
+            "review" if r.review_pr else "build",
+            d.kind,
+            d.reason,
+            run_metrics(attempt_lines(r)),
+        )
+        append_metrics(METRICS, row)
+    except Exception as exc:  # noqa: BLE001 - metrics must never stop running sessions
+        log(f"metrics: không ghi được ({type(exc).__name__}: {exc})")
+
+
+# ---------- daily report ----------
+
+DAILY_SENT = STATE / "daily-sent"  # own file: `daily` may run while `run` holds orchestrator.json
+
+
+def daily_sent() -> str | None:
+    return DAILY_SENT.read_text("utf-8").strip() if DAILY_SENT.exists() else None
+
+
+def calendar_window(day: date) -> tuple[datetime, datetime]:
+    """Aware local midnight of ``day`` and of the next day (each converted on its own: DST)."""
+    nxt = day + timedelta(days=1)
+    start = datetime(day.year, day.month, day.day).astimezone()
+    return start, datetime(nxt.year, nxt.month, nxt.day).astimezone()
+
+
+def rolling_window() -> tuple[datetime, datetime]:
+    """The 24 hours up to now, so sessions ending after the send hour are in tomorrow's mail."""
+    end = datetime.now().astimezone()
+    return end - timedelta(hours=24), end
+
+
+def send_daily(day: date, start: datetime, end: datetime, send: bool) -> bool:
+    """Write logs/daily-<day>.md for [start, end); e-mail it if ``send`` and SMTP is set.
+
+    Returns True only when the mail went out; only then is the day marked as sent, so setting
+    the SMTP variables later the same evening still gets that day's mail.
+    """
+    fmt = "%Y-%m-%d %H:%M:%S"
+    rows = rows_between(read_metrics(METRICS), start.strftime(fmt), end.strftime(fmt))
+    denials = denials_between(permission_log_lines(), *utc_window(start, end))
+    reports = sorted(LOGS.glob("run-*.md"), key=lambda p: p.stat().st_mtime)
+    todo = needs_lam(reports[-1].read_text("utf-8")) if reports else []
+    window = f"{start:%Y-%m-%d %H:%M} → {end:%Y-%m-%d %H:%M}"
+    subject, body = build_daily_report(day, rows, denials, todo, window=window)
+    LOGS.mkdir(exist_ok=True)
+    path = LOGS / f"daily-{day.isoformat()}.md"
+    path.write_text(body, "utf-8")
+    log(f"daily: {path}")
+    if not send:
+        return False
+    cfg = smtp_config(dict(os.environ))
+    if cfg is None:
+        log("daily: chưa đặt REPOPULSE_SMTP_USER / REPOPULSE_SMTP_APP_PASSWORD, chỉ ghi file")
+        return False
+    try:
+        send_email(build_email(subject, body, cfg), cfg)
+    except (OSError, smtplib.SMTPException) as exc:
+        log(f"daily: gửi mail lỗi ({type(exc).__name__}); chạy lại `daily --force`")
+        return False
+    log(f"daily: đã gửi mail tới {cfg['to']}")
+    STATE.mkdir(parents=True, exist_ok=True)
+    DAILY_SENT.write_text(day.isoformat(), "utf-8")
+    return True
+
+
+def daily(args: argparse.Namespace) -> int:
+    """``--date`` = that calendar day; without it, the 24 hours up to now (as the run loop)."""
+    day = date.fromisoformat(args.date) if args.date else date.today()
+    send = not args.no_send
+    if send and not args.force and daily_sent() == day.isoformat():
+        print(f"Báo cáo {day} đã gửi rồi; thêm --force để gửi lại.")
+        return 0
+    start, end = calendar_window(day) if args.date else rolling_window()
+    send_daily(day, start, end, send=send)
+    print(LOGS / f"daily-{day.isoformat()}.md")
+    return 0
+
+
 def report(_: argparse.Namespace) -> int:
     tasks = load_tasks(PRS_TOML)
     done = merged_task_ids(tasks, gh_prs())
@@ -557,15 +844,30 @@ def report(_: argparse.Namespace) -> int:
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
-    for stream in (sys.stdout, sys.stderr):  # Windows consoles default to cp1252
-        if hasattr(stream, "reconfigure"):
-            stream.reconfigure(encoding="utf-8", errors="replace")
+def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("run")
     r.add_argument("--dry-run", action="store_true")
-    r.add_argument("--parallel", type=int, default=2)
+    r.add_argument(
+        "--parallel",
+        type=int,
+        default=5,
+        help="số phiên tối đa; thực tế bị giới hạn bởi độ rộng DAG, quota và CI develop",
+    )
+    r.add_argument(
+        "--stall-minutes",
+        type=float,
+        default=30,
+        help="quá số phút này không có output stream (trừ lúc chờ quota reset) thì coi là "
+        "treo: dừng phiên, lần sau thử lại kèm ngữ cảnh",
+    )
+    r.add_argument(
+        "--daily-hour",
+        type=int,
+        default=22,
+        help="giờ local gửi báo cáo ngày qua email (một lần mỗi ngày, nếu đang chạy)",
+    )
     r.add_argument("--only", help="comma-separated task ids")
     r.add_argument(
         "--auto-approve-harness",
@@ -591,7 +893,19 @@ def main(argv: list[str] | None = None) -> int:
     c.set_defaults(fn=lambda a: clean(a.dry_run) or 0)
     sub.add_parser("quota").set_defaults(fn=quota)
     sub.add_parser("report").set_defaults(fn=report)
-    args = p.parse_args(argv)
+    dl = sub.add_parser("daily", help="ghi logs/daily-<ngày>.md và gửi email báo cáo ngày")
+    dl.add_argument("--date", help="YYYY-MM-DD, mặc định hôm nay (giờ local)")
+    dl.add_argument("--no-send", action="store_true", help="chỉ ghi file, không gửi mail")
+    dl.add_argument("--force", action="store_true", help="gửi lại dù hôm đó đã gửi")
+    dl.set_defaults(fn=daily)
+    return p
+
+
+def main(argv: list[str] | None = None) -> int:
+    for stream in (sys.stdout, sys.stderr):  # Windows consoles default to cp1252
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+    args = build_parser().parse_args(argv)
     return args.fn(args)
 
 

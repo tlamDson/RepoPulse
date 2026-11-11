@@ -8,6 +8,32 @@ test-paths: ["tests"]
 target-path: "target"
 clean-targets: ["target", "dbt_packages"]
 
+# Source of stg_gharchive_events (docs/dbt-models.md):
+#   --vars '{silver_gharchive_parquet: "<glob>/*.parquet"}'  -> read_parquet('<glob>')
+#   not set                                                  -> seed fixture_silver_gharchive_events
+#
+# Materialization (docs/dbt-models.md): stg_gharchive_events incremental (append new event ids,
+# full_refresh: false), fct_events incremental (delete+insert, touched actors), dims and marts
+# table. Changing the seed repos_data_ecosystem needs `--full-refresh` for gold.
+
+vars:
+  # Salt of mask_pii (macros/mask_pii.sql) on target `ci` ONLY, when PII_HASH_SALT is unset.
+  # A fixture value for CI and tests, NOT a secret: any other target without PII_HASH_SALT fails
+  # to compile. Policy and roles: governance.yml, docs/governance.md.
+  ci_pii_hash_salt: "repopulse-ci-fixture-salt-not-a-secret"
+
 models:
   repopulse:
     +materialized: view
+    staging:
+      +schema: staging
+    intermediate:
+      +schema: intermediate
+    gold:
+      +schema: gold
+      +materialized: table
+    # What the `public` role reads (dashboard, GitHub Pages, Tableau Public). Tables, not views:
+    # a view would store its SQL, salt literal included, in the shared database.
+    public:
+      +schema: public
+      +materialized: table

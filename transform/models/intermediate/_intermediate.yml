@@ -1,0 +1,43 @@
+version: 2
+
+# meta.pii on every column: class of transform/governance.yml (docs/governance.md).
+
+models:
+  - name: int_events_enriched
+    description: >
+      fct_events joined to dim_user (login and is_bot of the version valid at the event) and
+      dim_repo (seed repo_name, category). Shared input of the Q1-Q6 marts.
+    columns:
+      - name: event_id
+        config: {meta: {pii: none}}
+        data_tests:
+          - not_null
+          - unique
+      - name: event_type
+        config: {meta: {pii: none}}
+      - name: action
+        config: {meta: {pii: none}}
+      - name: created_at
+        config: {meta: {pii: none}}
+      - name: event_date
+        config: {meta: {pii: none}}
+      - name: event_week
+        config: {meta: {pii: none}}
+      - name: pr_number
+        config: {meta: {pii: none}}
+      - name: item_number
+        config: {meta: {pii: none}}
+      - name: pr_merged
+        config: {meta: {pii: none}}
+      - name: actor_login
+        config: {meta: {pii: public_identifier}}
+      - name: is_bot
+        config: {meta: {pii: none}}
+        data_tests:
+          - not_null
+      - name: repo_name
+        config: {meta: {pii: none}}
+        data_tests:
+          - not_null
+      - name: category
+        config: {meta: {pii: none}}

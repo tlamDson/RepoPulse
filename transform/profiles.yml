@@ -1,6 +1,8 @@
 # Target mặc định `ci`: DuckDB local, không cần tài khoản hay secret.
 # `databricks` và `motherduck` dùng cho bước thử cloud (.github/workflows/probe.yml) và gold thật;
 # mọi giá trị nhạy cảm đọc từ biến môi trường, không ghi vào file này.
+# Hai target DuckDB cố định múi giờ phiên UTC (Spark ghi created_at theo UTC); staging cũng tự
+# chuẩn hoá về UTC nên kết quả không phụ thuộc múi giờ máy.
 repopulse:
   target: ci
   outputs:
@@ -8,6 +10,8 @@ repopulse:
       type: duckdb
       path: ci.duckdb  # tương đối với thư mục chạy lệnh (gốc repo); *.duckdb đã gitignore
       threads: 2
+      settings:
+        TimeZone: UTC
 
     # Cần `pip install dbt-databricks`. DATABRICKS_HOST có thể có `https://`, bỏ đi ở đây.
     databricks:
@@ -20,7 +24,27 @@ repopulse:
       threads: 2
 
     # duckdb tự đọc token từ biến môi trường MOTHERDUCK_TOKEN; không nhúng token vào path.
+    # MOTHERDUCK_DATABASE mặc định `repopulse` (gold thật), kể cả khi biến có mà rỗng (`or`);
+    # bước smoke của PR đặt `repopulse_smoke`.
     motherduck:
       type: duckdb
-      path: "md:repopulse"
+      path: "md:{{ env_var('MOTHERDUCK_DATABASE', 'repopulse') or 'repopulse' }}"
       threads: 2
+      settings:
+        TimeZone: UTC
+
+    # Port Snowflake (docs/snowflake-port.md). Cần `pip install -e ".[dbt,snowflake]"`. Chỉ chạy
+    # trong .github/workflows/snowflake-port.yml. User SERVICE đăng nhập key-pair: private_key là
+    # PEM PKCS#8 không mật khẩu, đọc từ biến môi trường; không có password.
+    snowflake:
+      type: snowflake
+      account: "{{ env_var('SNOWFLAKE_ACCOUNT', '') }}"
+      user: "{{ env_var('SNOWFLAKE_USER', '') }}"
+      private_key: "{{ env_var('SNOWFLAKE_PRIVATE_KEY', '') }}"
+      role: "{{ env_var('SNOWFLAKE_ROLE', '') }}"
+      warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE', '') }}"
+      database: "{{ env_var('SNOWFLAKE_DATABASE', '') }}"
+      schema: repopulse
+      threads: 4
+      client_session_keep_alive: false
+      query_tag: repopulse-snowflake-port

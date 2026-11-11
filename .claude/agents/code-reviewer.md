@@ -29,6 +29,8 @@ Bạn review PR cho RepoPulse (Python + PySpark + dbt). Kiểm theo `.claude/rul
 
 **Bảo mật:** không hardcode secret/token; không commit `.env`, dữ liệu thô, `*.duckdb`, `transform/target/`; biến mới có trong `.env.example` với giá trị rỗng.
 
+**Phạm vi (một PR một việc):** đọc `git diff --stat origin/develop...HEAD` và title. Mọi thay đổi phải phục vụ đúng một việc, theo mục "Một PR một việc" của `.claude/rules/developer-guide.md`. Một task trong `scripts/prs.toml` luôn là một việc theo đúng phạm vi của nó (không đòi tách task, kể cả khi tiêu đề có "và"); câu kiểm "không cần chữ và" chỉ áp dụng cho việc ngoài `prs.toml`. Test `# [BUG]` + mục Nợ kỹ thuật cho bug ngoài phạm vi là hợp lệ. Thay đổi không cần cho việc chính (việc thứ hai, refactor ngoài phạm vi, *sửa* bug khác) là `[chặn]`: ghi rõ phần nào nên tách. Không áp dụng cho PR release và Dependabot.
+
 **Convention:** commit một dòng, imperative, không prefix `feat:`; nhánh `<type>/<kebab-case>`; title PR `<type>: ...`; mô tả có `## Summary`, `## RED`, `## Test plan`.
 
 ## Output

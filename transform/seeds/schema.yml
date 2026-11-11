@@ -28,3 +28,35 @@ seeds:
                   - streaming
                   - dataframe
                   - bi
+
+  - name: fixture_silver_gharchive_events
+    description: >
+      CI FIXTURE, not a measurement. 36 hand-written GH Archive events (tests/fixtures/gharchive_small
+      deduplicated by id, plus tests/fixtures/gharchive_scd2) in the column layout of
+      silver/gharchive_events (docs/spark-jobs.md). stg_gharchive_events reads it only when the var
+      silver_gharchive_parquet is not set, so `dbt build --target ci` runs without a lake.
+      Regenerate from the JSON fixtures with tests/dbt_helpers.py::silver_select_sql.
+    config:
+      column_types:
+        event_id: varchar
+        event_type: varchar
+        created_at: timestamp
+        event_date: date
+        actor_id: bigint
+        actor_login: varchar
+        repo_id: bigint
+        repo_name: varchar
+        action: varchar
+        pr_number: bigint
+        issue_number: bigint
+        pr_merged: boolean
+        commit_author_email_hashes: varchar
+        commit_author_name_hashes: varchar
+        landing_date: date
+        landing_hour: integer
+        is_late: boolean
+    columns:
+      - name: event_id
+        data_tests:
+          - not_null
+          - unique

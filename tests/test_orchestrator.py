@@ -470,3 +470,344 @@ def test_should_exit_waits_for_refresh_after_a_merge():
     # a STOP request still ends the run once nothing is running
     assert should_exit(running=0, waiting=1, refresh_pending=True, stopping=True) is True
     assert should_exit(running=1, waiting=0, refresh_pending=False, stopping=True) is False
+
+
+def test_held_task_is_not_started_and_does_not_unlock_dependants(tasks):
+    # Regression 2026-11-11 03:55: PR 5 was waiting for a usage-limit reset, the run loop
+    # passed waiting tasks as "done", and PR 6 (depends on 5) started on a develop without 5.
+    done = {"S0.4", "B", "2", "probe"}
+    ready, _, _ = next_ready(tasks, done, set(), CLOUD, slots=2, held={"4"})
+    assert "4" not in ids(ready)  # held task is not restarted
+    assert "7" not in ids(ready)  # 7 depends on held 4: must not start
+    assert ready == []
+
+
+def test_held_default_keeps_old_behaviour(tasks):
+    ready, _, _ = next_ready(tasks, {"S0.4", "B"}, set(), NO_SECRETS, slots=2)
+    assert ids(ready) == ["2", "4"]
+
+
+def test_scheduling_sets_keeps_waiting_and_unmerged_final_out_of_done():
+    from repopulse.orchestrator import Decision, scheduling_sets
+
+    final = {
+        "4": Decision("merged", "16"),
+        "8": Decision("failed", "CI red"),
+        "9": Decision("blocked", "needs secret"),
+    }
+    done, held = scheduling_sets(done={"S0.4"}, final=final, waiting={"5"})
+    assert done == {"S0.4", "4"}  # merged in this run counts even if gh lags
+    assert held == {"5", "8", "9"}
+    assert "5" not in done and "8" not in done
+
+
+def test_scheduling_sets_feeds_next_ready_correctly(tasks):
+    from repopulse.orchestrator import Decision, scheduling_sets
+
+    done, held = scheduling_sets(done={"S0.4", "B", "2", "probe"}, final={}, waiting={"4"})
+    ready, _, _ = next_ready(tasks, done, set(), CLOUD, slots=2, held=held)
+    assert ready == []  # 7 depends on waiting 4
+    done, held = scheduling_sets(
+        done={"S0.4", "B", "2", "probe"}, final={"4": Decision("merged", "16")}, waiting=set()
+    )
+    ready, _, _ = next_ready(tasks, done, set(), CLOUD, slots=2, held=held)
+    assert ids(ready) == ["7"]
+
+
+# ---------- retry with the previous failure (#1) ----------
+
+
+def _line(obj: dict) -> str:
+    return json.dumps(obj, ensure_ascii=False)
+
+
+def test_failure_context_prefers_final_result_text():
+    from repopulse.orchestrator import failure_context
+
+    lines = [
+        _line({"type": "assistant", "message": {"content": [{"type": "text", "text": "old"}]}}),
+        _line({"type": "result", "result": "CI đỏ ở job Lint\nRESULT: failed lint"}),
+    ]
+    ctx = failure_context(lines)
+    assert "CI đỏ ở job Lint" in ctx
+    assert "old" not in ctx
+
+
+def test_failure_context_falls_back_to_last_assistant_texts_and_truncates():
+    from repopulse.orchestrator import failure_context
+
+    long = "x" * 5000
+    lines = [
+        "not json",
+        _line({"type": "assistant", "message": {"content": [{"type": "text", "text": "đầu"}]}}),
+        _line({"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "B"}]}}),
+        _line({"type": "assistant", "message": {"content": [{"type": "text", "text": long}]}}),
+    ]
+    ctx = failure_context(lines, max_chars=800)
+    assert len(ctx) <= 800
+    assert ctx.endswith("x")  # keeps the tail, the most recent text
+    assert failure_context([]) == ""
+
+
+def test_build_prompt_without_failure_has_no_failure_section(tasks):
+    assert "Lần trước thất bại" not in build_prompt(tasks[2])
+
+
+def test_build_prompt_with_previous_failure_tells_session_what_went_wrong(tasks):
+    p = build_prompt(tasks[2], previous_failure="treo 30 phút\nchờ gh pr checks")
+    assert "Lần trước thất bại" in p
+    assert "treo 30 phút" in p and "chờ gh pr checks" in p
+    assert p.rstrip().endswith("RESULT: blocked <việc cần chủ repo làm>")  # contract stays last
+
+
+# ---------- develop CI health (#3) ----------
+
+
+def test_develop_ci_state_maps_latest_run():
+    from repopulse.orchestrator import develop_ci_state
+
+    assert develop_ci_state([]) == "unknown"
+    assert develop_ci_state([{"status": "completed", "conclusion": "success"}]) == "green"
+    assert develop_ci_state([{"status": "completed", "conclusion": "failure"}]) == "red"
+    assert develop_ci_state([{"status": "completed", "conclusion": "cancelled"}]) == "unknown"
+    assert develop_ci_state([{"status": "in_progress", "conclusion": ""}]) == "pending"
+    # only the newest run counts (gh lists newest first)
+    runs = [
+        {"status": "completed", "conclusion": "success"},
+        {"status": "completed", "conclusion": "failure"},
+    ]
+    assert develop_ci_state(runs) == "green"
+
+
+def test_develop_ci_pending_keeps_previous_verdict():
+    from repopulse.orchestrator import develop_ci_blocks
+
+    # red blocks new work; pending/unknown keep whatever we knew before; only green releases it
+    assert develop_ci_blocks("red", previously_blocked=False) is True
+    assert develop_ci_blocks("pending", previously_blocked=True) is True
+    assert develop_ci_blocks("pending", previously_blocked=False) is False
+    assert develop_ci_blocks("green", previously_blocked=True) is False
+
+
+def test_develop_ci_unknown_does_not_clear_a_red_flag():
+    # a gh error or a cancelled run says nothing new: a red develop stays red until green
+    from repopulse.orchestrator import develop_ci_blocks
+
+    assert develop_ci_blocks("unknown", previously_blocked=True) is True
+    assert develop_ci_blocks("unknown", previously_blocked=False) is False
+
+
+def test_failure_context_keeps_only_the_five_latest_texts():
+    from repopulse.orchestrator import failure_context
+
+    lines = [
+        _line({"type": "assistant", "message": {"content": [{"type": "text", "text": f"t{i}"}]}})
+        for i in range(8)
+    ]
+    ctx = failure_context(lines)
+    assert ctx.splitlines() == ["t3", "t4", "t5", "t6", "t7"]
+
+
+# ---------- stall detection (#6) ----------
+
+
+def test_is_stalled_after_silence_limit():
+    from repopulse.orchestrator import is_stalled
+
+    assert is_stalled(last_output=1000, now=1000 + 1799, limit_s=1800, last_rate=None) is False
+    assert is_stalled(last_output=1000, now=1000 + 1800, limit_s=1800, last_rate=None) is False
+    assert is_stalled(last_output=1000, now=1000 + 1801, limit_s=1800, last_rate=None) is True
+
+
+def test_decide_after_exit_stalled_session_fails_even_with_stale_rejected_event():
+    # Review PR 24: a stalled run whose last_rate is an old "rejected" event must not be
+    # resumed as if it hit the usage limit; it is a failure with the stall as its reason.
+    stale = {
+        "type": "rate_limit_event",
+        "rate_limit_info": {"status": "rejected", "resetsAt": 1000},
+    }
+    d = decide_after_exit(
+        -15, stale, "", now=5000, max_wait_s=6 * 3600, stalled="treo 30 phút không có output"
+    )
+    assert d.kind == "failed"
+    assert d.reason == "treo 30 phút không có output"
+
+
+def test_decide_after_exit_stalled_but_merged_is_still_merged():
+    d = decide_after_exit(0, None, "RESULT: merged 24", now=0, max_wait_s=0, stalled="treo")
+    assert d.kind == "merged"
+
+
+def test_is_stalled_not_while_waiting_for_quota_reset():
+    from repopulse.orchestrator import is_stalled
+
+    rejected = {
+        "type": "rate_limit_event",
+        "rate_limit_info": {"status": "rejected", "resetsAt": 10_000},
+    }
+    # silent because the in-session watchdog waits for the reset: not a stall
+    assert is_stalled(last_output=1000, now=9000, limit_s=1800, last_rate=rejected) is False
+    # reset passed long ago and still silent: stalled
+    assert is_stalled(last_output=1000, now=10_000 + 1801, limit_s=1800, last_rate=rejected) is True
+
+
+# ---------- CLI defaults ----------
+
+
+def _load_cli():
+    import importlib.util
+    import sys
+
+    path = Path(__file__).resolve().parents[1] / "scripts" / "orchestrate.py"
+    spec = importlib.util.spec_from_file_location("orchestrate_cli", path)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["orchestrate_cli"] = mod  # dataclasses resolve annotations via sys.modules
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_cli_defaults_to_five_parallel_and_thirty_minute_stall():
+    args = _load_cli().build_parser().parse_args(["run"])
+    assert args.parallel == 5
+    assert args.stall_minutes == 30
+
+
+# ---------- independent review session (#2) ----------
+
+
+def test_build_prompt_stops_at_ready_and_never_reviews_or_merges(tasks):
+    p = build_prompt(tasks[2])
+    assert "RESULT: ready <số PR>" in p
+    assert "gh pr merge" not in p
+    assert "code-reviewer" not in p  # review is a separate, fresh session
+
+
+def test_parse_result_accepts_ready():
+    assert parse_result("CI xanh\nRESULT: ready 31") == ("ready", "31")
+
+
+def test_decide_after_exit_ready_carries_pr_number():
+    d = decide_after_exit(0, None, "RESULT: ready 31", now=0, max_wait_s=0)
+    assert d.kind == "ready"
+    assert d.reason == "31"
+
+
+def test_decide_after_exit_ready_keeps_only_the_digits():
+    for text in ("RESULT: ready #31", "RESULT: ready 31 (CI xanh)", "RESULT: ready PR #31"):
+        d = decide_after_exit(0, None, text, now=0, max_wait_s=0)
+        assert (d.kind, d.reason) == ("ready", "31"), text
+
+
+def test_decide_after_exit_ready_prefers_the_hash_number():
+    # Review PR 25 (round 2): "ready PR 2 #31" must read the PR number, not the task id
+    d = decide_after_exit(0, None, "RESULT: ready PR 2 #31", now=0, max_wait_s=0)
+    assert (d.kind, d.reason) == ("ready", "31")
+
+
+def test_cli_has_daily_command_and_daily_hour():
+    parser = _load_cli().build_parser()
+    assert parser.parse_args(["run"]).daily_hour == 22
+    args = parser.parse_args(["daily", "--date", "2026-11-11", "--no-send"])
+    assert args.cmd == "daily" and args.date == "2026-11-11" and args.no_send is True
+    assert parser.parse_args(["daily"]).force is False
+
+
+def test_decide_after_exit_ready_without_pr_number_is_a_counted_failure():
+    # Review PR 25: "ready" with no number put "" in pending_review, the next start was a build
+    # session again (falsy review_pr) and the loop never ended.
+    d = decide_after_exit(0, None, "RESULT: ready", now=0, max_wait_s=0)
+    assert d.kind == "failed"
+    assert "số PR" in d.reason
+
+
+def test_decide_after_exit_ready_beats_a_stale_rate_event():
+    stale = {"type": "rate_limit_event", "rate_limit_info": {"status": "rejected", "resetsAt": 9}}
+    d = decide_after_exit(0, stale, "RESULT: ready 31", now=0, max_wait_s=3600)
+    assert (d.kind, d.reason) == ("ready", "31")
+
+
+def test_build_review_command_runs_code_reviewer_agent_headless(tmp_path: Path):
+    from repopulse.orchestrator import build_review_command
+
+    cmd = build_review_command(tmp_path, "REVIEW IT", resume=None)
+    assert cmd[:3] == ["claude", "-p", "REVIEW IT"]
+    joined = " ".join(cmd)
+    assert "--agent code-reviewer" in joined
+    assert "--model opus" in joined and "--effort medium" in joined
+    assert "--permission-mode auto" in joined and "--permission-prompts none" in joined
+    assert "--output-format stream-json" in joined
+    assert "--resume" not in cmd
+    assert build_review_command(tmp_path, "R", resume="s1")[-2:] == ["--resume", "s1"]
+
+
+def test_build_review_prompt_names_pr_and_verdict_contract(tasks):
+    from repopulse.orchestrator import build_review_prompt
+
+    p = build_review_prompt(tasks[2], "31")
+    assert "#31" in p and "feature/event-spec" in p
+    assert "gh pr comment 31" in p
+    assert "REVIEW: PASS" in p and "REVIEW: FAIL" in p
+    assert "không merge" in p.lower()
+
+
+def test_parse_review_takes_last_verdict_line():
+    from repopulse.orchestrator import parse_review
+
+    assert parse_review("REVIEW: FAIL a\n...\nREVIEW: PASS") == ("PASS", "")
+    assert parse_review("REVIEW: FAIL thiếu test cho dedup") == ("FAIL", "thiếu test cho dedup")
+    assert parse_review("không có gì") is None
+
+
+def test_parse_review_trusts_only_review_lines():
+    # Review PR 25: the agent's template "Kết luận: PASS | FAIL" must never read as a PASS;
+    # merging hangs on this, so only an explicit REVIEW: line counts.
+    from repopulse.orchestrator import parse_review
+
+    assert parse_review("## Kết luận: PASS | FAIL") is None
+    assert parse_review("## Kết luận: PASS") is None
+    assert parse_review("## Kết luận: PASS\n\nREVIEW: FAIL thiếu test") == ("FAIL", "thiếu test")
+
+
+def test_decide_after_review_maps_verdict_quota_and_missing_line():
+    from repopulse.orchestrator import decide_after_review
+
+    assert decide_after_review(0, None, "REVIEW: PASS", now=0, max_wait_s=0).kind == "pass"
+    d = decide_after_review(0, None, "REVIEW: FAIL mutation sống", now=0, max_wait_s=0)
+    assert (d.kind, d.reason) == ("fail", "mutation sống")
+    limit = {
+        "type": "rate_limit_event",
+        "rate_limit_info": {"status": "rejected", "resetsAt": 100},
+    }
+    assert decide_after_review(1, limit, "", now=50, max_wait_s=3600).kind == "resume_at"
+    assert decide_after_review(1, None, "", now=0, max_wait_s=0).kind == "failed"
+    d = decide_after_review(1, limit, "", now=50, max_wait_s=3600, stalled="treo")
+    assert (d.kind, d.reason) == ("failed", "treo")
+
+
+def test_merge_ready_needs_all_three_required_checks_passing():
+    from repopulse.orchestrator import merge_ready
+
+    ok = [
+        {"name": "Lint", "bucket": "pass"},
+        {"name": "Unit Tests", "bucket": "pass"},
+        {"name": "dbt build (DuckDB)", "bucket": "pass"},
+        {"name": "GitGuardian Security Checks", "bucket": "pass"},
+    ]
+    assert merge_ready(ok) == (True, "")
+    red = [dict(c, bucket="fail") if c["name"] == "Unit Tests" else c for c in ok]
+    assert merge_ready(red) == (False, "Unit Tests: fail")
+    missing = [c for c in ok if c["name"] != "Lint"]
+    assert merge_ready(missing) == (False, "Lint: thiếu")
+    # Review PR 25: a check still running (or skipped) is not a pass
+    for bucket in ("pending", "skipping", "cancel"):
+        running = [dict(c, bucket=bucket) if c["name"] == "Unit Tests" else c for c in ok]
+        assert merge_ready(running) == (False, f"Unit Tests: {bucket}")
+
+
+def test_review_next_merges_on_pass_fixes_once_then_gives_up():
+    from repopulse.orchestrator import Decision, review_next
+
+    assert review_next(Decision("pass"), failed_rounds=0, max_rounds=2) == "merge"
+    assert review_next(Decision("pass"), failed_rounds=1, max_rounds=2) == "merge"
+    assert review_next(Decision("fail", "x"), failed_rounds=0, max_rounds=2) == "fix"
+    assert review_next(Decision("fail", "x"), failed_rounds=1, max_rounds=2) == "give_up"

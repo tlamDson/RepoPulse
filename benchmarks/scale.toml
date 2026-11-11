@@ -1,0 +1,38 @@
+# Spark vs DuckDB scale benchmark (M5 in docs/plan.md): 1, 7, 30 days of real GH Archive data
+# (not simulated). Smaller levels are prefixes of the largest one, so the 30-day window is
+# prepared once and reused by every level. See docs/benchmark-scale.md.
+#
+# 2025 rather than 2026: 2026 hour files are many times smaller, too small to find the point
+# where Spark catches up with DuckDB (docs/plan.md, GH Archive risk).
+
+start_date = "2025-06-01"
+levels = [1, 7, 30]
+runs = 3
+
+# Exactly the event types Q1-Q6 read (tests/test_bench_scale.py greps benchmarks/queries/).
+event_types = [
+    "ForkEvent",
+    "IssueCommentEvent",
+    "IssuesEvent",
+    "PullRequestEvent",
+    "PullRequestReviewCommentEvent",
+    "PullRequestReviewEvent",
+]
+
+# Slim hour files (gzip NDJSON) + manifest.json; cached between workflow runs.
+data_dir = "data/scale/gharchive"
+# Parallel download + slim processes in the prepare step (runner: 4 CPU).
+workers = 4
+# Each measured run is a child process killed after this many minutes.
+run_timeout_minutes = 45
+
+[spark]
+master = "local[*]"
+# Runner has 16 GB RAM; leave room for the Python driver and the OS.
+driver_memory = "10g"
+# 2 x the 4 runner cores; AQE coalesces further.
+shuffle_partitions = 8
+
+[duckdb]
+# Lets DuckDB spill instead of dying with OOM at 30 days.
+temp_directory = "data/tmp/duckdb"

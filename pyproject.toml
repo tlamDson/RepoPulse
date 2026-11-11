@@ -8,15 +8,20 @@ license = { text = "MIT" }
 dependencies = []
 
 [project.optional-dependencies]
-dev = ["ruff>=0.6", "pytest>=8", "pre-commit>=3.8", "pyyaml>=6", "duckdb>=1.1"]
+dev = ["ruff>=0.6", "pytest>=8", "pre-commit>=3.8", "pyyaml>=6", "jsonschema>=4.18,<5", "duckdb>=1.1"]
 dbt = ["dbt-core>=1.8", "dbt-duckdb>=1.8"]
+snowflake = ["dbt-snowflake>=1.8"]  # only for .github/workflows/snowflake-port.yml
+spark = ["pyspark>=3.5.3,<3.6", "delta-spark>=3.3,<3.4"]
 
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["repopulse*"]
+include = ["repopulse*", "eventspec*", "simkit*"]
+
+[tool.setuptools.package-data]
+eventspec = ["catalog/*.yaml", "schemas/*.json"]
 
 [tool.ruff]
 line-length = 100
@@ -26,7 +31,7 @@ target-version = "py311"
 select = ["E", "F", "I", "B", "UP"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["repopulse", "benchmarks"]
+known-first-party = ["repopulse", "benchmarks", "eventspec", "simkit"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

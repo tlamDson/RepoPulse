@@ -1,0 +1,63 @@
+# PII governance policy of RepoPulse: the only source of PII classes, layers and roles.
+# Read by `python -m repopulse.governance check` (repopulse/governance.py) against dbt's
+# target/manifest.json; every column of every dbt model carries `config: {meta: {pii: <class>}}`.
+# Explained in docs/governance.md.
+#
+# DuckDB and MotherDuck have no column-level GRANT: roles are enforced by which schema/database
+# is shared with whom (the `public` role only ever gets the `public` schema) plus the automatic
+# checks. Mapping to Snowflake grants is PR 13.
+
+version: 1
+
+pii_classes:
+  none:
+    description: Not personal data (event ids, types, timestamps, repo names, counts, metrics).
+  public_identifier:
+    description: >
+      Public GitHub login or numeric id (actor_login, actor_id, user_key). Public on GitHub but
+      still pseudonymous personal data: readable by pipeline and analyst, masked for public.
+  hashed:
+    description: >
+      Salted SHA-256 done in silver (commit author email/name hashes). Allowed up to staging and
+      intermediate, never carried into gold or public.
+  direct:
+    description: >
+      Raw email or real name. Never allowed from staging on: silver hashes it first
+      (repopulse/spark/pii.py).
+
+# dbt custom schema (+schema in dbt_project.yml) -> layer rules. A model whose schema is not
+# listed here fails `check`.
+layers:
+  staging:
+    description: Silver columns as-is (main_staging on DuckDB).
+    forbidden_classes: [direct]
+  intermediate:
+    description: Internal joins feeding the marts (main_intermediate).
+    forbidden_classes: [direct]
+  gold:
+    description: Star schema and Q1-Q6 marts (main_gold).
+    forbidden_classes: [direct, hashed]
+  public:
+    description: >
+      What dashboards, GitHub Pages and Tableau Public may read (main_public). Identifiers are
+      masked with mask_pii (same formula as silver hashing) and labelled `masked: true`.
+    forbidden_classes: [direct, hashed]
+
+# read/write: layers the role may read/write. raw_classes: PII classes the role may see unmasked.
+# Any column the role can read whose class is not in raw_classes must be `masked: true`.
+roles:
+  pipeline:
+    description: Scheduled jobs and dbt (GitHub Actions); builds every layer.
+    read: [staging, intermediate, gold, public]
+    write: [staging, intermediate, gold, public]
+    raw_classes: [none, public_identifier, hashed]
+  analyst:
+    description: People exploring gold (DuckDB file or MotherDuck database, read-only).
+    read: [gold, public]
+    write: []
+    raw_classes: [none, public_identifier]
+  public:
+    description: Dashboard on GitHub Pages and Tableau Public; anyone on the internet.
+    read: [public]
+    write: []
+    raw_classes: [none]
