@@ -20,6 +20,7 @@ from __future__ import annotations
 import bisect
 import copy
 import random
+import re
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -56,6 +57,7 @@ _DRIFT_FIELDS = {
     "client_build": (4120, 4121, 4200),
 }
 _MIN_TIME = datetime.min.replace(tzinfo=UTC)
+_USER_ID = re.compile(r"u-(\d+)")
 
 
 @dataclass(frozen=True)
@@ -180,6 +182,8 @@ class _Injector:
         self.tags: dict[int, int] = {}  # source index -> record number (modified in place)
         self.used_ids = {e["event_id"] for e in self.source if isinstance(e.get("event_id"), str)}
         self.user_ids = {e["user_id"] for e in self.source if isinstance(e.get("user_id"), str)}
+        numbers = (_USER_ID.fullmatch(user_id) for user_id in self.user_ids)
+        self.last_user_number = max((int(m[1]) for m in numbers if m), default=0)
         prefix, latest = [], _MIN_TIME
         for e in self.source:
             moment = parse_ts(e.get("occurred_at"))
@@ -275,17 +279,21 @@ class _Injector:
             }
         self.tags[i] = self._record("schema_drift", detail)
 
-    def _new_user_id(self) -> str:
+    def _new_user_number(self) -> int:
+        """Next unused user number: bot ids use the clean id format, so only behavior tells."""
         while True:
-            user_id = f"u-{self.rng.getrandbits(48):012x}"
+            self.last_user_number += 1
+            user_id = f"u-{self.last_user_number:05d}"
             if user_id not in self.user_ids:
                 self.user_ids.add(user_id)
-                return user_id
+                return self.last_user_number
 
     def bot(self, first: datetime, last: datetime) -> None:
         rng = self.rng
-        user_id = self._new_user_id()
-        session_id = f"s-{rng.getrandbits(48):012x}"
+        number = self._new_user_number()
+        user_id = f"u-{number:05d}"
+        session_id = f"s-{number:05d}-0001"
+        itineraries = 0
         span_ms = int((last - first).total_seconds() * 1000)
         moment = first + ms(rng.randint(0, max(span_ms, 0)))
         total = rng.randint(*BOT_EVENTS_RANGE)
@@ -298,11 +306,12 @@ class _Injector:
                 fields: dict = {"platform": "web", "app_version": rng.choice(APP_VERSIONS)}
             elif trips and rng.random() < 0.5:
                 name = "itinerary_generated"
-                itinerary_id = f"i-{rng.getrandbits(48):012x}"
+                itineraries += 1
+                itinerary_id = f"i-{number:05d}-{itineraries:04d}"
                 fields = itinerary_fields(rng, rng.choice(trips), itinerary_id)
             else:
                 name = "trip_created"
-                fields = trip_fields(rng, moment, f"t-{rng.getrandbits(48):012x}")
+                fields = trip_fields(rng, moment, f"t-{number:05d}-{len(trips) + 1:04d}")
                 trips.append(fields)
             event = {
                 "event_id": new_event_id(rng, self.used_ids),
@@ -349,6 +358,10 @@ def inject_faults(
     Raises ``ValueError`` for an unknown type, a negative or non-integer count, or a request for
     more single-event faults than there are eligible (valid, non-duplicate) events. ``events`` is
     not modified. With every count at 0 the output equals the input.
+
+    Meant for clean input, in one call. Calling it again on its own output is not supported: late
+    and bot events of the first call are still eligible, so a second pass can stack a fault on
+    them and the counts of the two manifests no longer add up.
     """
     requested = _check_counts(counts)
     cat = default_catalog() if catalog is None else catalog

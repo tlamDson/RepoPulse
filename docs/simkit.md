@@ -70,7 +70,7 @@ Các trường không bao giờ bị sửa: `event_id`, `event_name`, `event_ver
 | `wrong_type` | một event có một trường đổi sang kiểu JSON khác (chuỗi → số nguyên; số → chuỗi số; boolean → `"true"`/`"false"`) | `validate` có `field '<f>' must be of type <t>, got <u>` |
 | `late` | một event có `received_at - occurred_at` > `LATE_THRESHOLD` (1 giờ; thêm 1 phút–72 giờ), vẫn hợp lệ schema; được dời tới vị trí nó "đến" trong luồng | `is_late(event)` / `arrival_delay(event)` |
 | `schema_drift` | một event có trường lạ (`utm_source`, `ab_bucket`, `referrer`, `client_build`) **hoặc** `event_version` = version lớn nhất đã khai + 1 | `validate` có `unexpected field '<f>'` hoặc `event_version N is not declared ...` |
-| `bot` | **một người dùng bot** (user_id mới, không trùng người dùng sạch): một phiên với 40–80 event hợp lệ cách nhau 0,1–0,7 giây, cả loạt nằm trong dưới 60 giây | `bot_users(events)`: người dùng có > `BOT_EVENTS_PER_MINUTE` (30) event trong một cửa sổ 60 giây bất kỳ |
+| `bot` | **một người dùng bot** (user_id mới cùng dạng `u-NNNNN`, số kế tiếp sau người dùng lớn nhất của input; `session_id`/`trip_id`/`itinerary_id` cũng cùng dạng với dữ liệu sạch, nên chỉ nhận ra bot qua hành vi): một phiên với 40–80 event hợp lệ cách nhau 0,1–0,7 giây, cả loạt nằm trong dưới 60 giây | `bot_users(events)`: người dùng có > `BOT_EVENTS_PER_MINUTE` (30) event trong một cửa sổ 60 giây bất kỳ |
 
 Lỗi `null`/`wrong_type`/`schema_drift` làm event sai schema (PR 5 đưa vào quarantine). `late` và
 `bot` hợp lệ schema, chỉ lộ qua thời gian đến / tốc độ. Bản sao `duplicate` và event bot không
@@ -80,6 +80,11 @@ Ràng buộc: count thiếu = 0; tất cả bằng 0 thì output bằng đúng i
 không phải số nguyên, tổng lỗi một-event (`duplicate` + `null` + `wrong_type` + `late` +
 `schema_drift`) lớn hơn số event đủ điều kiện, hay `bot` > 0 mà input không có event nào → ném
 `ValueError` nêu rõ lý do (không chèn thiếu).
+
+Gọi `inject_faults` **một lần trên dữ liệu sạch**. Gọi lần hai trên output đã chèn lỗi không được
+hỗ trợ: event `late` và event bot của lần trước vẫn đủ điều kiện, nên lần sau có thể chèn chồng lỗi
+lên chúng và số đếm của hai manifest không còn cộng lại được. Cần nhiều loại lỗi thì đưa hết vào
+một `counts`.
 
 ## Manifest
 
