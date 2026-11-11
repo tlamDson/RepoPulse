@@ -1,7 +1,7 @@
 """Headless orchestrator: runs RepoPulse PRs with `claude -p`, unattended.
 
     python scripts/orchestrate.py run --dry-run
-    python scripts/orchestrate.py run --parallel 2 [--only ID] [--auto-approve-harness]
+    python scripts/orchestrate.py run [--parallel 5] [--only ID] [--auto-approve-harness]
     python scripts/orchestrate.py clean [--dry-run]
     python scripts/orchestrate.py quota
     python scripts/orchestrate.py report
@@ -36,8 +36,12 @@ from repopulse.orchestrator import (  # noqa: E402
     build_prompt,
     clean_plan,
     decide_after_exit,
+    develop_ci_blocks,
+    develop_ci_state,
+    failure_context,
     harness_auto_approved,
     harness_file_approved,
+    is_stalled,
     load_tasks,
     mark_trusted,
     merged_task_ids,
@@ -105,6 +109,31 @@ def gh_secret_names() -> frozenset[str]:
         return frozenset(s["name"] for s in json.loads(out or "[]"))
     except json.JSONDecodeError:
         return frozenset()
+
+
+def gh_develop_ci() -> str:
+    """green | red | pending | unknown for the newest CI run on a push to develop."""
+    out = sh(
+        [
+            "gh",
+            "run",
+            "list",
+            "--workflow",
+            "ci.yml",
+            "--branch",
+            "develop",
+            "--event",
+            "push",
+            "--limit",
+            "1",
+            "--json",
+            "status,conclusion,headSha",
+        ]
+    )
+    try:
+        return develop_ci_state(json.loads(out or "[]"))
+    except json.JSONDecodeError:
+        return "unknown"
 
 
 def permission_log_lines() -> list[str]:
@@ -207,7 +236,24 @@ class Run:
     last_rate: dict | None = None
     result_text: str = ""
     warn: bool = False
+    stalled: bool = False
+    last_output: float = 0.0
+    log_offset: int = 0  # where this attempt starts in logs/pr-<id>.jsonl
     reader: threading.Thread | None = field(default=None, repr=False)
+
+
+def task_log(task: Task) -> Path:
+    return LOGS / f"pr-{task.id}.jsonl"
+
+
+def attempt_lines(run: Run) -> list[str]:
+    """Stream lines written by this attempt only (the log file is appended across attempts)."""
+    p = task_log(run.task)
+    if not p.exists():
+        return []
+    with p.open("rb") as fh:
+        fh.seek(run.log_offset)
+        return fh.read().decode("utf-8", errors="replace").splitlines()
 
 
 def _reader(run: Run, logfile: Path) -> None:
@@ -215,6 +261,7 @@ def _reader(run: Run, logfile: Path) -> None:
         for line in run.proc.stdout:  # type: ignore[union-attr]
             fh.write(line)
             fh.flush()
+            run.last_output = time.time()
             ev = parse_stream_line(line)
             if not ev:
                 continue
@@ -227,10 +274,14 @@ def _reader(run: Run, logfile: Path) -> None:
                 run.result_text = str(ev.get("result", ""))
 
 
-def start(task: Task, resume: str | None = None) -> Run:
+def start(task: Task, resume: str | None = None, previous_failure: str | None = None) -> Run:
     path = ensure_worktree(task)
     ensure_trusted([path])  # re-check: a running claude may have rewritten ~/.claude.json
-    prompt = "Tiếp tục đúng việc đang dở." if resume else build_prompt(task)
+    prompt = (
+        "Tiếp tục đúng việc đang dở."
+        if resume
+        else build_prompt(task, previous_failure=previous_failure)
+    )
     cmd = build_command(ROOT, prompt, resume)
     cmd[0] = shutil.which("claude") or "claude"
     env = dict(os.environ)
@@ -241,6 +292,8 @@ def start(task: Task, resume: str | None = None) -> Run:
         CLAUDE_CODE_RETRY_WATCHDOG_MAX_USAGE_LIMIT_WAIT_MS=str(6 * 3600 * 1000),
     )
     LOGS.mkdir(exist_ok=True)
+    logfile = task_log(task)
+    offset = logfile.stat().st_size if logfile.exists() else 0
     proc = subprocess.Popen(
         cmd,
         cwd=path,
@@ -252,12 +305,12 @@ def start(task: Task, resume: str | None = None) -> Run:
         encoding="utf-8",
         errors="replace",
     )
-    run = Run(task, proc, path, time.time())
-    run.reader = threading.Thread(
-        target=_reader, args=(run, LOGS / f"pr-{task.id}.jsonl"), daemon=True
-    )
+    now = time.time()
+    run = Run(task, proc, path, now, last_output=now, log_offset=offset)
+    run.reader = threading.Thread(target=_reader, args=(run, logfile), daemon=True)
     run.reader.start()
-    log(f"start {task.id} ({task.branch}) in {path}" + (f" resume={resume}" if resume else ""))
+    note = f" resume={resume}" if resume else (" (thử lại có ngữ cảnh)" if previous_failure else "")
+    log(f"start {task.id} ({task.branch}) in {path}{note}")
     return run
 
 
@@ -359,6 +412,8 @@ def run(args: argparse.Namespace) -> int:
     state = load_state()
     released = set(state["released"])
     failures: dict[str, int] = state.get("failures", {})
+    last_failure: dict[str, str] = state.setdefault("last_failure", {})
+    develop_red = False
     runs: dict[str, Run] = {}
     waiting: dict[str, tuple[int, str | None]] = {}
     final: dict[str, Decision] = {}
@@ -382,6 +437,18 @@ def run(args: argparse.Namespace) -> int:
             sh(["git", "fetch", "origin", "--prune"])
             done = merged_task_ids(tasks, gh_prs())
             gates = Gates(gh_secret_names(), harness_approved(done, args.auto_approve_harness))
+            red = develop_ci_blocks(gh_develop_ci(), develop_red)
+            if red != develop_red:
+                log(
+                    "CI trên develop đỏ: không mở việc mới, không release"
+                    if red
+                    else "CI trên develop xanh lại: mở việc tiếp"
+                )
+            develop_red = red
+            if develop_red:
+                blocked["develop-ci"] = "CI trên develop đỏ sau lần merge gần nhất: cần sửa"
+            else:
+                blocked.pop("develop-ci", None)
             last_refresh = now
 
         # finished runs
@@ -389,6 +456,12 @@ def run(args: argparse.Namespace) -> int:
             if r.proc.poll() is None:
                 if now - r.started > args.task_hours * 3600:
                     log(f"{tid}: quá {args.task_hours}h, dừng tiến trình")
+                    r.proc.terminate()
+                elif not r.stalled and is_stalled(
+                    r.last_output, now, args.stall_minutes * 60, r.last_rate
+                ):
+                    log(f"{tid}: {args.stall_minutes} phút không có output, coi là treo, dừng")
+                    r.stalled = True
                     r.proc.terminate()
                 continue
             r.reader.join(timeout=10)
@@ -404,7 +477,10 @@ def run(args: argparse.Namespace) -> int:
                 stop_all = d.reason
                 final[tid] = d
             elif d.kind == "failed":
+                if r.stalled:
+                    d = Decision("failed", f"treo {args.stall_minutes} phút không có output")
                 failures[tid] = failures.get(tid, 0) + 1
+                last_failure[tid] = f"Lý do: {d.reason}\n{failure_context(attempt_lines(r))}"
                 if failures[tid] >= MAX_FAILURES:
                     final[tid] = d
             elif d.kind == "blocked":
@@ -412,6 +488,7 @@ def run(args: argparse.Namespace) -> int:
             else:
                 done.add(tid)
                 final[tid] = d
+                last_failure.pop(tid, None)
                 last_refresh = 0
             state["failures"] = failures
             save_state(state)
@@ -429,7 +506,7 @@ def run(args: argparse.Namespace) -> int:
             for t in releases_due(tasks, done, released | release_failed)
             if keep is None or t in keep
         ]
-        if due and not runs and not args.dry_run:
+        if due and not runs and not args.dry_run and not develop_red:
             err = release(due[0])
             if err:
                 blocked[f"release-{due[0]}"] = err
@@ -463,9 +540,9 @@ def run(args: argparse.Namespace) -> int:
             if not ready:
                 print("Không có việc nào sẵn sàng. Bị chặn: " + json.dumps(blk, ensure_ascii=False))
             return 0
-        if not stopping and not hold_new:
+        if not stopping and not hold_new and not develop_red:
             for t in ready:
-                runs[t.id] = start(t)
+                runs[t.id] = start(t, previous_failure=last_failure.get(t.id))
 
         if should_exit(
             len(runs), len(waiting), refresh_pending=last_refresh == 0, stopping=stopping
@@ -558,15 +635,24 @@ def report(_: argparse.Namespace) -> int:
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
-    for stream in (sys.stdout, sys.stderr):  # Windows consoles default to cp1252
-        if hasattr(stream, "reconfigure"):
-            stream.reconfigure(encoding="utf-8", errors="replace")
+def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("run")
     r.add_argument("--dry-run", action="store_true")
-    r.add_argument("--parallel", type=int, default=2)
+    r.add_argument(
+        "--parallel",
+        type=int,
+        default=5,
+        help="số phiên tối đa; thực tế bị giới hạn bởi độ rộng DAG, quota và CI develop",
+    )
+    r.add_argument(
+        "--stall-minutes",
+        type=float,
+        default=30,
+        help="quá số phút này không có output stream (trừ lúc chờ quota reset) thì coi là "
+        "treo: dừng phiên, lần sau thử lại kèm ngữ cảnh",
+    )
     r.add_argument("--only", help="comma-separated task ids")
     r.add_argument(
         "--auto-approve-harness",
@@ -592,7 +678,14 @@ def main(argv: list[str] | None = None) -> int:
     c.set_defaults(fn=lambda a: clean(a.dry_run) or 0)
     sub.add_parser("quota").set_defaults(fn=quota)
     sub.add_parser("report").set_defaults(fn=report)
-    args = p.parse_args(argv)
+    return p
+
+
+def main(argv: list[str] | None = None) -> int:
+    for stream in (sys.stdout, sys.stderr):  # Windows consoles default to cp1252
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+    args = build_parser().parse_args(argv)
     return args.fn(args)
 
 

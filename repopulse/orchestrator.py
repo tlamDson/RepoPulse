@@ -270,6 +270,60 @@ def decide_after_exit(
     return Decision("failed", f"exit {returncode}, no RESULT line")
 
 
+# ---------- retry context, develop CI, stalls ----------
+
+FAILURE_CONTEXT_CHARS = 1500
+
+
+def failure_context(log_lines: Iterable[str], max_chars: int = FAILURE_CONTEXT_CHARS) -> str:
+    """Tail of what a failed session last said, to brief its retry.
+
+    The final ``result`` event is the session's own summary; without one (killed, crashed)
+    fall back to its last assistant texts. Keeps the most recent ``max_chars``.
+    """
+    result = ""
+    texts: list[str] = []
+    for line in log_lines:
+        ev = parse_stream_line(line)
+        if not ev:
+            continue
+        if ev.get("type") == "result" and ev.get("result"):
+            result = str(ev["result"])
+        elif ev.get("type") == "assistant":
+            content = (ev.get("message") or {}).get("content") or []
+            texts += [c.get("text", "") for c in content if c.get("type") == "text"]
+    text = result or "\n".join(t for t in texts[-5:] if t)
+    return text[-max_chars:].strip()
+
+
+def develop_ci_state(runs: list[dict]) -> str:
+    """State of the newest CI run on develop (``gh run list`` lists newest first)."""
+    if not runs:
+        return "unknown"
+    run = runs[0]
+    if run.get("status") != "completed":
+        return "pending"
+    return {"success": "green", "failure": "red"}.get(run.get("conclusion") or "", "unknown")
+
+
+def develop_ci_blocks(state: str, previously_blocked: bool) -> bool:
+    """Red develop holds new work; a pending run keeps the last verdict."""
+    if state == "red":
+        return True
+    if state == "pending":
+        return previously_blocked
+    return False
+
+
+def is_stalled(last_output: float, now: float, limit_s: float, last_rate: dict | None) -> bool:
+    """No stream output for ``limit_s``, not counting an in-session wait for a quota reset."""
+    since = last_output
+    info = (last_rate or {}).get("rate_limit_info") or {}
+    if info.get("status") == "rejected" and info.get("resetsAt"):
+        since = max(since, float(info["resetsAt"]))
+    return now - since > limit_s
+
+
 # ---------- command and prompt ----------
 
 
@@ -297,10 +351,18 @@ def build_command(repo_root: Path, prompt: str, resume: str | None) -> list[str]
     return cmd
 
 
-def build_prompt(task: Task) -> str:
+def build_prompt(task: Task, previous_failure: str | None = None) -> str:
     label = f"PR {task.id}" if task.id[0].isdigit() else f"việc {task.id}"
     about = task.title or task.branch
-    return f"""Bạn là phiên điều phối headless cho {label} của RepoPulse ({about}).
+    retry = ""
+    if previous_failure:
+        retry = f"""
+Lần trước thất bại. Đây là phần cuối lần chạy trước, đọc kỹ và đừng lặp lại cùng lỗi:
+<lan-truoc>
+{previous_failure.strip()}
+</lan-truoc>
+"""
+    return f"""Bạn là phiên điều phối headless cho {label} của RepoPulse ({about}).{retry}
 Thư mục hiện tại là worktree riêng của việc này, nhánh `{task.branch}` rẽ từ `origin/develop`.
 Đọc trước: CLAUDE.md, docs/plan.md (mục của {label}), .claude/rules/command-style.md.
 Kiểm `gh pr list --head {task.branch} --state all`: nếu PR đã mở thì làm tiếp từ đó.
