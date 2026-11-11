@@ -1,0 +1,14 @@
+version: 2
+
+models:
+  - name: pipeline_health_check
+    description: Model giữ chỗ cho CI. Sẽ được thay khi có star schema.
+    columns:
+      - name: check_id
+        tests:
+          - not_null
+          - unique
+      - name: status
+        tests:
+          - accepted_values:
+              values: ["ok"]
