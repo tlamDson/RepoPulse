@@ -29,7 +29,7 @@ target-version = "py311"
 select = ["E", "F", "I", "B", "UP"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["repopulse", "benchmarks", "eventspec"]
+known-first-party = ["repopulse", "benchmarks", "eventspec", "simkit"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
