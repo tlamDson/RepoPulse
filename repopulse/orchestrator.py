@@ -207,14 +207,44 @@ def rate_limit_action(event: dict | None) -> tuple[str, int | str | None]:
         if info.get("errorCode"):
             return ("stop", f"usage limit: {info['errorCode']}")
         return ("wait", info.get("resetsAt"))
+    peak = quota_peak(event)
+    if peak >= WARN_UTILIZATION:
+        return ("warn", peak)
+    return ("none", None)
+
+
+def quota_peak(event: dict | None) -> float:
+    """Highest utilization (0..1) of the 5-hour and 7-day windows while requests are allowed.
+
+    0.0 for any other event: a rejected one is a wait/stop (``rate_limit_action``), not a hold.
+    """
+    if not event or event.get("type") != "rate_limit_event":
+        return 0.0
+    info = event.get("rate_limit_info") or {}
+    if info.get("status") not in ("allowed", "allowed_warning"):
+        return 0.0
     windows = info.get("unifiedWindows") or {}
     used = [info.get("utilization") or 0] + [
         (w or {}).get("utilization") or 0 for w in windows.values() if isinstance(w, dict)
     ]
-    peak = max(used)
-    if peak >= WARN_UTILIZATION and status in ("allowed", "allowed_warning"):
-        return ("warn", peak)
-    return ("none", None)
+    return float(max(used))
+
+
+def parse_hold_at(text: str) -> int:
+    """Value of ``--hold-at``: a whole percent from 1 to 100."""
+    value = int(text) if re.fullmatch(r"[0-9]+", text) else 0
+    if not 1 <= value <= 100:
+        raise ValueError(f"ngưỡng phải là số nguyên từ 1 đến 100, nhận {text!r}")
+    return value
+
+
+def over_hold_at(peak: float, hold_at: int | None) -> bool:
+    """True when a quota peak (0..1) has reached ``hold_at`` percent; None never holds.
+
+    Reaching the threshold already holds, as 0.9 always did for ``--hold-at-90``. The percent
+    is divided, not the peak multiplied: 0.29 * 100 is 28.999999999999996 in floats.
+    """
+    return hold_at is not None and peak >= hold_at / 100
 
 
 def hold_until(event: dict | None) -> int | None:
