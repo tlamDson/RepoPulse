@@ -1,0 +1,216 @@
+version: 2
+
+# Schema `public` (main_public on DuckDB): the only thing the `public` role reads (dashboard on
+# GitHub Pages, Tableau Public). Policy: transform/governance.yml; docs/governance.md.
+# Relations keep the gold names (alias): main_public.dim_user, main_public.mart_..., etc.
+# Every column has meta.pii; identifiers are masked with mask_pii and carry masked: true, and
+# their hashed_pii test proves the stored values are 64-hex hashes, not logins/ids.
+
+models:
+  - name: pub_dim_user
+    description: dim_user with user_key, actor_id and actor_login masked (mask_pii).
+    config: {alias: dim_user}
+    columns:
+      - name: user_key
+        config: {meta: {pii: public_identifier, masked: true}}
+        data_tests: [not_null, unique, hashed_pii, no_raw_email]
+      - name: actor_id
+        config: {meta: {pii: public_identifier, masked: true}}
+        data_tests: [not_null, hashed_pii, no_raw_email]
+      - name: actor_login
+        config: {meta: {pii: public_identifier, masked: true}}
+        data_tests: [hashed_pii, no_raw_email]
+      - name: version_number
+        config: {meta: {pii: none}}
+      - name: valid_from
+        config: {meta: {pii: none}}
+      - name: valid_to
+        config: {meta: {pii: none}}
+      - name: is_current
+        config: {meta: {pii: none}}
+      - name: is_bot
+        config: {meta: {pii: none}}
+
+  - name: pub_fct_events
+    description: fct_events with user_key and actor_id masked like pub_dim_user (joins on user_key).
+    config: {alias: fct_events}
+    columns:
+      - name: event_id
+        config: {meta: {pii: none}}
+        data_tests: [not_null, unique]
+      - name: event_type
+        config: {meta: {pii: none}}
+      - name: action
+        config: {meta: {pii: none}}
+      - name: created_at
+        config: {meta: {pii: none}}
+      - name: event_date
+        config: {meta: {pii: none}}
+      - name: event_week
+        config: {meta: {pii: none}}
+      - name: user_key
+        config: {meta: {pii: public_identifier, masked: true}}
+        data_tests:
+          - not_null
+          - hashed_pii
+          - no_raw_email
+          - relationships:
+              arguments:
+                to: ref('pub_dim_user')
+                field: user_key
+      - name: actor_id
+        config: {meta: {pii: public_identifier, masked: true}}
+        data_tests: [not_null, hashed_pii, no_raw_email]
+      - name: repo_key
+        config: {meta: {pii: none}}
+      - name: repo_id
+        config: {meta: {pii: none}}
+      - name: pr_number
+        config: {meta: {pii: none}}
+      - name: issue_number
+        config: {meta: {pii: none}}
+      - name: item_number
+        config: {meta: {pii: none}}
+      - name: pr_merged
+        config: {meta: {pii: none}}
+      - name: is_late
+        config: {meta: {pii: none}}
+
+  - name: pub_dim_repo
+    description: dim_repo as-is (no personal data).
+    config: {alias: dim_repo}
+    columns:
+      - name: repo_key
+        config: {meta: {pii: none}}
+      - name: repo_name
+        config: {meta: {pii: none}}
+      - name: category
+        config: {meta: {pii: none}}
+
+  - name: pub_mart_daily_active_contributors
+    description: Q1 mart as-is (aggregates).
+    config: {alias: mart_daily_active_contributors}
+    columns:
+      - name: period
+        config: {meta: {pii: none}}
+      - name: period_start
+        config: {meta: {pii: none}}
+      - name: scope
+        config: {meta: {pii: none}}
+      - name: scope_key
+        config: {meta: {pii: none}}
+      - name: active_contributors
+        config: {meta: {pii: none}}
+      - name: new_contributors
+        config: {meta: {pii: none}}
+      - name: returning_contributors
+        config: {meta: {pii: none}}
+
+  - name: pub_mart_cohort_retention
+    description: Q2 mart as-is (aggregates).
+    config: {alias: mart_cohort_retention}
+    columns:
+      - name: cohort_week
+        config: {meta: {pii: none}}
+      - name: cohort_size
+        config: {meta: {pii: none}}
+      - name: retained_w4
+        config: {meta: {pii: none}}
+      - name: retained_w12
+        config: {meta: {pii: none}}
+      - name: retention_w4_pct
+        config: {meta: {pii: none}}
+      - name: retention_w12_pct
+        config: {meta: {pii: none}}
+
+  - name: pub_mart_contribution_funnel
+    description: Q3 mart as-is (aggregates).
+    config: {alias: mart_contribution_funnel}
+    columns:
+      - name: repo_name
+        config: {meta: {pii: none}}
+      - name: category
+        config: {meta: {pii: none}}
+      - name: forkers
+        config: {meta: {pii: none}}
+      - name: forkers_with_pr
+        config: {meta: {pii: none}}
+      - name: forkers_with_merge
+        config: {meta: {pii: none}}
+      - name: prs_opened
+        config: {meta: {pii: none}}
+      - name: prs_merged
+        config: {meta: {pii: none}}
+      - name: merge_hours_p50
+        config: {meta: {pii: none}}
+      - name: merge_hours_p90
+        config: {meta: {pii: none}}
+
+  - name: pub_mart_responsiveness
+    description: Q4 mart as-is (aggregates).
+    config: {alias: mart_responsiveness}
+    columns:
+      - name: repo_name
+        config: {meta: {pii: none}}
+      - name: item_type
+        config: {meta: {pii: none}}
+      - name: opened
+        config: {meta: {pii: none}}
+      - name: responded
+        config: {meta: {pii: none}}
+      - name: response_hours_p50
+        config: {meta: {pii: none}}
+      - name: response_hours_p90
+        config: {meta: {pii: none}}
+      - name: closed
+        config: {meta: {pii: none}}
+      - name: close_rate_pct
+        config: {meta: {pii: none}}
+
+  - name: pub_mart_repo_concentration
+    description: Q5 mart as-is (aggregates).
+    config: {alias: mart_repo_concentration}
+    columns:
+      - name: repo_name
+        config: {meta: {pii: none}}
+      - name: category
+        config: {meta: {pii: none}}
+      - name: contributions
+        config: {meta: {pii: none}}
+      - name: bot_contributions
+        config: {meta: {pii: none}}
+      - name: bot_share_pct
+        config: {meta: {pii: none}}
+      - name: human_contributors
+        config: {meta: {pii: none}}
+      - name: top1_share_pct
+        config: {meta: {pii: none}}
+      - name: top2_share_pct
+        config: {meta: {pii: none}}
+      - name: top3_share_pct
+        config: {meta: {pii: none}}
+
+  - name: pub_mart_repo_health_score
+    description: Q6 mart as-is (aggregates).
+    config: {alias: mart_repo_health_score}
+    columns:
+      - name: health_rank
+        config: {meta: {pii: none}}
+      - name: repo_name
+        config: {meta: {pii: none}}
+      - name: category
+        config: {meta: {pii: none}}
+      - name: activity_score
+        config: {meta: {pii: none}}
+      - name: retention_score
+        config: {meta: {pii: none}}
+      - name: merge_score
+        config: {meta: {pii: none}}
+      - name: response_score
+        config: {meta: {pii: none}}
+      - name: close_score
+        config: {meta: {pii: none}}
+      - name: diversity_score
+        config: {meta: {pii: none}}
+      - name: health_score
+        config: {meta: {pii: none}}

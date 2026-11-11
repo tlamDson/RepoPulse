@@ -5,7 +5,7 @@ silver parquet handed to dbt only holds the hours of that run. ``stg_gharchive_e
 accumulates silver across runs (insert event ids not seen yet, existing copy wins) and
 ``fct_events`` is incremental; dims and marts are rebuilt from the accumulated history.
 
-Batches (built from the raw fixtures with ``silver_select_sql`` of test_dbt_marts.py, no Spark):
+Batches (built from the raw fixtures with ``silver_select_sql`` of dbt_helpers.py, no Spark):
 
 - ``b1``: ``tests/fixtures/gharchive_small`` (deduplicated).
 - ``b2``: only ``gharchive_late/2026-01-04-0.json`` (hand-written fixture): carol (1003) as
@@ -29,18 +29,22 @@ from pathlib import Path
 import duckdb
 import pytest
 import yaml
-from test_dbt_marts import (
+
+pytest.importorskip("dbt.cli.main", reason="dbt extra not installed: pip install -e '.[dbt]'")
+pytest.importorskip("dbt.adapters.duckdb", reason="dbt-duckdb not installed")
+
+from dbt_helpers import (  # noqa: E402
     GOLD_MODELS,
     GOLD_SCHEMA,
     PARQUET_ONLY_DIR,
     PROJECT,
-    _q,
-    _require_ok,
     dedup_lines,
     run_dbt,
     silver_select_sql,
     write_profiles,
 )
+from dbt_helpers import q as _q  # noqa: E402
+from dbt_helpers import require_ok as _require_ok  # noqa: E402
 
 FIXTURES = Path(__file__).parent / "fixtures"
 SMALL = FIXTURES / "gharchive_small"

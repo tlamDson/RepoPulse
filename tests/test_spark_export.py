@@ -183,7 +183,8 @@ def test_export_of_a_lake_without_silver_is_an_empty_parquet_with_the_schema(spa
 def test_exported_silver_feeds_dbt(spark, tmp_path):
     """Spark silver -> export -> dbt staging/fct (needs dbt; both are installed on CI)."""
     pytest.importorskip("dbt.cli.main")
-    from test_dbt_marts import PROJECT, _require_ok, run_dbt, write_profiles
+    from dbt_helpers import PROJECT, run_dbt, write_profiles
+    from dbt_helpers import require_ok as _require_ok
 
     land(
         tmp_path,

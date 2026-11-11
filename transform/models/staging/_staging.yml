@@ -1,5 +1,7 @@
 version: 2
 
+# meta.pii on every column: class of transform/governance.yml (docs/governance.md).
+
 models:
   - name: stg_gharchive_events
     description: >
@@ -11,25 +13,64 @@ models:
       fixture_silver_gharchive_events (fixture, not a measurement).
     columns:
       - name: event_id
+        config: {meta: {pii: none}}
         data_tests:
           - not_null
           - unique
       - name: event_type
+        config: {meta: {pii: none}}
         data_tests:
           - not_null
       - name: created_at
+        config: {meta: {pii: none}}
         data_tests:
           - not_null
       - name: event_date
+        config: {meta: {pii: none}}
         data_tests:
           - not_null
       - name: actor_id
+        config: {meta: {pii: public_identifier}}
         data_tests:
           - not_null
+      - name: actor_login
+        config: {meta: {pii: public_identifier}}
+      - name: repo_id
+        config: {meta: {pii: none}}
       - name: repo_name
+        config: {meta: {pii: none}}
         data_tests:
           - not_null
+      - name: action
+        config: {meta: {pii: none}}
+      - name: pr_number
+        config: {meta: {pii: none}}
+      - name: issue_number
+        config: {meta: {pii: none}}
+      - name: pr_merged
+        config: {meta: {pii: none}}
+      # Silver hashes commit author emails/names (repopulse/spark/pii.py). hashed_pii fails the
+      # build, and so skips every model downstream, if a raw value got through.
+      - name: commit_author_email_hashes
+        config: {meta: {pii: hashed}}
+        data_tests:
+          - hashed_pii:
+              arguments:
+                is_array: true
+      - name: commit_author_name_hashes
+        config: {meta: {pii: hashed}}
+        data_tests:
+          - hashed_pii:
+              arguments:
+                is_array: true
+      - name: landing_date
+        config: {meta: {pii: none}}
+      - name: landing_hour
+        config: {meta: {pii: none}}
+      - name: is_late
+        config: {meta: {pii: none}}
       - name: loaded_at
         description: Start of the dbt run that inserted the row (run_started_at, UTC).
+        config: {meta: {pii: none}}
         data_tests:
           - not_null
