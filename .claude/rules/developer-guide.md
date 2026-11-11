@@ -35,6 +35,16 @@ Không commit: `.env`/credentials/tokens, `.venv/`, `transform/target/`, `*.duck
 
 ## Pull Requests
 
+### Một PR một việc
+
+Mỗi PR làm đúng **một** việc, để review, revert và đo được từng việc riêng.
+
+- Một việc = một task trong `scripts/prs.toml`, hoặc một cải tiến/sửa lỗi cụ thể. Kiểm nhanh: title và câu đầu của `## Summary` nói hết PR mà không cần "và", "+", hay danh sách nhiều mục độc lập.
+- **Thuộc cùng việc** (được ở chung PR): test của việc đó; cập nhật `CLAUDE.md`, `.claude/rules/*`, `docs/` mà chính việc đó làm thay đổi; sửa các finding review của chính PR đó.
+- **Không thuộc** (PR riêng hoặc Nợ kỹ thuật): bug tìm thấy ngoài phạm vi, refactor không cần cho việc này, gợi ý review về code khác, sửa CI/tooling mà việc này không bắt buộc. Nếu việc chính *bắt buộc* phải sửa thứ khác mới xanh được, ghi rõ lý do trong `## Giả định`.
+- Nhiều cải tiến được duyệt cùng lúc: mỗi cái một PR, kể cả khi sửa cùng file (rẽ nhánh sau khi PR trước merge để tránh conflict).
+- `code-reviewer` coi PR làm hơn một việc là finding `[chặn]`.
+
 Feature target `develop`; chỉ PR release target `main`. Title `<type>: <short description>` (< 72 ký tự): `feat:`, `fix:`, `test:`, `docs:`, `chore:`, `refactor:`, `release:`. Mô tả theo `.github/pull_request_template.md`, thêm mục `## Giả định` khi chạy headless:
 
 ```markdown
