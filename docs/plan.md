@@ -180,17 +180,47 @@ Một PR ở **repo TravelPlan** (tuỳ chọn, làm riêng bên đó) để có
 | M9 | Tỉ lệ event bị loại vì sai schema; tỉ lệ trùng | Event mô phỏng (ghi rõ là mô phỏng) và event thật nếu có | Trước khi có spec |
 | M10 | p50 thời gian query và lượng dữ liệu quét | Bộ Q1–Q6, 10 lần | Bảng chưa partition (`variant=baseline`) |
 
-## Giai đoạn 2 (trên máy, khi RAM rảnh): chia ba đợt
+## Plan v2 (2026-11-11): so sánh hai đường, mở rộng engine, giai đoạn 2, AI
 
-Mỗi đợt chỉ bật nhóm dịch vụ nó cần, để đỉnh RAM khoảng 5–8 GB thay vì 20 GB. Con số là ước lượng; đợt đầu đo RAM thật trước khi làm tiếp.
+Giai đoạn 1 đã xong (16/16 việc, release #45). Lần chạy lại probe với token đúng ([run 43104609971](https://github.com/tlamDson/RepoPulse/actions/runs/43104609971), 2026-11-11) cho kết quả `primary`: cả 9 bước đều pass. `docs/probe-result.md` hiện vẫn ghi lần thử đầu (`fallback`, lỗi 401); việc D4 cập nhật file đó cùng bảng so sánh. Plan v2 đo hai đường đối đầu, rồi chọn đường chính theo một luật đã ghi **trước khi đo**. Ngoài ra nó thêm ma trận engine, Iceberg so với Delta, giai đoạn 2 và một SQL agent chạy bằng model local. Chủ repo đã chốt ngày 2026-11-11: mọi thứ phải miễn phí, giai đoạn 2 chạy trên runner GitHub Actions, orchestrator chạy tới hết quota.
 
-| Đợt | Bật dịch vụ | Việc | Số đo thêm |
-|---|---|---|---|
-| 2a | Kafka 3 broker (Redpanda) + Spark | Nhánh streaming; kill một broker và một consumer giữa chừng; đối chiếu streaming với batch | Số event mất và trùng; thời gian phục hồi; throughput theo số partition |
-| 2b | Trino + Hive Metastore + MinIO | Bảng gold dạng Hive-partitioned; tối ưu query trên Presto/Trino | p50 và dữ liệu quét trước và sau |
-| 2c | Airflow | DAG có backfill, retry, SLA thay cho cron của GitHub Actions | Thời gian backfill N ngày |
+### Luật chọn đường chính (chốt trước khi đo, PR D4 áp dụng y nguyên)
 
-Giai đoạn 2 là phần mở rộng. Bỏ cũng không ảnh hưởng kết quả của giai đoạn 1.
+Gọi A là runner + MotherDuck (đường hiện tại), B là Databricks serverless + SQL warehouse. Mỗi đường chạy cùng pipeline end-to-end (ingest → bronze/silver → gold → bộ Q1–Q6) trên cùng dữ liệu, đủ số lần chạy theo lịch để có p50 và tỉ lệ thành công.
+
+1. Loại đường nào **không chạy đủ 24 lần/ngày trong quota miễn phí**, hoặc có **tỉ lệ thành công < 95%**.
+2. Trong các đường còn lại, chọn đường có **p50 thời gian end-to-end nhỏ hơn**.
+3. Nếu hai đường chênh nhau **dưới 10%**, giữ đường hiện tại (A).
+
+D4 ghi bảng số liệu, luật và kết luận vào `docs/probe-result.md`. Bảng chỉ dùng số trong `runs.csv`. D4 chỉ đổi `pipeline.yml` khi luật nói đổi.
+
+### Các việc (DAG ở `scripts/prs.toml`)
+
+| Việc | Nhánh | Nội dung | Test đỏ viết trước | Số đo vào `runs.csv` |
+|---|---|---|---|---|
+| D1 | `feature/databricks-bronze-silver` | Job bronze/silver chạy serverless trên Databricks: Delta trong Unity Catalog, dùng chung logic với `repopulse/spark/`, nạp bằng Files API + Jobs API từ GitHub Actions | Logic gọi API (mock HTTP): dựng payload job, retry, idempotent theo (ngày, giờ) | `variant=databricks-bronze-silver` |
+| D2 | `feature/dbt-databricks-target` | Target `databricks` đã có trong `transform/profiles.yml` (probe dùng nó cho `dbt debug`). Việc này dựng **phần gold còn thiếu** trên SQL warehouse: nguồn đọc từ bảng silver Delta của D1 (Unity Catalog), macro khác dialect (ngày giờ, mảng) chạy được trên cả DuckDB và Databricks, workflow chạy `dbt build --target databricks` | Test macro dialect trên DuckDB đỏ trước; unit test dbt khẳng định mart cho cùng kết quả trên fixture ở cả hai adapter | `variant=dbt-build-databricks` |
+| D3 | `feature/pipeline-path-comparison` | Workflow chạy A và B end-to-end theo lịch, ghi thời gian từng bước, thời gian khởi động/xếp hàng, kết quả thành công; script tổng hợp p50/p95 và tỉ lệ thành công | Parser và hàm tổng hợp trên fixture | `variant=path-a-runner`, `variant=path-b-databricks` |
+| D4 | `feature/primary-path-switch` | Áp luật chọn ở trên; cập nhật `docs/probe-result.md`; đổi `pipeline.yml` nếu luật nói đổi | Hàm luật chọn (thuần) trên các bộ số mẫu, gồm cả trường hợp chênh dưới 10% | — |
+| E1 | `feature/engine-matrix` | Cùng bộ Q1–Q6 trên DuckDB, Spark trên runner, Databricks serverless, Databricks SQL, MotherDuck, Snowflake (lấy lại số đã có). README sinh một bảng duy nhất | Parser ma trận; cảnh báo khi thiếu engine | `variant=matrix-<engine>` |
+| E2 | `feature/iceberg-vs-delta` | Cùng dữ liệu ghi bằng Delta và Apache Iceberg (PySpark trên runner): ghi, đọc Q1–Q6, MERGE, time travel | Trên fixture nhỏ: số dòng và kết quả Q1–Q6 bằng nhau giữa Delta và Iceberg; MERGE chạy lại không sinh trùng (idempotent); time travel đọc đúng phiên bản trước MERGE | `variant=format-delta`, `variant=format-iceberg` |
+| P2a | `feature/streaming-kafka` | **Apache Kafka** 3 broker chế độ KRaft (image chính thức `apache/kafka`, không ZooKeeper) làm Docker service trong workflow; producer phát event GH Archive của ngày chuẩn vào topic có N partition; Spark Structured Streaming đọc Kafka, ghi Delta (checkpoint, exactly-once tới sink); đối chiếu số dòng với batch | Producer/consumer trên fixture; đối chiếu đếm | `variant=streaming-throughput-p<N>` |
+| P2b | `feature/streaming-fault-tolerance` | Kill một broker và một consumer giữa chừng; đo số event mất, trùng, thời gian phục hồi | Hàm đối soát mất/trùng | `variant=streaming-fault-<case>` |
+| P2c | `feature/trino-hive` | Trino + Hive Metastore + MinIO làm Docker service; gold dạng Hive-partitioned; Q1–Q6 trên Trino trước và sau tối ưu | Sinh DDL partition; parser kết quả | `variant=trino-<layout>` |
+| P2d | `feature/airflow-dags` | Airflow standalone trong workflow; DAG có backfill, retry, SLA thay cho cron; đo backfill N ngày | DAG import được, không lỗi chu trình; thứ tự task | `variant=airflow-backfill-<N>d` |
+| AI1 | `feature/dbt-semantic-layer` | Semantic model và metric (MetricFlow) cho Q1–Q6 trên gold public | `dbt parse` kiểm semantic manifest; metric khớp SQL của Q1–Q6 trên fixture | — |
+| AI2 | `feature/sql-agent` | SQL agent gọi qua API OpenAI-compatible (`base_url` và model là cấu hình): chỉ đọc schema `public`, chặn mọi câu lệnh ghi, giới hạn số dòng; bộ câu hỏi đánh giá có đáp án; CI dùng LLM giả lập | Chặn câu lệnh ghi; sinh và chạy SQL với LLM giả; chấm đáp án | — (đo ở AI3) |
+| R2 | `docs/results-v2` | README kết quả v2 sinh từ `runs.csv`: bảng hai đường, ma trận engine, Iceberg/Delta, giai đoạn 2, agent | Generator báo lỗi khi thiếu biến thể | — |
+
+**AI3, chạy tay trên máy chủ repo, không qua orchestrator:** model `Qwen3.6-35B-A3B` (GGUF 18 GB) không chạy được trên runner. Sau khi AI2 merge, phiên chính xin phép chủ repo, rồi bật `llama-server` cục bộ và chạy bộ đánh giá. Độ chính xác và thời gian mỗi câu ghi vào `runs.csv` với `variant=sql-agent-qwen3.6-35b-a3b`, đưa vào qua một PR.
+
+### Ràng buộc
+
+- **Chỉ dịch vụ miễn phí:** Databricks Free Edition (quota theo ngày, tối đa 5 job chạy cùng lúc), MotherDuck Lite, Snowflake trial không thẻ, runner GitHub Actions (job ≤ 6 giờ, 16 GB RAM, 14 GB đĩa). Không dùng API LLM trả phí.
+- **Giai đoạn 2 chạy trên runner:** dùng `services:` hoặc `docker compose` trong workflow chạy tay hay theo lịch, không chạy trên máy chủ repo.
+- **Số đo chỉ lấy từ `runs.csv`:** mọi tối ưu so với `variant=baseline` trên cùng ngày dữ liệu và cùng bộ Q1–Q6.
+
+Plan v2 là phần mở rộng. Bỏ đi cũng không ảnh hưởng kết quả của giai đoạn 1.
 
 ## Việc Lam cần làm
 
