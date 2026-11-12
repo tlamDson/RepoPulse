@@ -36,6 +36,8 @@ TITLE_LAYOUTS = "Query layouts vs naive baseline"
 TITLE_SCALE = "Spark vs DuckDB at 1, 7 and 30 days"
 TITLE_DBT = "dbt build: DuckDB vs Snowflake"
 TITLE_DQ = "Data quality fault injection (simulated data)"
+TITLE_DBT_DATABRICKS = "dbt build on a Databricks SQL warehouse (real GH Archive data)"
+VARIANT_DBT_DATABRICKS = "dbt-build-databricks"
 TITLE_OTHER = "Other runs"
 
 _COMMON = (
@@ -216,6 +218,16 @@ _PROSE_DBT = (
     "to Q6, not the time of the query; `row_count` is the number of seed rows; `lines_changed` "
     "is read from `notes`. Method: [`docs/snowflake-port.md`](docs/snowflake-port.md)."
 )
+_PROSE_DBT_DATABRICKS = (
+    "Real GH Archive data (not simulated): the dbt project builds on a Databricks SQL warehouse "
+    "from the silver Delta table written by the Databricks bronze/silver job, not from the "
+    "hand-made CI events, so these rows are compared neither with the builds above nor with "
+    "`baseline`. "
+    "`total_seconds` is the whole `dbt build`; `q1_seconds` to `q6_seconds` are the build time "
+    "of the mart for Q1 to Q6; `row_count` is the number of staged events and `data_date` the "
+    "earliest `event_date`; `max_event_date` and `lines_changed` are read from `notes`. "
+    "Method: [`docs/dbt-databricks.md`](docs/dbt-databricks.md)."
+)
 _PROSE_DQ = (
     "Simulated data: app events from `simkit` (no real users) with a known number of faults "
     "injected, run through the Spark job. `injected` and `caught` count faults; `false_alarms` "
@@ -240,6 +252,7 @@ def render(rows: Iterable[Row]) -> str:
     layouts: list[Row] = []
     scale: list[Row] = []
     dbt: list[Row] = []
+    dbt_databricks: list[Row] = []
     dq: list[Row] = []
     other: list[Row] = []
     for row in latest:
@@ -250,6 +263,8 @@ def render(rows: Iterable[Row]) -> str:
             layouts.append(row)
         elif _SCALE_VARIANT.fullmatch(variant):
             scale.append(row)
+        elif variant == VARIANT_DBT_DATABRICKS:
+            dbt_databricks.append(row)
         elif variant.startswith("dbt-build-"):
             dbt.append(row)
         elif variant == "dq-fault-injection":
@@ -293,6 +308,16 @@ def render(rows: Iterable[Row]) -> str:
         ),
         _section(TITLE_DQ, _PROSE_DQ, sorted(dq, key=by_date_variant), _DQ_COLUMNS),
     ]
+    # Only once a row exists, so README.md does not change before the first Databricks build.
+    if dbt_databricks:
+        parts.append(
+            _section(
+                TITLE_DBT_DATABRICKS,
+                _PROSE_DBT_DATABRICKS,
+                sorted(dbt_databricks, key=by_date_variant),
+                (*_COMMON[:12], "max_event_date", "lines_changed", *_COMMON[12:]),
+            )
+        )
     if other:
         parts.append(
             _section(

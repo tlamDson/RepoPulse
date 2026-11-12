@@ -220,12 +220,14 @@ def test_hours_between_databricks_and_duckdb_branches_agree_on_duckdb():
         rows = con.execute(f"SELECT {duck_sql}, {dbx_sql} FROM t ORDER BY i").fetchall()
     finally:
         con.close()
+    # The duckdb__ branch subtracts epoch() doubles (seconds since 1970, about 0.24 us apart in
+    # 2026), the databricks__ one exact integer microseconds: equal to well under a microsecond.
     for (expected, got), pair in zip(rows, HOUR_PAIRS, strict=True):
         if expected is None:
             assert got is None, pair
         else:
             assert isinstance(got, float), pair
-            assert got == pytest.approx(expected, rel=1e-12, abs=1e-15), pair
+            assert got == pytest.approx(expected, rel=1e-12, abs=1e-6 / 3600), pair
     assert rows[0][1] == 1.5
     assert rows[1][1] == pytest.approx(1 / 3_600_000_000, rel=1e-12)
 

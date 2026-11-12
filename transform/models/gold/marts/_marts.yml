@@ -16,7 +16,7 @@ models:
     columns:
       - name: period
         config: {meta: {pii: none}}
-        data_type: varchar
+        data_type: string
         constraints:
           - type: not_null
         data_tests:
@@ -30,7 +30,7 @@ models:
           - type: not_null
       - name: scope
         config: {meta: {pii: none}}
-        data_type: varchar
+        data_type: string
         constraints:
           - type: not_null
         data_tests:
@@ -39,7 +39,7 @@ models:
                 values: [repo, category]
       - name: scope_key
         config: {meta: {pii: none}}
-        data_type: varchar
+        data_type: string
         constraints:
           - type: not_null
       - name: active_contributors
@@ -101,7 +101,7 @@ models:
     columns:
       - name: repo_name
         config: {meta: {pii: none}}
-        data_type: varchar
+        data_type: string
         constraints:
           - type: not_null
         data_tests:
@@ -112,7 +112,7 @@ models:
                 field: repo_name
       - name: category
         config: {meta: {pii: none}}
-        data_type: varchar
+        data_type: string
         constraints:
           - type: not_null
       - name: forkers
@@ -155,12 +155,12 @@ models:
     columns:
       - name: repo_name
         config: {meta: {pii: none}}
-        data_type: varchar
+        data_type: string
         constraints:
           - type: not_null
       - name: item_type
         config: {meta: {pii: none}}
-        data_type: varchar
+        data_type: string
         constraints:
           - type: not_null
         data_tests:
@@ -200,14 +200,14 @@ models:
     columns:
       - name: repo_name
         config: {meta: {pii: none}}
-        data_type: varchar
+        data_type: string
         constraints:
           - type: not_null
         data_tests:
           - unique
       - name: category
         config: {meta: {pii: none}}
-        data_type: varchar
+        data_type: string
         constraints:
           - type: not_null
       - name: contributions
@@ -255,14 +255,14 @@ models:
           - unique
       - name: repo_name
         config: {meta: {pii: none}}
-        data_type: varchar
+        data_type: string
         constraints:
           - type: not_null
         data_tests:
           - unique
       - name: category
         config: {meta: {pii: none}}
-        data_type: varchar
+        data_type: string
         constraints:
           - type: not_null
       - name: activity_score

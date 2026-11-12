@@ -131,10 +131,16 @@ def test_input_stats_accept_upper_case_keys_and_numeric_strings():
     assert dbt_databricks.input_stats([row]) == (42, "2026-10-25", "2026-10-25")
 
 
+def test_input_stats_accept_an_integral_decimal_count():
+    row = {"row_count": 42.0, "min_event_date": "2026-10-25", "max_event_date": "2026-10-25"}
+    assert dbt_databricks.input_stats([row]) == (42, "2026-10-25", "2026-10-25")
+
+
 @pytest.mark.parametrize(
     "rows",
     [
         [],
+        [{"row_count": 2.5, "min_event_date": "2026-10-25", "max_event_date": "2026-10-25"}],
         [{"row_count": 0, "min_event_date": None, "max_event_date": None}],
         [{"row_count": 3, "min_event_date": "25/10/2026", "max_event_date": "2026-10-25"}],
         [{"row_count": 3, "max_event_date": "2026-10-25"}],

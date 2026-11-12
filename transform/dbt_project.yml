@@ -8,9 +8,11 @@ test-paths: ["tests"]
 target-path: "target"
 clean-targets: ["target", "dbt_packages"]
 
-# Source of stg_gharchive_events (docs/dbt-models.md):
-#   --vars '{silver_gharchive_parquet: "<glob>/*.parquet"}'  -> read_parquet('<glob>')
-#   not set                                                  -> seed fixture_silver_gharchive_events
+# Source of stg_gharchive_events (docs/dbt-models.md, docs/dbt-databricks.md):
+#   --vars '{silver_gharchive_parquet: "<glob>/*.parquet"}'  -> read_parquet('<glob>') (DuckDB)
+#   var silver_gharchive_source: unity_catalog                -> source silver.silver_gharchive_events
+#                                                                (default on target type databricks)
+#   otherwise (silver_gharchive_source: seed)                 -> seed fixture_silver_gharchive_events
 #
 # Materialization (docs/dbt-models.md): stg_gharchive_events incremental (append new event ids,
 # full_refresh: false), fct_events incremental (delete+insert, touched actors), dims and marts

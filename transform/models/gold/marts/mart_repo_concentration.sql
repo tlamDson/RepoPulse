@@ -47,8 +47,8 @@ human as (
 )
 
 select
-    cast(t.repo_name as varchar) as repo_name,
-    cast(t.category as varchar) as category,
+    cast(t.repo_name as string) as repo_name,
+    cast(t.category as string) as category,
     cast(t.contributions as bigint) as contributions,
     cast(t.bot_contributions as bigint) as bot_contributions,
     cast(
