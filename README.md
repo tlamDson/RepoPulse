@@ -107,6 +107,14 @@ Simulated data: app events from `simkit` (no real users) with a known number of 
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | dq-fault-injection | 2026-11-01 | 81.907 | 677 | true | 42 | 60 | 2 | 27 | 27 | 0 | 3 | 5/5 | 5/5 | 5/5 | 5/5 | 5/5 | 2/2 | 2026-11-11T18:22:59+00:00 | 0bc1ad4 |
 
+### dbt build on a Databricks SQL warehouse (real GH Archive data)
+
+Real GH Archive data (not simulated): the dbt project builds on a Databricks SQL warehouse from the silver Delta table written by the Databricks bronze/silver job, not from the hand-made CI events, so these rows are compared neither with the builds above nor with `baseline`. `total_seconds` is the whole `dbt build`; `q1_seconds` to `q6_seconds` are the build time of the mart for Q1 to Q6; `row_count` is the number of staged events and `data_date` the earliest `event_date`; `max_event_date` and `lines_changed` are read from `notes`. Method: [`docs/dbt-databricks.md`](docs/dbt-databricks.md).
+
+| variant | data_date | total_seconds | q1_seconds | q2_seconds | q3_seconds | q4_seconds | q5_seconds | q6_seconds | peak_rss_mb | bytes_read | row_count | max_event_date | lines_changed | run_at | git_sha |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| dbt-build-databricks | 2026-10-25 | 121.6275634765625 | 10.2672700881958 | 7.4214441776275635 | 9.794240236282349 | 9.563957691192627 | 7.928206205368042 | 7.523385286331177 | — | — | 206827 | 2026-10-25 | 501 | 2026-11-12T06:15:38+00:00 | 4553df1 |
+
 ### Other runs
 
 Not compared with `baseline`: either there is no baseline row with the same `data_date`, or the variant is not one of the groups above. `notes` is copied from `runs.csv`.

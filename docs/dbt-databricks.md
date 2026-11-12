@@ -142,6 +142,17 @@ python -m repopulse.readme_results
 
 Tài liệu này không chép số; số đo chỉ đọc ở `runs.csv`.
 
+## Kết quả
+
+Lần chạy workflow trên nhánh `feature/dbt-databricks-target` (commit `4553df1`,
+[run 43166502216](https://github.com/tlamDson/RepoPulse/actions/runs/43166502216)) build xanh trên
+SQL warehouse: cùng bộ seed, model, data test và unit test như target `ci`, không node nào lỗi hay
+bị bỏ qua. Đầu vào là silver Delta của D1 (GH Archive thật, không phải simulated). Dòng của lần
+chạy đó đã gộp vào `runs.csv` với `variant=dbt-build-databricks`.
+
+Đây là một lần build, không phải so sánh tốc độ với DuckDB/Snowflake (hai dòng kia build từ seed
+fixture). So sánh hai đường end-to-end là việc D3.
+
 ## Giả định và giới hạn
 
 - **Múi giờ phiên là UTC.** `timestamp` của Databricks là thời điểm hiển thị theo múi giờ phiên;
