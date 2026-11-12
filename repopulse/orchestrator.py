@@ -364,6 +364,28 @@ def decide_after_review(
     return Decision("failed", f"review exit {returncode}, no REVIEW line")
 
 
+def merge_failure_reason(pr: str, view: dict) -> str:
+    """Why `gh pr merge` failed, phrased as what the retried PR session must do.
+
+    ``view`` is ``gh pr view <n> --json mergeable,mergeStateStatus``.
+    """
+    state = (view or {}).get("mergeStateStatus", "")
+    if view and (view.get("mergeable") == "CONFLICTING" or state == "DIRTY"):
+        return (
+            f"merge PR #{pr} thất bại: nhánh conflict với develop. Chạy `git fetch origin` rồi "
+            "`git merge origin/develop`, gỡ conflict (giữ thay đổi của cả hai bên), chạy lại "
+            "test, commit merge và push; chờ CI xanh rồi mới ready."
+        )
+    if state == "BEHIND":
+        return (
+            f"merge PR #{pr} thất bại: nhánh tụt sau develop. Chạy `gh pr update-branch {pr}`, "
+            "chờ CI xanh rồi mới ready."
+        )
+    if state in ("BLOCKED", "UNSTABLE"):
+        return f"merge PR #{pr} thất bại: check bắt buộc chưa xanh ({state}). Chờ CI xong và sửa."
+    return f"merge PR #{pr} thất bại ({state or 'không rõ trạng thái'})"
+
+
 def merge_ready(checks: list[dict]) -> tuple[bool, str]:
     """All required checks pass, from ``gh pr checks <n> --json name,bucket``."""
     buckets = {c.get("name"): c.get("bucket") for c in checks}
