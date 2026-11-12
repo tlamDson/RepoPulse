@@ -1,17 +1,17 @@
 name: Cloud probe
 
-# Bước thử số 1 (docs/plan.md): GitHub Actions có điều khiển được Databricks Free Edition không
-# (token, Volume, job serverless, SQL warehouse, dbt debug), hay phải dùng đường dự phòng
-# (runner + MotherDuck). Kết quả: artifact `probe-result` (probe-result.json + probe-result.md)
-# và Job summary; chỉ có pass/fail/skipped, không có số đo.
+# Probe number 1 (docs/plan.md): can GitHub Actions control Databricks Free Edition
+# (token, Volume, serverless job, SQL warehouse, dbt debug), or must the fallback path be used
+# (runner + MotherDuck)? Result: the `probe-result` artifact (probe-result.json + probe-result.md)
+# and the Job summary; only pass/fail/skipped, no measurements.
 #
 # Trigger:
-# - workflow_dispatch chỉ hiện trong tab Actions khi file này đã có trên `main` (sau release).
-# - Vì vậy thêm `push` giới hạn đúng nhánh `docs/probe-result` để chạy được ngay trong PR này.
-#   Không dùng `pull_request`. Sau khi merge, nhánh bị xoá nên trigger push không còn chạy.
+# - workflow_dispatch only shows up in the Actions tab once this file exists on `main` (after a release).
+# - So a `push` trigger limited to exactly the `docs/probe-result` branch is added to run it right in this PR.
+#   Do not use `pull_request`. After the merge the branch is deleted, so the push trigger stops running.
 #
-# Secret thiếu thì check tương ứng ra `skipped`, workflow vẫn xanh. Secret chỉ vào qua `env:`;
-# không bước nào in giá trị. Artifact được che host/token/warehouse path trước khi ghi.
+# A missing secret makes the matching check `skipped`; the workflow stays green. Secrets enter only
+# through `env:`; no step prints a value. The artifact has host/token/warehouse path masked before writing.
 
 on:
   workflow_dispatch:
@@ -43,8 +43,8 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
 
-      # MotherDuck từ chối client DuckDB mới hơn bản extension của nó hỗ trợ (lần chạy đầu:
-      # "latest supported version is v1.5.6"), nên khoá duckdb ở đúng bản đó cho bước thử.
+      # MotherDuck rejects DuckDB clients newer than its extension supports (first run:
+      # "latest supported version is v1.5.6"), so duckdb is pinned to exactly that version for the probe.
       - name: Install
         run: pip install -e ".[dbt]" dbt-databricks "duckdb==1.5.6"
 
@@ -58,8 +58,8 @@ jobs:
           --no-step-summary
           --github-env
 
-      # PROBE_HTTP_PATH do bước trên ghi vào $GITHUB_ENV (đã ::add-mask::), lấy từ
-      # DATABRICKS_HTTP_PATH hoặc tự tìm qua API warehouses.
+      # PROBE_HTTP_PATH is written to $GITHUB_ENV by the step above (already ::add-mask::ed), taken from
+      # DATABRICKS_HTTP_PATH or found automatically through the warehouses API.
       - name: dbt debug (Databricks)
         id: dbt_databricks
         if: env.DATABRICKS_HOST != '' && env.DATABRICKS_TOKEN != '' && env.PROBE_HTTP_PATH != ''

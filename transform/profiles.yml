@@ -1,23 +1,24 @@
-# Target mặc định `ci`: DuckDB local, không cần tài khoản hay secret.
-# `databricks` và `motherduck` dùng cho bước thử cloud (.github/workflows/probe.yml) và gold thật;
-# mọi giá trị nhạy cảm đọc từ biến môi trường, không ghi vào file này.
-# Hai target DuckDB cố định múi giờ phiên UTC (Spark ghi created_at theo UTC); staging cũng tự
-# chuẩn hoá về UTC nên kết quả không phụ thuộc múi giờ máy.
+# Default target `ci`: local DuckDB, needs no account or secret.
+# `databricks` and `motherduck` are used for the cloud probe (.github/workflows/probe.yml) and the
+# real gold; every sensitive value is read from environment variables, never written in this file.
+# The two DuckDB targets pin the session time zone to UTC (Spark writes created_at in UTC); staging
+# also normalizes to UTC, so results do not depend on the machine's time zone.
 repopulse:
   target: ci
   outputs:
     ci:
       type: duckdb
-      path: ci.duckdb  # tương đối với thư mục chạy lệnh (gốc repo); *.duckdb đã gitignore
+      path: ci.duckdb  # relative to the directory the command runs in (repo root); *.duckdb is gitignored
       threads: 2
       settings:
         TimeZone: UTC
 
-    # Cần `pip install -e ".[dbt,databricks]"`. DATABRICKS_HOST có thể có `https://`, bỏ đi ở đây.
-    # Probe chỉ `dbt debug` với schema mặc định `repopulse_probe`. Gold thật
-    # (.github/workflows/dbt-databricks.yml, docs/dbt-databricks.md) đặt DBT_DATABRICKS_SCHEMA
-    # (rỗng cũng về mặc định): dbt ghép `<schema>`, `<schema>_staging`, `<schema>_gold`…, không
-    # đụng schema `repopulse` chứa bảng bronze/silver của job Databricks (D1).
+    # Needs `pip install -e ".[dbt,databricks]"`. DATABRICKS_HOST may include `https://`; it is stripped here.
+    # The probe only runs `dbt debug` with the default schema `repopulse_probe`. The real gold
+    # (.github/workflows/dbt-databricks.yml, docs/dbt-databricks.md) sets DBT_DATABRICKS_SCHEMA
+    # (empty also falls back to the default): dbt composes `<schema>`, `<schema>_staging`,
+    # `<schema>_gold`..., and never touches the `repopulse` schema that holds the bronze/silver
+    # tables of the Databricks job (D1).
     databricks:
       type: databricks
       host: "{{ env_var('DATABRICKS_HOST', '') | replace('https://', '') | replace('http://', '') | trim('/') }}"
@@ -27,9 +28,9 @@ repopulse:
       schema: "{{ env_var('DBT_DATABRICKS_SCHEMA', '') or 'repopulse_probe' }}"
       threads: 2
 
-    # duckdb tự đọc token từ biến môi trường MOTHERDUCK_TOKEN; không nhúng token vào path.
-    # MOTHERDUCK_DATABASE mặc định `repopulse` (gold thật), kể cả khi biến có mà rỗng (`or`);
-    # bước smoke của PR đặt `repopulse_smoke`.
+    # duckdb reads the token from the MOTHERDUCK_TOKEN environment variable itself; never embed the
+    # token in the path. MOTHERDUCK_DATABASE defaults to `repopulse` (the real gold), even when the
+    # variable is set but empty (`or`); the PR smoke step sets `repopulse_smoke`.
     motherduck:
       type: duckdb
       path: "md:{{ env_var('MOTHERDUCK_DATABASE', 'repopulse') or 'repopulse' }}"
@@ -37,9 +38,9 @@ repopulse:
       settings:
         TimeZone: UTC
 
-    # Port Snowflake (docs/snowflake-port.md). Cần `pip install -e ".[dbt,snowflake]"`. Chỉ chạy
-    # trong .github/workflows/snowflake-port.yml. User SERVICE đăng nhập key-pair: private_key là
-    # PEM PKCS#8 không mật khẩu, đọc từ biến môi trường; không có password.
+    # Snowflake port (docs/snowflake-port.md). Needs `pip install -e ".[dbt,snowflake]"`. Only runs
+    # in .github/workflows/snowflake-port.yml. The SERVICE user logs in with a key pair: private_key
+    # is a PKCS#8 PEM without a passphrase, read from an environment variable; there is no password.
     snowflake:
       type: snowflake
       account: "{{ env_var('SNOWFLAKE_ACCOUNT', '') }}"
