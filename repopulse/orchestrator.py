@@ -70,6 +70,9 @@ class Gate:
     reason: str
 
 
+KNOWN_NEEDS = frozenset({"cloud", "snowflake", "harness"})
+
+
 def _has_cloud(secrets: frozenset[str]) -> bool:
     databricks = {"DATABRICKS_HOST", "DATABRICKS_TOKEN"} <= secrets
     return databricks or "MOTHERDUCK_TOKEN" in secrets
@@ -82,6 +85,8 @@ def _need_reason(need: str, gates: Gates) -> str | None:
         return "cần secret SNOWFLAKE_* (đăng ký Snowflake trial)"
     if need == "harness" and not gates.harness_approved:
         return "chờ duyệt harness (docs/harness-check.md chưa có 'Lam đã duyệt')"
+    if need not in KNOWN_NEEDS:
+        return f"điều kiện không rõ trong prs.toml: {need}"
     return None
 
 
@@ -202,14 +207,44 @@ def rate_limit_action(event: dict | None) -> tuple[str, int | str | None]:
         if info.get("errorCode"):
             return ("stop", f"usage limit: {info['errorCode']}")
         return ("wait", info.get("resetsAt"))
+    peak = quota_peak(event)
+    if peak >= WARN_UTILIZATION:
+        return ("warn", peak)
+    return ("none", None)
+
+
+def quota_peak(event: dict | None) -> float:
+    """Highest utilization (0..1) of the 5-hour and 7-day windows while requests are allowed.
+
+    0.0 for any other event: a rejected one is a wait/stop (``rate_limit_action``), not a hold.
+    """
+    if not event or event.get("type") != "rate_limit_event":
+        return 0.0
+    info = event.get("rate_limit_info") or {}
+    if info.get("status") not in ("allowed", "allowed_warning"):
+        return 0.0
     windows = info.get("unifiedWindows") or {}
     used = [info.get("utilization") or 0] + [
         (w or {}).get("utilization") or 0 for w in windows.values() if isinstance(w, dict)
     ]
-    peak = max(used)
-    if peak >= WARN_UTILIZATION and status in ("allowed", "allowed_warning"):
-        return ("warn", peak)
-    return ("none", None)
+    return float(max(used))
+
+
+def parse_hold_at(text: str) -> int:
+    """Value of ``--hold-at``: a whole percent from 1 to 100."""
+    value = int(text) if re.fullmatch(r"[0-9]+", text) else 0
+    if not 1 <= value <= 100:
+        raise ValueError(f"ngưỡng phải là số nguyên từ 1 đến 100, nhận {text!r}")
+    return value
+
+
+def over_hold_at(peak: float, hold_at: int | None) -> bool:
+    """True when a quota peak (0..1) has reached ``hold_at`` percent; None never holds.
+
+    Reaching the threshold already holds, as 0.9 always did for ``--hold-at-90``. The percent
+    is divided, not the peak multiplied: 0.29 * 100 is 28.999999999999996 in floats.
+    """
+    return hold_at is not None and peak >= hold_at / 100
 
 
 def hold_until(event: dict | None) -> int | None:
@@ -329,11 +364,56 @@ def decide_after_review(
     return Decision("failed", f"review exit {returncode}, no REVIEW line")
 
 
+def merge_failure_reason(pr: str, view: dict) -> str:
+    """Why `gh pr merge` failed, phrased as what the retried PR session must do.
+
+    ``view`` is ``gh pr view <n> --json mergeable,mergeStateStatus``.
+    """
+    state = (view or {}).get("mergeStateStatus", "")
+    if view and (view.get("mergeable") == "CONFLICTING" or state == "DIRTY"):
+        return (
+            f"merge PR #{pr} thất bại: nhánh conflict với develop. Chạy `git fetch origin` rồi "
+            "`git merge origin/develop`, gỡ conflict (giữ thay đổi của cả hai bên), chạy lại "
+            "test, commit merge và push; chờ CI xanh rồi mới ready."
+        )
+    if state == "BEHIND":
+        return (
+            f"merge PR #{pr} thất bại: nhánh tụt sau develop. Chạy `gh pr update-branch {pr}`, "
+            "chờ CI xanh rồi mới ready."
+        )
+    if state in ("BLOCKED", "UNSTABLE"):
+        return f"merge PR #{pr} thất bại: check bắt buộc chưa xanh ({state}). Chờ CI xong và sửa."
+    return f"merge PR #{pr} thất bại ({state or 'không rõ trạng thái'})"
+
+
+def _check_bucket(checks: list[dict], name: str) -> str | None:
+    """One bucket for a check name that may have several runs (push + pull_request): any
+    fail/cancel wins, then anything not finished, and "pass" only when every run passed."""
+    runs = [c.get("bucket") for c in checks if c.get("name") == name]
+    if not runs:
+        return None
+    for bad in ("fail", "cancel"):
+        if bad in runs:
+            return bad
+    return next((b or "pending" for b in runs if b != "pass"), "pass")
+
+
+def required_checks_state(checks: list[dict]) -> str:
+    """'pending' | 'pass' | 'fail' for the required checks only (``gh pr checks --json
+    name,bucket``). A required check not registered yet counts as pending, so a freshly
+    created PR is never judged red; optional workflows never decide."""
+    states = [_check_bucket(checks, name) for name in REQUIRED_CHECKS]
+    if any(b in ("fail", "cancel") for b in states):
+        return "fail"
+    if all(b == "pass" for b in states):
+        return "pass"
+    return "pending"
+
+
 def merge_ready(checks: list[dict]) -> tuple[bool, str]:
     """All required checks pass, from ``gh pr checks <n> --json name,bucket``."""
-    buckets = {c.get("name"): c.get("bucket") for c in checks}
     for name in REQUIRED_CHECKS:
-        bucket = buckets.get(name)
+        bucket = _check_bucket(checks, name)
         if bucket != "pass":
             return False, f"{name}: {bucket or 'thiếu'}"
     return True, ""
@@ -455,7 +535,9 @@ Quy trình:
 1. Viết kế hoạch ngắn (5-10 dòng) có mục "test phải đỏ".
 2. Giao agent `{task.agent}` (subagent, KHÔNG dùng isolation worktree, làm ngay trong thư mục này)
    viết test đỏ, commit riêng, rồi code tới khi xanh. Dán nguyên văn .claude/rules/command-style.md
-   vào brief của agent.
+   vào brief của agent. Gọi agent ở foreground: KHÔNG đặt `run_in_background`, chờ nó trả kết
+   quả rồi mới đi tiếp. Phiên này thoát thì mọi việc chạy nền chết theo, nên không kết thúc lượt
+   khi còn agent hay lệnh nào đang chạy.
 3. Push, mở PR vào `develop` theo .github/pull_request_template.md (có ## RED và ## Giả định).
 4. Chờ CI: `gh pr checks <số> --watch --interval 30` (foreground), lặp tới khi xong.
    CI đỏ thì sửa và push lại.

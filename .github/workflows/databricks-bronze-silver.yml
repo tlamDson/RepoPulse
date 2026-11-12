@@ -1,0 +1,162 @@
+name: Databricks bronze/silver
+
+# D1 (docs/plan.md, docs/databricks-job.md): the bronze -> silver incremental batch (not
+# streaming, not real-time) as a serverless Databricks job. This runner ingests GH Archive hours
+# into data/landing/gharchive, builds the repopulse wheel, and `python -m repopulse.databricks_job
+# run` pushes both to a Unity Catalog Volume (Files API), submits one serverless notebook run
+# (Jobs API) that calls the shared repopulse.spark.batch logic on Delta tables
+# workspace.repopulse.{bronze,silver,quarantine}_gharchive_events, then submits the same hours
+# again (--verify-rerun: silver must gain 0 rows). One runs.csv row (variant
+# databricks-bronze-silver) lands in the `databricks-bronze-silver` artifact; merge it with
+# `python benchmarks/record_run.py out/databricks-row.csv`.
+#
+# Triggers:
+# - workflow_dispatch only shows in the Actions tab once this file is on `main` (after release).
+#   Inputs date/hour/hours are optional; empty date = the benchmark reference day
+#   (benchmarks/reference.toml), last hour 23, 3 hours.
+# - So `push` is limited to the branch feature/databricks-bronze-silver to run it inside this PR,
+#   always on that reference-day window. No `pull_request`: the Databricks workspace is written
+#   only by this workflow. After the merge the branch is deleted and the push trigger no longer
+#   fires.
+#
+# Missing DATABRICKS_HOST: the Databricks step is skipped at step level (notice), the workflow
+# stays green and no row is written. Secrets enter only through `env:`; no step prints them, and
+# the client masks the bare hostname and the user name (--add-mask).
+
+on:
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "last data date YYYY-MM-DD (UTC); empty = benchmark reference day"
+        type: string
+        required: false
+        default: ""
+      hour:
+        description: "last data hour 0..23 (UTC); needed with date (empty date = 23)"
+        type: string
+        required: false
+        default: ""
+      hours:
+        description: "consecutive hours ending at date/hour (1..6, runner disk)"
+        type: string
+        required: false
+        default: "3"
+  push:
+    branches: [feature/databricks-bronze-silver]
+    paths:
+      - ".github/workflows/databricks-bronze-silver.yml"
+      - "repopulse/databricks_job.py"
+      - "repopulse/spark/**"
+      - "repopulse/ingest.py"
+      - "pyproject.toml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: databricks-bronze-silver
+  cancel-in-progress: false
+
+jobs:
+  bronze-silver:
+    name: Databricks bronze/silver (serverless)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+      GIT_SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      # Runner side is standard library only (ingest, pipeline window, Databricks REST client).
+      - name: Install
+        run: pip install -e .
+
+      - name: Ingest GH Archive
+        env:
+          INPUT_DATE: ${{ inputs.date }}
+          INPUT_HOUR: ${{ inputs.hour }}
+          INPUT_HOURS: ${{ inputs.hours }}
+        run: |
+          day="$INPUT_DATE"
+          hour="$INPUT_HOUR"
+          if [ -z "$day" ]; then
+            day=$(python -c 'import tomllib; print(tomllib.load(open("benchmarks/reference.toml", "rb"))["data_date"])')
+            hour="${hour:-23}"
+          fi
+          if [ -z "$hour" ]; then
+            echo "::error::input hour is needed when date is given"
+            exit 1
+          fi
+          python -m repopulse.ingest --date "$day" --hour "$hour" --hours "${INPUT_HOURS:-3}" \
+            --landing-dir data/landing/gharchive \
+            --work-dir "$RUNNER_TEMP/gharchive-raw" \
+            --summary out/ingest-summary.json
+
+      - name: Data window
+        run: python -m repopulse.pipeline window --ingest-summary out/ingest-summary.json >> "$GITHUB_ENV"
+
+      # The job's notebook runs `%pip install --no-deps` on this wheel (dependencies = []).
+      - name: Build wheel
+        run: |
+          pip wheel --no-deps --wheel-dir dist .
+          echo "WHEEL=$(ls dist/repopulse-*.whl)" >> "$GITHUB_ENV"
+
+      - name: Databricks secrets missing
+        if: env.DATABRICKS_HOST == ''
+        run: echo "::notice::Databricks secrets are not set; skipped the serverless job (no databricks-bronze-silver row)."
+
+      - name: Databricks job (serverless, run + re-run)
+        if: env.DATABRICKS_HOST != ''
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+          PII_HASH_SALT: ${{ secrets.PII_HASH_SALT }}
+        run: |
+          python -m repopulse.databricks_job run --source gharchive \
+            --date "$DATA_DATE" --hour "$DATA_HOUR" --hours "$DATA_HOURS" \
+            --landing-dir data/landing/gharchive \
+            --wheel "$WHEEL" \
+            --git-sha "$GIT_SHA" \
+            --job-timeout 1800 \
+            --verify-rerun \
+            --add-mask \
+            --summary out/databricks-summary.json \
+            --out out/databricks-row.csv
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "### Databricks bronze/silver (incremental batch, serverless)"
+            echo
+            for f in out/databricks-row.csv out/databricks-summary.json out/ingest-summary.json; do
+              if [ -f "$f" ]; then
+                echo "\`$f\`"
+                echo
+                echo '```'
+                cat "$f"
+                echo '```'
+              else
+                echo "\`$f\`: not written (skipped or an earlier step failed)."
+              fi
+              echo
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: databricks-bronze-silver
+          path: |
+            out/databricks-row.csv
+            out/databricks-summary.json
+            out/ingest-summary.json
+          if-no-files-found: warn
+          retention-days: 90

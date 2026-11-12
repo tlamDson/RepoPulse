@@ -1,0 +1,38 @@
+[
+  {
+    "dag_id": "repopulse_pipeline",
+    "run_id": "backfill__2026-01-05T00:00:00+00:00",
+    "state": "success",
+    "run_after": "2026-01-05T00:00:00+00:00",
+    "logical_date": "2026-01-05T00:00:00+00:00",
+    "start_date": "2026-11-11T10:00:05+00:00",
+    "end_date": "2026-11-11T10:06:05+00:00"
+  },
+  {
+    "dag_id": "repopulse_pipeline",
+    "run_id": "backfill__2026-01-06T00:00:00+00:00",
+    "state": "success",
+    "run_after": "2026-01-06T00:00:00+00:00",
+    "logical_date": "2026-01-06T00:00:00+00:00",
+    "start_date": "2026-11-11T10:06:10+00:00",
+    "end_date": "2026-11-11T10:46:10+00:00"
+  },
+  {
+    "dag_id": "repopulse_pipeline",
+    "run_id": "backfill__2026-01-07T00:00:00+00:00",
+    "state": "running",
+    "run_after": "2026-01-07T00:00:00+00:00",
+    "logical_date": "2026-01-07T00:00:00+00:00",
+    "start_date": "2026-11-11T10:46:15+00:00",
+    "end_date": null
+  },
+  {
+    "dag_id": "repopulse_pipeline",
+    "run_id": "manual__2026-11-11T09:00:00+00:00",
+    "state": "failed",
+    "run_after": "2026-11-11T09:00:00+00:00",
+    "logical_date": "2026-01-06T00:00:00+00:00",
+    "start_date": "2026-11-11T09:00:01+00:00",
+    "end_date": "2026-11-11T09:01:01+00:00"
+  }
+]

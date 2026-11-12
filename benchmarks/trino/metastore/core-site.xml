@@ -1,0 +1,41 @@
+<?xml version="1.0"?>
+<!--
+  S3A for the Hive Metastore of benchmarks/trino/docker-compose.yml: the metastore checks and
+  creates table / schema paths itself (create_database, create_table), so it must reach MinIO.
+  The keys are the throwaway keys of the local stack, read from the container environment
+  (Hadoop ${env.NAME} substitution); they are not secrets. Details: docs/trino-hive.md.
+-->
+<configuration>
+  <property>
+    <name>fs.s3a.impl</name>
+    <value>org.apache.hadoop.fs.s3a.S3AFileSystem</value>
+  </property>
+  <property>
+    <name>fs.s3a.endpoint</name>
+    <value>http://minio:9000</value>
+  </property>
+  <property>
+    <name>fs.s3a.endpoint.region</name>
+    <value>us-east-1</value>
+  </property>
+  <property>
+    <name>fs.s3a.path.style.access</name>
+    <value>true</value>
+  </property>
+  <property>
+    <name>fs.s3a.connection.ssl.enabled</name>
+    <value>false</value>
+  </property>
+  <property>
+    <name>fs.s3a.aws.credentials.provider</name>
+    <value>org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider</value>
+  </property>
+  <property>
+    <name>fs.s3a.access.key</name>
+    <value>${env.MINIO_ACCESS_KEY}</value>
+  </property>
+  <property>
+    <name>fs.s3a.secret.key</name>
+    <value>${env.MINIO_SECRET_KEY}</value>
+  </property>
+</configuration>

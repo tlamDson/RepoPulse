@@ -7,8 +7,8 @@ seeds:
       Repo names match GH Archive repo.name; the baseline joins them case-insensitively.
     config:
       column_types:
-        repo_name: varchar
-        category: varchar
+        repo_name: string
+        category: string
     columns:
       - name: repo_name
         description: GitHub owner/name.
@@ -38,20 +38,20 @@ seeds:
       Regenerate from the JSON fixtures with tests/dbt_helpers.py::silver_select_sql.
     config:
       column_types:
-        event_id: varchar
-        event_type: varchar
+        event_id: string
+        event_type: string
         created_at: timestamp
         event_date: date
         actor_id: bigint
-        actor_login: varchar
+        actor_login: string
         repo_id: bigint
-        repo_name: varchar
-        action: varchar
+        repo_name: string
+        action: string
         pr_number: bigint
         issue_number: bigint
         pr_merged: boolean
-        commit_author_email_hashes: varchar
-        commit_author_name_hashes: varchar
+        commit_author_email_hashes: string
+        commit_author_name_hashes: string
         landing_date: date
         landing_hour: integer
         is_late: boolean

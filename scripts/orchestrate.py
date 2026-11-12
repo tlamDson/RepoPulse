@@ -66,14 +66,18 @@ from repopulse.orchestrator import (  # noqa: E402
     is_stalled,
     load_tasks,
     mark_trusted,
+    merge_failure_reason,
     merge_ready,
     merged_task_ids,
     next_ready,
+    over_hold_at,
+    parse_hold_at,
     parse_stream_line,
     parse_worktree_porcelain,
-    rate_limit_action,
+    quota_peak,
     releases_due,
     render_progress,
+    required_checks_state,
     review_next,
     scheduling_sets,
     should_exit,
@@ -88,6 +92,7 @@ PRS_TOML = ROOT / "scripts" / "prs.toml"
 POLL_S = 15
 REFRESH_S = 60
 MAX_FAILURES = 2
+RELEASE_WAIT_S = 2 * 3600  # release PRs run every workflow; heavy ones take long
 METRICS = LOGS / "orchestrator-metrics.csv"
 
 
@@ -260,7 +265,7 @@ class Run:
     session_id: str | None = None
     last_rate: dict | None = None
     result_text: str = ""
-    warn: bool = False
+    peak: float = 0.0  # highest quota utilization (0..1) this session reported, for --hold-at
     stalled: bool = False
     last_output: float = 0.0
     log_offset: int = 0  # where this attempt starts in logs/pr-<id>.jsonl
@@ -295,8 +300,7 @@ def _reader(run: Run, logfile: Path) -> None:
             run.session_id = ev.get("session_id") or run.session_id
             if ev.get("type") == "rate_limit_event":
                 run.last_rate = ev
-                if rate_limit_action(ev)[0] == "warn":
-                    run.warn = True
+                run.peak = max(run.peak, quota_peak(ev))
             if ev.get("type") == "result":
                 run.result_text = str(ev.get("result", ""))
 
@@ -370,7 +374,12 @@ def merge_pr(pr: str, head_sha: str) -> str | None:
     sh(["gh", "pr", "merge", pr, "--squash", "--delete-branch", "--match-head-commit", head_sha])
     state = sh(["gh", "pr", "view", pr, "--json", "state"])
     if '"MERGED"' not in state:
-        return f"merge PR #{pr} thất bại"
+        out = sh(["gh", "pr", "view", pr, "--json", "mergeable,mergeStateStatus"])
+        try:
+            view = json.loads(out or "{}")
+        except json.JSONDecodeError:
+            view = {}
+        return merge_failure_reason(pr, view)
     return None
 
 
@@ -425,15 +434,19 @@ def release(after: str) -> str | None:
         if not number.isdigit():
             return f"không tạo được PR release: {url}"
     log(f"release after {after}: chờ CI của PR #{number}")
-    checks = subprocess.run(
-        ["gh", "pr", "checks", number, "--watch", "--interval", "30"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        timeout=3600,
-    )
-    if checks.returncode != 0:
-        return f"CI của PR release #{number} không xanh"
+    deadline = time.time() + RELEASE_WAIT_S
+    state = "pending"
+    while time.time() < deadline:
+        try:
+            checks = json.loads(sh(["gh", "pr", "checks", number, "--json", "name,bucket"]) or "[]")
+        except json.JSONDecodeError:
+            checks = []
+        state = required_checks_state(checks)
+        if state != "pending":
+            break
+        time.sleep(30)
+    if state != "pass":
+        return f"CI bắt buộc của PR release #{number}: {state}"
     r = subprocess.run(
         ["gh", "pr", "merge", number, "--merge"], cwd=ROOT, capture_output=True, text=True
     )
@@ -540,7 +553,7 @@ def run(args: argparse.Namespace) -> int:
             del runs[tid]
             phase = f"review #{r.review_pr}" if r.review_pr else "build"
             log(f"{tid} [{phase}]: {d.kind} {d.reason}")
-            hold_new = hold_new or (args.hold_at_90 and r.warn)
+            hold_new = hold_new or over_hold_at(r.peak, args.hold_at)
             if d.kind == "pass":
                 # an independent session said PASS: the orchestrator merges, not the author
                 err = merge_pr(r.review_pr or "", r.review_sha)
@@ -608,9 +621,9 @@ def run(args: argparse.Namespace) -> int:
                 log(f"daily: lỗi khi viết báo cáo ({type(exc).__name__}: {exc})")
 
         stopping = should_stop(STATE) or bool(stop_all)
-        if args.hold_at_90 and not hold_new and any(r.warn for r in runs.values()):
+        if not hold_new and any(over_hold_at(r.peak, args.hold_at) for r in runs.values()):
             hold_new = True
-            log("quota trên 90% (5 giờ hoặc 7 ngày): không mở việc mới")
+            log(f"quota trên {args.hold_at}% (5 giờ hoặc 7 ngày): không mở việc mới")
 
         # releases happen only when nothing is running, so develop is stable
         due = [
@@ -674,12 +687,14 @@ def run(args: argparse.Namespace) -> int:
             break
         time.sleep(POLL_S)
 
-    write_report(tasks, done, blocked, skipped, final, run_started, stop_all, hold_new)
+    held_at = args.hold_at if hold_new else None
+    write_report(tasks, done, blocked, skipped, final, run_started, stop_all, held_at)
     _chime()
     return 0
 
 
-def write_report(tasks, done, blocked, skipped, final, started, stop_all, hold_new) -> Path:
+def write_report(tasks, done, blocked, skipped, final, started, stop_all, held_at) -> Path:
+    """``held_at`` = the --hold-at percent when the run stopped opening work on it, else None."""
     LOGS.mkdir(exist_ok=True)
     path = LOGS / f"run-{started:%Y-%m-%d-%H%M}.md"
     lines = [f"# Orchestrator run {started:%Y-%m-%d %H:%M}", ""]
@@ -687,8 +702,8 @@ def write_report(tasks, done, blocked, skipped, final, started, stop_all, hold_n
     todo += [f"- [ ] {k}: {d.reason}" for k, d in final.items() if d.kind in ("blocked", "stop")]
     if stop_all:
         todo.append(f"- [ ] Dừng sớm: {stop_all}")
-    if hold_new:
-        todo.append("- [ ] Quota trên 90%: không mở việc mới, chạy lại sau khi reset")
+    if held_at is not None:
+        todo.append(f"- [ ] Quota trên {held_at}%: không mở việc mới, chạy lại sau khi reset")
     lines += ["## Việc cần Lam", *(todo or ["- Không có"]), ""]
     lines += ["## Kết quả từng việc", ""]
     lines += [f"- {k}: {d.kind} {d.reason}" for k, d in final.items()] or ["- (không có)"]
@@ -844,6 +859,13 @@ def report(_: argparse.Namespace) -> int:
     return 0
 
 
+def _hold_at_arg(text: str) -> int:
+    try:
+        return parse_hold_at(text)
+    except ValueError as exc:  # argparse would hide the reason behind "invalid ... value"
+        raise argparse.ArgumentTypeError(str(exc)) from None
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -882,10 +904,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="chờ limit reset tối đa bao lâu rồi chạy tiếp; mặc định 6h = chờ limit 5 giờ, "
         "gặp limit tuần thì dừng",
     )
-    r.add_argument(
+    hold = r.add_mutually_exclusive_group()
+    hold.add_argument(
+        "--hold-at",
+        type=_hold_at_arg,
+        metavar="PHẦN_TRĂM",
+        help="không mở việc mới khi quota 5 giờ hoặc 7 ngày chạm hoặc vượt ngưỡng này "
+        "(số nguyên 1-100; mặc định: chạy tới hết)",
+    )
+    hold.add_argument(
         "--hold-at-90",
-        action="store_true",
-        help="không mở việc mới khi quota 5 giờ hoặc 7 ngày vượt 90%% (mặc định: chạy tới hết)",
+        dest="hold_at",
+        action="store_const",
+        const=90,
+        help="như --hold-at 90",
     )
     r.set_defaults(fn=run)
     c = sub.add_parser("clean")
