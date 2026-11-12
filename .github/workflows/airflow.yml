@@ -56,6 +56,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 210
     env:
+      GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       DAYS: ${{ inputs.days || '2' }}
       LAST_DATA_DATE: ${{ inputs.last_data_date || '2026-10-25' }}
       REPOPULSE_AIRFLOW_HOUR: ${{ inputs.hour || '15' }}
@@ -168,7 +169,7 @@ jobs:
           python -m repopulse.dagspec row \
             --summary out/airflow/backfill-summary.json \
             --run-at "$RUN_AT" \
-            --git-sha "$GITHUB_SHA" \
+            --git-sha "$GIT_SHA" \
             --run-id "$GITHUB_RUN_ID" \
             --trigger "$GITHUB_EVENT_NAME" \
             --summaries-dir out/airflow \

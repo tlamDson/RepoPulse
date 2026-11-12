@@ -171,7 +171,10 @@ def test_wait_and_row():
     assert "--raw out/airflow/list-runs.json" in wait
     row = steps(data)[step_index(data, "-m repopulse.dagspec row")]["run"]
     assert "--out out/airflow-backfill-row.csv" in row
-    assert '--git-sha "$GITHUB_SHA"' in row
+    # On pull_request GITHUB_SHA is the throwaway merge commit: the row records the head commit.
+    assert '--git-sha "$GIT_SHA"' in row
+    text = WORKFLOW.read_text(encoding="utf-8")
+    assert "GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}" in text
 
 
 def test_summary_and_artifact_always():
