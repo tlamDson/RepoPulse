@@ -82,7 +82,7 @@ def _spark_unavailable_reason() -> str | None:
 
 
 @pytest.fixture(scope="session")
-def spark():
+def spark(tmp_path_factory):
     reason = _spark_unavailable_reason()
     if reason is not None:
         if os.environ.get("CI"):
@@ -107,7 +107,12 @@ def spark():
         .config("spark.ui.enabled", "false")
         .config("spark.sql.session.timeZone", "UTC")
         .config("spark.databricks.delta.snapshotPartitions", "1")
+        # One JVM serves every Spark test of the run and its live heap only grows (query plans
+        # Spark keeps per execution). At 1g the old generation filled up before the last Spark
+        # tests and the run stalled in back-to-back full GCs until the CI job timeout.
         .config("spark.driver.memory", "2g")
+        # Managed tables by name (test_spark_catalog_tables.py) live in tmp, not ./spark-warehouse.
+        .config("spark.sql.warehouse.dir", str(tmp_path_factory.mktemp("spark-warehouse")))
     )
     session = configure_spark_with_delta_pip(
         builder, extra_packages=[ICEBERG_PACKAGE]

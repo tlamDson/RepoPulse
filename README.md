@@ -113,6 +113,7 @@ Not compared with `baseline`: either there is no baseline row with the same `dat
 
 | variant | data_date | total_seconds | q1_seconds | q2_seconds | q3_seconds | q4_seconds | q5_seconds | q6_seconds | peak_rss_mb | bytes_read | row_count | run_at | git_sha | notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| databricks-bronze-silver | 2026-10-25 | 107.948 | — | — | — | — | — | — | — | — | 206827 | 2026-11-12T01:32:05+00:00 | b965514 | source=gharchive last_hour=2026-10-25T23 hours=3 bronze_rows=206827 quarantined_total=0 duplicates_dropped=0 upload_s=3.79 setup_s=3.0 execution_s=88.0 cleanup_s=1.0 run_s=92.42 run_id=43134787015 trigger=push rerun_silver_inserted=0 |
 | format-delta | 2026-10-25 | 71.87834 | 7.64757 | 4.878722 | 13.089235 | 12.407299 | 2.199803 | 7.016043 | 9039.9 | 295319902 | 1670400 | 2026-11-12T02:13:36+00:00 | 39d76aa | format=delta runs=5 stat=median write_seconds=8.116 merge_seconds=8.259 merge_rerun_seconds=6.927 time_travel_seconds=1.105 load_seconds=15.958 startup_seconds=6.609 base_rows=1590485 merge_source_rows=161510 table_bytes=352367811 table_files=5 spark=3.5.9 delta=3.3.3 iceberg=1.9.2 cross_check=full |
 | format-iceberg | 2026-10-25 | 56.041629 | 7.251662 | 3.726932 | 10.22701 | 9.219515 | 1.486354 | 5.14486 | 8368.2 | 295319902 | 1670400 | 2026-11-12T02:13:36+00:00 | 39d76aa | format=iceberg runs=5 stat=median write_seconds=5.841 merge_seconds=6.147 merge_rerun_seconds=6.823 time_travel_seconds=0.068 load_seconds=16.217 startup_seconds=6.347 base_rows=1590485 merge_source_rows=161510 table_bytes=214203312 table_files=5 spark=3.5.9 delta=3.3.3 iceberg=1.9.2 cross_check=full |
 | streaming-throughput-p1 | 2026-10-25 | 72.101 | — | — | — | — | — | — | — | 1371864797 | 1670400 | 2026-11-12T01:18:30+00:00 | d5df6de | partitions=1 brokers=3 rf=3 min_isr=2 produce_seconds=24.132 consume_seconds=47.969 produce_events_per_s=69219.3 consume_events_per_s=34822.5 batch_rows=1670400 match=true trigger=availableNow micro_batches=9 max_offsets_per_trigger=200000 unkeyed=0 kafka=apache/kafka:4.0.0 |
@@ -174,6 +175,7 @@ Most pages are in Vietnamese; the benchmark pages are in English.
 | [`docs/benchmark-scale.md`](docs/benchmark-scale.md) | Spark against DuckDB at 1, 7 and 30 days |
 | [`docs/iceberg-vs-delta.md`](docs/iceberg-vs-delta.md) | Delta Lake against Apache Iceberg: write, Q1–Q6, MERGE, time travel |
 | [`docs/snowflake-port.md`](docs/snowflake-port.md) | Running the dbt project on Snowflake |
+| [`docs/databricks-job.md`](docs/databricks-job.md) | The same bronze/silver incremental batch as a serverless Databricks job (Plan v2, outside this deployment) |
 
 ## Baseline benchmark
 
