@@ -15,6 +15,7 @@
 | Gold | dbt | `transform/`; CI chạy trên DuckDB (`--target ci`); gold thật trên Databricks SQL warehouse hoặc MotherDuck |
 | Semantic layer | MetricFlow (đi kèm dbt-core >= 1.12) | `transform/models/public/_semantic.yml` (spec `semantic_models:` + `metrics:`) trên 6 mart public; `repopulse/semantic.py` sinh SQL DuckDB; `docs/semantic-layer.md` |
 | Dashboard | Trang tĩnh trên GitHub Pages + Tableau Public (publish tay) | Databricks dashboard không chia sẻ công khai được |
+| SQL agent (AI2) | `repopulse/sql_agent.py`: LLM qua API OpenAI-compatible (`urllib`, không SDK; local thường là `llama-server`), DuckDB chỉ đọc `main_public` | Chỉ file DuckDB local, không MotherDuck; guard dựa trên parser DuckDB (`json_serialize_sql`); CI chỉ dùng LLM giả lập; `docs/sql-agent.md` |
 | Bảo mật | pre-commit (`ruff`, `gitleaks`), secret scanning + push protection, Dependabot (`pip`, `github-actions`) | |
 
 Bước thử số 1 (`docs/plan.md`) quyết định đường chính (Databricks) hay đường dự phòng (runner + MotherDuck). Kết quả ghi ở `docs/progress.md`; cập nhật bảng trên khi đã chốt.
@@ -54,6 +55,8 @@ Cập nhật sơ đồ này khi thêm thư mục mới.
 `DATABRICKS_HOST`, `DATABRICKS_TOKEN`, `DATABRICKS_HTTP_PATH`, `MOTHERDUCK_TOKEN`, `PII_HASH_SALT` (salt băm PII ở silver), và cho PR 13: `SNOWFLAKE_ACCOUNT`, `SNOWFLAKE_USER` (`REPOPULSE_CI`, user SERVICE, đăng nhập bằng key-pair), `SNOWFLAKE_PRIVATE_KEY` (PKCS#8 PEM), `SNOWFLAKE_ROLE`, `SNOWFLAKE_WAREHOUSE` (`REPOPULSE_WH`, XSMALL, auto-suspend 60s, resource monitor 20 credit), `SNOWFLAKE_DATABASE` (`REPOPULSE`) — chủ repo tự thêm bằng `gh secret set` hoặc trên web. Agent không đọc `.env`, không in giá trị secret, không chạy `gh secret` (lệnh này ở nhóm `ask`). Biến mới thêm vào `.env.example` với giá trị rỗng.
 
 Biến môi trường local (không phải GitHub secret) cho email báo cáo ngày của orchestrator: `REPOPULSE_SMTP_USER`, `REPOPULSE_SMTP_APP_PASSWORD` (Gmail App password), `REPOPULSE_REPORT_TO` (tuỳ chọn). Chủ repo đặt bằng `setx`; script chỉ chuyển giá trị cho `smtplib`, không in. Agent không đọc, không in các biến này.
+
+Biến môi trường local cho SQL agent (`python -m repopulse.sql_agent`, `docs/sql-agent.md`): `REPOPULSE_LLM_BASE_URL` (mặc định `http://127.0.0.1:8080/v1`), `REPOPULSE_LLM_MODEL`, `REPOPULSE_LLM_API_KEY` (tuỳ chọn). Module chỉ đọc từ môi trường, không đọc `.env`, không đưa key vào lỗi/log/report. Agent không đọc, không in `REPOPULSE_LLM_API_KEY`.
 
 ## Cạm bẫy đã biết
 

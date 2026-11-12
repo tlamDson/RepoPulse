@@ -43,6 +43,8 @@ python -m pytest tests/test_dbt_semantic_layer.py   # semantic layer MetricFlow:
 python -m repopulse.semantic sql --metrics cohort_size,retention_w4_pct --group-by q2_cohort__cohort_week__week   # SQL DuckDB của metric từ transform/target/semantic_manifest.json (sau dbt build/parse)
 python -m repopulse.governance scan --db ci.duckdb --schema main_gold --schema main_public   # email thô ở gold/public? exit 0 sạch, 1 có finding (docs/governance.md)
 python -m repopulse.governance check --manifest transform/target/manifest.json --policy transform/governance.yml --db ci.duckdb   # nhãn meta.pii + quyền theo vai
+python -m repopulse.sql_agent ask --db ci.duckdb --model <model> "<câu hỏi>"   # SQL agent chỉ đọc main_public qua LLM OpenAI-compatible (REPOPULSE_LLM_BASE_URL, mặc định llama-server 127.0.0.1:8080); exit 1 hết lượt thử, 2 lỗi cấu hình/LLM (docs/sql-agent.md)
+python -m repopulse.sql_agent eval --db ci.duckdb --model <model> --report out/sql-agent-eval.json --out out/sql-agent-row.csv --git-sha <sha>   # bộ câu hỏi repopulse/sql_agent_eval.toml, execution accuracy; LLM không gọi được thì exit 2, không ghi dòng; gộp bằng record_run.py
 gh pr checks <số-PR> --watch --interval 30
 
 python benchmarks/fetch_reference.py             # tải + kiểm sha256 ngày chuẩn (benchmarks/reference.toml)
