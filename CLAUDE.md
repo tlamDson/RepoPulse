@@ -43,6 +43,8 @@ python -m pytest tests/test_dbt_semantic_layer.py   # semantic layer MetricFlow:
 python -m repopulse.semantic sql --metrics cohort_size,retention_w4_pct --group-by q2_cohort__cohort_week__week   # SQL DuckDB của metric từ transform/target/semantic_manifest.json (sau dbt build/parse)
 python -m repopulse.governance scan --db ci.duckdb --schema main_gold --schema main_public   # email thô ở gold/public? exit 0 sạch, 1 có finding (docs/governance.md)
 python -m repopulse.governance check --manifest transform/target/manifest.json --policy transform/governance.yml --db ci.duckdb   # nhãn meta.pii + quyền theo vai
+python -m repopulse.sql_agent ask --db ci.duckdb --model <model> "<câu hỏi>"   # SQL agent chỉ đọc main_public qua LLM OpenAI-compatible (REPOPULSE_LLM_BASE_URL, mặc định llama-server 127.0.0.1:8080); exit 1 hết lượt thử, 2 lỗi cấu hình/LLM (docs/sql-agent.md)
+python -m repopulse.sql_agent eval --db ci.duckdb --model <model> --report out/sql-agent-eval.json --out out/sql-agent-row.csv --git-sha <sha>   # bộ câu hỏi repopulse/sql_agent_eval.toml, execution accuracy; LLM không gọi được thì exit 2, không ghi dòng; gộp bằng record_run.py
 gh pr checks <số-PR> --watch --interval 30
 
 python benchmarks/fetch_reference.py             # tải + kiểm sha256 ngày chuẩn (benchmarks/reference.toml)
@@ -69,6 +71,8 @@ python -m repopulse.spark.job --source gharchive --date 2026-01-05 --hour 16 --h
 python -m repopulse.spark.export --lake-dir data/lake --out data/silver-export   # silver Delta -> parquet cho dbt (var silver_gharchive_parquet)
 python -m repopulse.databricks_job run --source gharchive --date 2026-10-25 --hour 23 --hours 3 --landing-dir data/landing/gharchive --wheel dist/<wheel>.whl --git-sha <sha> --verify-rerun --summary out/databricks-summary.json --out out/databricks-row.csv   # cùng bronze/silver chạy serverless trên Databricks (DATABRICKS_HOST/TOKEN, PII_HASH_SALT); workflow databricks-bronze-silver.yml; docs/databricks-job.md
 python -m repopulse.pipeline {window,timed,counts,row,md-reset} --help   # helper của .github/workflows/pipeline.yml (incremental batch theo giờ); docs/pipeline.md
+python -m repopulse.pathcompare summary --runs runs.csv --out out/path-summary.md   # D3: số lần chạy, tỉ lệ thành công, p50/p95 (nearest-rank) end-to-end/từng bước/xếp hàng của path-a-runner vs path-b-databricks, chỉ từ runs.csv
+python -m repopulse.pathcompare {window,runner-waits,warehouse-start,queries,md-ensure,row} --help   # helper của .github/workflows/path-comparison.yml (A runner+MotherDuck repopulse_path_a vs B Databricks, cùng cửa sổ dữ liệu; cron chỉ chạy sau release); docs/path-comparison.md
 python -m repopulse.dagspec {window,wait,row,check-ingest} --help   # helper của DAG Airflow dags/repopulse_pipeline.py và .github/workflows/airflow.yml (backfill N ngày, variant airflow-backfill-<N>d; Airflow chỉ chạy trên runner Linux); docs/airflow.md
 python -m dbt.cli.main build --project-dir transform --profiles-dir transform --target ci --full-refresh   # dựng lại fct_events (staging giữ lịch sử); khi nào cần: docs/dbt-models.md
 python -m repopulse.quality faults --seed 42 --users 30 --days 2 --clean-runs 2 --git-sha <sha> --report out/dq-faults.json --out out/dq-fault-row.csv   # 6 lỗi simkit (simulated) qua Spark; exit 1 khi sót lỗi/báo động giả (cần PII_HASH_SALT, Java 17); docs/data-quality.md
