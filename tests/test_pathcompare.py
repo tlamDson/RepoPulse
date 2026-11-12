@@ -275,6 +275,24 @@ def test_build_row_records_missing_hours_from_the_ingest_summary():
     assert notes_of(row)["missing_hours"] == "1"
 
 
+def test_build_row_records_bronze_rows_so_both_paths_show_the_same_input():
+    # row_count is what silver gained: 0 when the hour was already in the path's silver.
+    # bronze_rows is what the run read, equal on A and B for the same data window.
+    row = pc.build_row(**a_success_kwargs(row_count=0, bronze_rows=68488))
+    assert row["row_count"] == "0"
+    assert notes_of(row)["bronze_rows"] == "68488"
+
+
+def test_build_row_without_bronze_rows_has_no_bronze_note():
+    assert "bronze_rows" not in notes_of(pc.build_row(**a_success_kwargs()))
+
+
+@pytest.mark.parametrize("bad", [-1, 1.5, True, "68488"])
+def test_build_row_rejects_a_bad_bronze_rows(bad):
+    with pytest.raises(pc.PathCompareError, match="bronze_rows"):
+        pc.build_row(**a_success_kwargs(bronze_rows=bad))
+
+
 # ---------------------------------------------------------------- notes + parser
 
 
@@ -849,7 +867,7 @@ def test_row_cli_success_path_a(tmp_path):
         tmp_path / "queries.json",
         {"seconds": {f"q{i}": 0.5 for i in range(1, 7)}, "rows": {}},
     )
-    spark = _write_json(tmp_path / "spark.json", {"silver_inserted": 50})
+    spark = _write_json(tmp_path / "spark.json", {"silver_inserted": 50, "bronze_rows": 70})
     ingest = _write_json(
         tmp_path / "ingest.json", [{"data_date": "2026-11-20", "hour": 8, "status": "ingested"}]
     )
@@ -868,6 +886,7 @@ def test_row_cli_success_path_a(tmp_path):
     assert row["total_seconds"] == 100.0
     assert notes_of(row)["status"] == "success"
     assert notes_of(row)["missing_hours"] == "0"
+    assert notes_of(row)["bronze_rows"] == "70"
 
 
 def test_row_cli_failed_path_b_with_missing_files(tmp_path):
