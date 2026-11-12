@@ -12,6 +12,12 @@ the rows measure. A row is compared with ``variant=baseline`` only when it has t
 ``data_date`` as a baseline row; every other row is listed where it belongs, and is never dropped
 silently.
 
+The engine matrix (E1, ``repopulse.engine_matrix``) is one table with one row per engine in a
+fixed order: the newest ``matrix-<engine>`` row, the reused ``dbt-build-snowflake`` row for
+Snowflake (labelled not comparable), or ``—`` with a warning line for a missing engine. Those
+rows are not repeated under "Other runs"; ``main`` prints the warnings to stderr without changing
+the exit code.
+
 The block lives between ``<!-- results:start -->`` and ``<!-- results:end -->`` in README.md.
 Output is deterministic: the same rows in any order give the same text.
 """
@@ -26,7 +32,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
-from repopulse import runs_log
+from repopulse import engine_matrix, runs_log
 
 START_MARKER = "<!-- results:start -->"
 END_MARKER = "<!-- results:end -->"
@@ -36,6 +42,9 @@ TITLE_LAYOUTS = "Query layouts vs naive baseline"
 TITLE_SCALE = "Spark vs DuckDB at 1, 7 and 30 days"
 TITLE_DBT = "dbt build: DuckDB vs Snowflake"
 TITLE_DQ = "Data quality fault injection (simulated data)"
+TITLE_DBT_DATABRICKS = "dbt build on a Databricks SQL warehouse (real GH Archive data)"
+VARIANT_DBT_DATABRICKS = "dbt-build-databricks"
+TITLE_MATRIX = "Engine matrix: Q1 to Q6 on six engines (real GH Archive data)"
 TITLE_OTHER = "Other runs"
 
 _COMMON = (
@@ -78,6 +87,32 @@ _DQ_COLUMNS = (
     "run_at",
     "git_sha",
 )
+_MATRIX_COLUMNS = (
+    "engine",
+    "source",
+    "variant",
+    "data_date",
+    "total_seconds",
+    "q1_seconds",
+    "q2_seconds",
+    "q3_seconds",
+    "q4_seconds",
+    "q5_seconds",
+    "q6_seconds",
+    "row_count",
+    "timing",
+    "cross_check",
+    "run_at",
+    "git_sha",
+)
+_MATRIX_SOURCE = {
+    engine_matrix.MEASURED: "measured: Q1-Q6 on the reference day",
+    engine_matrix.REUSED: (
+        f"reused {engine_matrix.SNOWFLAKE_REUSED_VARIANT}: dbt build of the marts on the seed "
+        "fixture, not comparable"
+    ),
+    engine_matrix.MISSING: "missing: no row in runs.csv yet",
+}
 _RUN_COLUMNS = frozenset(runs_log.COLUMNS)
 
 Row = Mapping[str, str | None]
@@ -216,6 +251,16 @@ _PROSE_DBT = (
     "to Q6, not the time of the query; `row_count` is the number of seed rows; `lines_changed` "
     "is read from `notes`. Method: [`docs/snowflake-port.md`](docs/snowflake-port.md)."
 )
+_PROSE_DBT_DATABRICKS = (
+    "Real GH Archive data (not simulated): the dbt project builds on a Databricks SQL warehouse "
+    "from the silver Delta table written by the Databricks bronze/silver job, not from the "
+    "hand-made CI events, so these rows are compared neither with the builds above nor with "
+    "`baseline`. "
+    "`total_seconds` is the whole `dbt build`; `q1_seconds` to `q6_seconds` are the build time "
+    "of the mart for Q1 to Q6; `row_count` is the number of staged events and `data_date` the "
+    "earliest `event_date`; `max_event_date` and `lines_changed` are read from `notes`. "
+    "Method: [`docs/dbt-databricks.md`](docs/dbt-databricks.md)."
+)
 _PROSE_DQ = (
     "Simulated data: app events from `simkit` (no real users) with a known number of faults "
     "injected, run through the Spark job. `injected` and `caught` count faults; `false_alarms` "
@@ -229,17 +274,59 @@ _PROSE_OTHER = (
 )
 
 
+_PROSE_MATRIX = (
+    "Real GH Archive data (not simulated): the same reference day as `baseline` and the same "
+    "queries Q1 to Q6 on every engine, one row per engine in a fixed order (the newest "
+    "`matrix-<engine>` run). Each engine loads the day first (not timed), runs Q1 to Q6 once as "
+    "a warm-up, then several timed runs; `q1_seconds` to `q6_seconds` are medians and "
+    "`total_seconds` is the median of the per-run sum of Q1 to Q6, so unlike `baseline` it "
+    "does not include loading. `timing` says where the clock runs: `in-process` engines "
+    "(`duckdb`, `spark`) are timed in the process that runs the query, `client` engines "
+    "(`motherduck`, `databricks-sql`) are timed by the client on the runner, so their times "
+    "include the network, and `notebook` (`databricks-serverless`) is timed inside the "
+    "Databricks notebook. A row is written only when its results matched DuckDB on the same "
+    "data (`cross_check`). The `snowflake` row is reused from `dbt-build-snowflake` (the trial "
+    "is not spent again): the build time of the marts with `dbt build` on the seed fixture, a "
+    "different measurement that is not comparable with the other rows. Method: "
+    "[`docs/engine-matrix.md`](docs/engine-matrix.md)."
+)
+
 _FOOTER = "The full log, with every run and not only the newest, is [`runs.csv`](runs.csv)."
+
+
+def _matrix_section(matrix: engine_matrix.Matrix) -> str:
+    """One table, one row per engine in the fixed order; missing engines show ``—``."""
+    header = "| " + " | ".join(_MATRIX_COLUMNS) + " |"
+    rule = "| " + " | ".join("---" for _ in _MATRIX_COLUMNS) + " |"
+    lines = [header, rule]
+    for entry in matrix.entries:
+        row: Row = entry.row or {}
+        extra = {"engine": entry.engine, "source": _MATRIX_SOURCE[entry.source]}
+        if entry.row is not None:
+            notes = _notes(row)
+            for key in ("timing", "cross_check"):
+                if key in notes:
+                    extra[key] = notes[key]
+        lines.append("| " + " | ".join(_cell(row, c, extra) for c in _MATRIX_COLUMNS) + " |")
+    parts = [f"### {TITLE_MATRIX}", _PROSE_MATRIX, "\n".join(lines)]
+    if matrix.warnings:
+        parts.append("\n".join(f"- Warning: {_escape(w)}." for w in matrix.warnings))
+    return "\n\n".join(parts)
 
 
 def render(rows: Iterable[Row]) -> str:
     """Markdown of the Results block for ``rows`` (dicts keyed by ``runs_log.COLUMNS``)."""
-    latest = _newest(rows)
+    rows = list(rows)
+    newest = _newest(rows)  # checks variant, data_date and run_at of every row first
+    matrix = engine_matrix.build_matrix(rows)
+    # matrix-<engine> rows of the six engines live only in the matrix table
+    latest = [r for r in newest if not engine_matrix.is_known_matrix_variant(_value(r, "variant"))]
     baseline_dates = {_value(r, "data_date") for r in latest if _value(r, "variant") == "baseline"}
 
     layouts: list[Row] = []
     scale: list[Row] = []
     dbt: list[Row] = []
+    dbt_databricks: list[Row] = []
     dq: list[Row] = []
     other: list[Row] = []
     for row in latest:
@@ -250,6 +337,8 @@ def render(rows: Iterable[Row]) -> str:
             layouts.append(row)
         elif _SCALE_VARIANT.fullmatch(variant):
             scale.append(row)
+        elif variant == VARIANT_DBT_DATABRICKS:
+            dbt_databricks.append(row)
         elif variant.startswith("dbt-build-"):
             dbt.append(row)
         elif variant == "dq-fault-injection":
@@ -284,6 +373,7 @@ def render(rows: Iterable[Row]) -> str:
         _section(
             TITLE_LAYOUTS, _PROSE_LAYOUTS, sorted(layouts, key=by_date_baseline_first), _COMMON
         ),
+        _matrix_section(matrix),
         _section(TITLE_SCALE, _PROSE_SCALE, sorted(scale, key=by_days_engine), (*_COMMON, "notes")),
         _section(
             TITLE_DBT,
@@ -293,6 +383,16 @@ def render(rows: Iterable[Row]) -> str:
         ),
         _section(TITLE_DQ, _PROSE_DQ, sorted(dq, key=by_date_variant), _DQ_COLUMNS),
     ]
+    # Only once a row exists, so README.md does not change before the first Databricks build.
+    if dbt_databricks:
+        parts.append(
+            _section(
+                TITLE_DBT_DATABRICKS,
+                _PROSE_DBT_DATABRICKS,
+                sorted(dbt_databricks, key=by_date_variant),
+                (*_COMMON[:12], "max_event_date", "lines_changed", *_COMMON[12:]),
+            )
+        )
     if other:
         parts.append(
             _section(
@@ -339,7 +439,11 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     readme_path = Path(args.readme)
     try:
-        block = render(read_runs(args.runs))
+        rows = read_runs(args.runs)
+        block = render(rows)
+        # A missing engine is reported, never an error: CI stays green before a cloud run.
+        for warning in engine_matrix.build_matrix(rows).warnings:
+            print(f"warning: engine matrix: {warning}", file=sys.stderr)
         if not readme_path.is_file():
             raise ReadmeResultsError(f"README not found: {readme_path}")
         current = readme_path.read_text(encoding="utf-8")

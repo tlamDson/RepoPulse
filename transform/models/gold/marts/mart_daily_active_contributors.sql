@@ -49,10 +49,10 @@ flagged as (
 )
 
 select
-    cast(period as varchar) as period,
+    cast(period as string) as period,
     cast(period_start as date) as period_start,
-    cast(scope as varchar) as scope,
-    cast(scope_key as varchar) as scope_key,
+    cast(scope as string) as scope,
+    cast(scope_key as string) as scope_key,
     cast(count(*) as bigint) as active_contributors,
     cast(count(case when is_new then 1 end) as bigint) as new_contributors,
     cast(count(case when not is_new then 1 end) as bigint) as returning_contributors

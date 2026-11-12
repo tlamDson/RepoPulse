@@ -66,6 +66,7 @@ from repopulse.orchestrator import (  # noqa: E402
     is_stalled,
     load_tasks,
     mark_trusted,
+    merge_failure_reason,
     merge_ready,
     merged_task_ids,
     next_ready,
@@ -76,6 +77,7 @@ from repopulse.orchestrator import (  # noqa: E402
     quota_peak,
     releases_due,
     render_progress,
+    required_checks_state,
     review_next,
     scheduling_sets,
     should_exit,
@@ -90,6 +92,7 @@ PRS_TOML = ROOT / "scripts" / "prs.toml"
 POLL_S = 15
 REFRESH_S = 60
 MAX_FAILURES = 2
+RELEASE_WAIT_S = 2 * 3600  # release PRs run every workflow; heavy ones take long
 METRICS = LOGS / "orchestrator-metrics.csv"
 
 
@@ -371,7 +374,12 @@ def merge_pr(pr: str, head_sha: str) -> str | None:
     sh(["gh", "pr", "merge", pr, "--squash", "--delete-branch", "--match-head-commit", head_sha])
     state = sh(["gh", "pr", "view", pr, "--json", "state"])
     if '"MERGED"' not in state:
-        return f"merge PR #{pr} thất bại"
+        out = sh(["gh", "pr", "view", pr, "--json", "mergeable,mergeStateStatus"])
+        try:
+            view = json.loads(out or "{}")
+        except json.JSONDecodeError:
+            view = {}
+        return merge_failure_reason(pr, view)
     return None
 
 
@@ -426,15 +434,19 @@ def release(after: str) -> str | None:
         if not number.isdigit():
             return f"không tạo được PR release: {url}"
     log(f"release after {after}: chờ CI của PR #{number}")
-    checks = subprocess.run(
-        ["gh", "pr", "checks", number, "--watch", "--interval", "30"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        timeout=3600,
-    )
-    if checks.returncode != 0:
-        return f"CI của PR release #{number} không xanh"
+    deadline = time.time() + RELEASE_WAIT_S
+    state = "pending"
+    while time.time() < deadline:
+        try:
+            checks = json.loads(sh(["gh", "pr", "checks", number, "--json", "name,bucket"]) or "[]")
+        except json.JSONDecodeError:
+            checks = []
+        state = required_checks_state(checks)
+        if state != "pending":
+            break
+        time.sleep(30)
+    if state != "pass":
+        return f"CI bắt buộc của PR release #{number}: {state}"
     r = subprocess.run(
         ["gh", "pr", "merge", number, "--merge"], cwd=ROOT, capture_output=True, text=True
     )

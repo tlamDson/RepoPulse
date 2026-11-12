@@ -42,7 +42,8 @@ one runs.csv row per N, only when every count matches
 - Heap 1 GiB per broker; a healthcheck (`kafka-broker-api-versions.sh`) lets
   `docker compose up -d --wait` block until all three answer.
 - Each broker is its own compose service without `container_name`, so the fault test (P2b) can
-  stop one with `docker compose -f benchmarks/kafka/docker-compose.yml kill kafka-2`.
+  stop one with `docker compose -f benchmarks/kafka/docker-compose.yml kill kafka-2`. The fault
+  test that does this is described in [`streaming-fault.md`](streaming-fault.md).
 
 ### Producer (`repopulse/streaming/producer.py`)
 

@@ -13,7 +13,9 @@
 | Bronze/Silver | PySpark + Delta Lake | Databricks Free Edition (serverless, chỉ batch `availableNow`). Dự phòng: chạy trên runner Actions (4 CPU, 16 GB RAM, 14 GB đĩa) |
 | Streaming (giai đoạn 2) | Apache Kafka (`apache/kafka`, KRaft, 3 broker, docker compose) + Spark Structured Streaming + Delta | Chỉ trong workflow `streaming.yml` trên runner; client `confluent-kafka` (extra `streaming`, import lười); trigger `availableNow`; `docs/streaming.md` |
 | Gold | dbt | `transform/`; CI chạy trên DuckDB (`--target ci`); gold thật trên Databricks SQL warehouse hoặc MotherDuck |
+| Semantic layer | MetricFlow (đi kèm dbt-core >= 1.12) | `transform/models/public/_semantic.yml` (spec `semantic_models:` + `metrics:`) trên 6 mart public; `repopulse/semantic.py` sinh SQL DuckDB; `docs/semantic-layer.md` |
 | Dashboard | Trang tĩnh trên GitHub Pages + Tableau Public (publish tay) | Databricks dashboard không chia sẻ công khai được |
+| SQL agent (AI2) | `repopulse/sql_agent.py`: LLM qua API OpenAI-compatible (`urllib`, không SDK; local thường là `llama-server`), DuckDB chỉ đọc `main_public` | Chỉ file DuckDB local, không MotherDuck; guard dựa trên parser DuckDB (`json_serialize_sql`); CI chỉ dùng LLM giả lập; `docs/sql-agent.md` |
 | Bảo mật | pre-commit (`ruff`, `gitleaks`), secret scanning + push protection, Dependabot (`pip`, `github-actions`) | |
 
 Bước thử số 1 (`docs/plan.md`) quyết định đường chính (Databricks) hay đường dự phòng (runner + MotherDuck). Kết quả ghi ở `docs/progress.md`; cập nhật bảng trên khi đã chốt.
@@ -54,6 +56,8 @@ Cập nhật sơ đồ này khi thêm thư mục mới.
 
 Biến môi trường local (không phải GitHub secret) cho email báo cáo ngày của orchestrator: `REPOPULSE_SMTP_USER`, `REPOPULSE_SMTP_APP_PASSWORD` (Gmail App password), `REPOPULSE_REPORT_TO` (tuỳ chọn). Chủ repo đặt bằng `setx`; script chỉ chuyển giá trị cho `smtplib`, không in. Agent không đọc, không in các biến này.
 
+Biến môi trường local cho SQL agent (`python -m repopulse.sql_agent`, `docs/sql-agent.md`): `REPOPULSE_LLM_BASE_URL` (mặc định `http://127.0.0.1:8080/v1`), `REPOPULSE_LLM_MODEL`, `REPOPULSE_LLM_API_KEY` (tuỳ chọn). Module chỉ đọc từ môi trường, không đọc `.env`, không đưa key vào lỗi/log/report. Agent không đọc, không in `REPOPULSE_LLM_API_KEY`.
+
 ## Cạm bẫy đã biết
 
 - **Databricks Free Edition**: tài liệu chính thức chưa xác nhận tạo token/điều khiển từ ngoài; truy cập internet theo danh sách domain (chưa biết `data.gharchive.org` có được phép); vượt quota thì compute tắt tới hết ngày; tối đa 5 job task đồng thời. Lịch chạy thưa, job idempotent để hôm sau chạy bù.
@@ -61,6 +65,7 @@ Biến môi trường local (không phải GitHub secret) cho email báo cáo ng
 - **Snowflake trial 30 ngày**: chỉ đăng ký khi tới PR 13.
 - **Windows**: mở phiên với `D:` viết hoa (xem `developer-guide.md`). Hook `ruff format` cần `ruff` đã cài trong Python mà lệnh `python` trỏ tới; chưa cài thì hook bỏ qua im lặng.
 - **Spark trên Windows**: PySpark cần JDK 17 (máy đang có Java 24, không hỗ trợ) và ghi Delta cần `winutils`. Test Spark đánh dấu `@pytest.mark.spark`, tự skip local khi thiếu, luôn chạy trên CI Linux.
+- **Kill cứng một tiến trình PySpark**: JVM là tiến trình con của Python; SIGKILL riêng Python thì JVM thấy stdin đóng và thoát qua shutdown hook (không phải crash). Muốn crash thật: chạy tiến trình con với `start_new_session=True` rồi `os.killpg(pid, SIGKILL)` (chỉ POSIX; xem `ConsumerProcess` trong `benchmarks/streaming_fault.py`, `docs/streaming-fault.md`).
 - **Auto mode bỏ qua allow rule rộng** (`Bash(python *)`, `npm *`, `npx *`, allow `Agent`/`Monitor`); allow rule phải cụ thể. `autoMode` không đọc từ `.claude/settings*.json` — nằm ở `.claude/auto-mode.json`, nạp bằng `--settings`.
 - **Ghi vào `.claude/` (ngoài `worktrees/`) là đường dẫn được bảo vệ**: allow rule không mở được, auto mode chặn tự sửa cấu hình. Thay đổi harness do chủ repo duyệt.
 - **Quota**: stream-json có `rate_limit_event` (`status: rejected`, `resetsAt` epoch giây); `errorCode: credits_required` thì chờ cũng vô ích. Orchestrator đặt `CLAUDE_CODE_RETRY_WATCHDOG=1` để limit 5 giờ được chờ ngay trong phiên, và `--resume <session_id>` khi phiên thoát vì limit. `autoContinueAtUsageLimit` không áp dụng cho `-p`.

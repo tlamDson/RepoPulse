@@ -1,0 +1,2 @@
+run_at,git_sha,variant,data_date,total_seconds,q1_seconds,q2_seconds,q3_seconds,q4_seconds,q5_seconds,q6_seconds,peak_rss_mb,bytes_read,row_count,notes
+2026-11-20T10:46:00+00:00,abcdef1,databricks-bronze-silver,2026-11-20,175.5,,,,,,,,,50,source=gharchive last_hour=2026-11-20T08 hours=1 bronze_rows=60 quarantined_total=0 duplicates_dropped=10 upload_s=4.2 queue_s=12.5 setup_s=40.0 execution_s=110.0 run_s=162.5 run_id=101 trigger=schedule

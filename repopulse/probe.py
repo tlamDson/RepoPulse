@@ -11,6 +11,9 @@ Runs a fixed set of checks against the Databricks REST API and MotherDuck, then 
 Whether the notebook can download ``data.gharchive.org`` is recorded for information only: the
 plan already has Actions download GH Archive and push it to the Volume.
 
+``python -m repopulse.probe http-path --github-env`` reuses the warehouse resolution of the SQL
+warehouse check for ``dbt --target databricks`` (``.github/workflows/dbt-databricks.yml``).
+
 Only the standard library is used; HTTP goes through an injectable ``transport`` so unit tests
 never touch the network. Secret values (host, tokens, warehouse path, user name) never reach a
 result: every detail goes through :class:`Redactor`. Results are pass/fail/skipped with a short
@@ -485,26 +488,42 @@ def check_notebook_gharchive(ctx: ProbeContext) -> tuple[str, str]:
     return FAIL, f"notebook could not download from data.gharchive.org: {error}"
 
 
-@_check(SQL_WAREHOUSE)
-def check_sql_warehouse(ctx: ProbeContext) -> tuple[str, str]:
-    """Resolve the warehouse http path and run ``SELECT 1`` through the Statement API."""
+def resolve_warehouse(ctx: ProbeContext) -> tuple[str, str]:
+    """(warehouse id, http path): DATABRICKS_HTTP_PATH when set, else the first warehouse listed.
+
+    Both values are added to the redactor. Raises ``ValueError`` for a malformed secret or a
+    workspace without warehouse, ``ApiError`` when the listing fails. Shared by the probe check
+    and ``python -m repopulse.probe http-path`` (dbt target databricks, docs/dbt-databricks.md).
+    """
     if ctx.secrets.http_path:
         match = _HTTP_PATH.fullmatch(ctx.secrets.http_path)
         if not match:
-            return FAIL, "DATABRICKS_HTTP_PATH is not of the form /sql/1.0/warehouses/<id>"
+            raise ValueError("DATABRICKS_HTTP_PATH is not of the form /sql/1.0/warehouses/<id>")
         warehouse_id, http_path = match.group(1), ctx.secrets.http_path
-        source = "from DATABRICKS_HTTP_PATH"
     else:
         listing = _json(_call(ctx, "GET", "/api/2.0/sql/warehouses"))
         warehouses = listing.get("warehouses") or []
         if not warehouses:
-            return FAIL, "no SQL warehouse found in the workspace"
+            raise ValueError("no SQL warehouse found in the workspace")
         warehouse_id = str(warehouses[0]["id"])
         odbc = warehouses[0].get("odbc_params") or {}
         http_path = odbc.get("path") or f"/sql/1.0/warehouses/{warehouse_id}"
-        source = "discovered via the SQL warehouses API"
     ctx.redact.add(warehouse_id)
     ctx.redact.add(http_path)
+    return warehouse_id, http_path
+
+
+@_check(SQL_WAREHOUSE)
+def check_sql_warehouse(ctx: ProbeContext) -> tuple[str, str]:
+    """Resolve the warehouse http path and run ``SELECT 1`` through the Statement API."""
+    try:
+        warehouse_id, http_path = resolve_warehouse(ctx)
+    except ValueError as exc:
+        return FAIL, str(exc)
+    if ctx.secrets.http_path:
+        source = "from DATABRICKS_HTTP_PATH"
+    else:
+        source = "discovered via the SQL warehouses API"
     ctx.http_path = http_path
 
     body = {
@@ -748,6 +767,44 @@ def _main_merge(argv: list[str], env: Mapping[str, str]) -> int:
     return 0
 
 
+HTTP_PATH_ENV = "DBT_DATABRICKS_HTTP_PATH"
+
+
+def _main_http_path(argv: list[str], env: Mapping[str, str], transport: Transport | None) -> int:
+    """Write the SQL warehouse http path to ``$GITHUB_ENV`` (masked) for ``dbt --target
+    databricks``. Exit 0 when written, 1 on any problem (message redacted, nothing written)."""
+    parser = argparse.ArgumentParser(prog="python -m repopulse.probe http-path")
+    parser.add_argument(
+        "--github-env",
+        action="store_true",
+        required=True,
+        help=f"append {HTTP_PATH_ENV}=<path> to $GITHUB_ENV and ::add-mask:: the values",
+    )
+    parser.parse_args(argv)
+    secrets = Secrets.from_env(env)
+    redact = secrets.redactor()
+    missing = secrets.missing(_DATABRICKS_NEEDS)
+    gh_env = env.get("GITHUB_ENV")
+    try:
+        if missing:
+            raise ValueError("missing secret " + ", ".join(missing))
+        if not gh_env:
+            raise ValueError("GITHUB_ENV is not set: --github-env runs on GitHub Actions only")
+        ctx = ProbeContext(secrets, transport or urllib_transport)
+        warehouse_id, http_path = resolve_warehouse(ctx)
+    except (ApiError, ValueError, OSError) as exc:
+        print(f"probe http-path: error: {redact(exc)}", file=sys.stderr)
+        return 1
+    netloc = urlsplit(secrets.host).netloc
+    for value in (netloc, http_path, warehouse_id):
+        if value:
+            print(f"::add-mask::{value}")
+    _append(gh_env, f"{HTTP_PATH_ENV}={http_path}\n")
+    source = "DATABRICKS_HTTP_PATH" if secrets.http_path else "the SQL warehouses API"
+    print(f"probe http-path: wrote {HTTP_PATH_ENV} to GITHUB_ENV (from {source})")
+    return 0
+
+
 def main(
     argv: Sequence[str] | None = None,
     *,
@@ -763,6 +820,8 @@ def main(
     try:
         if args and args[0] == "merge-dbt":
             return _main_merge(args[1:], env)
+        if args and args[0] == "http-path":
+            return _main_http_path(args[1:], env, transport)
         return _main_run(args, env, transport=transport, connect=connect, sleep=sleep, clock=clock)
     except Exception as exc:
         redact = Secrets.from_env(env).redactor()

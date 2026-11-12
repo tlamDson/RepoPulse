@@ -364,11 +364,56 @@ def decide_after_review(
     return Decision("failed", f"review exit {returncode}, no REVIEW line")
 
 
+def merge_failure_reason(pr: str, view: dict) -> str:
+    """Why `gh pr merge` failed, phrased as what the retried PR session must do.
+
+    ``view`` is ``gh pr view <n> --json mergeable,mergeStateStatus``.
+    """
+    state = (view or {}).get("mergeStateStatus", "")
+    if view and (view.get("mergeable") == "CONFLICTING" or state == "DIRTY"):
+        return (
+            f"merge PR #{pr} thất bại: nhánh conflict với develop. Chạy `git fetch origin` rồi "
+            "`git merge origin/develop`, gỡ conflict (giữ thay đổi của cả hai bên), chạy lại "
+            "test, commit merge và push; chờ CI xanh rồi mới ready."
+        )
+    if state == "BEHIND":
+        return (
+            f"merge PR #{pr} thất bại: nhánh tụt sau develop. Chạy `gh pr update-branch {pr}`, "
+            "chờ CI xanh rồi mới ready."
+        )
+    if state in ("BLOCKED", "UNSTABLE"):
+        return f"merge PR #{pr} thất bại: check bắt buộc chưa xanh ({state}). Chờ CI xong và sửa."
+    return f"merge PR #{pr} thất bại ({state or 'không rõ trạng thái'})"
+
+
+def _check_bucket(checks: list[dict], name: str) -> str | None:
+    """One bucket for a check name that may have several runs (push + pull_request): any
+    fail/cancel wins, then anything not finished, and "pass" only when every run passed."""
+    runs = [c.get("bucket") for c in checks if c.get("name") == name]
+    if not runs:
+        return None
+    for bad in ("fail", "cancel"):
+        if bad in runs:
+            return bad
+    return next((b or "pending" for b in runs if b != "pass"), "pass")
+
+
+def required_checks_state(checks: list[dict]) -> str:
+    """'pending' | 'pass' | 'fail' for the required checks only (``gh pr checks --json
+    name,bucket``). A required check not registered yet counts as pending, so a freshly
+    created PR is never judged red; optional workflows never decide."""
+    states = [_check_bucket(checks, name) for name in REQUIRED_CHECKS]
+    if any(b in ("fail", "cancel") for b in states):
+        return "fail"
+    if all(b == "pass" for b in states):
+        return "pass"
+    return "pending"
+
+
 def merge_ready(checks: list[dict]) -> tuple[bool, str]:
     """All required checks pass, from ``gh pr checks <n> --json name,bucket``."""
-    buckets = {c.get("name"): c.get("bucket") for c in checks}
     for name in REQUIRED_CHECKS:
-        bucket = buckets.get(name)
+        bucket = _check_bucket(checks, name)
         if bucket != "pass":
             return False, f"{name}: {bucket or 'thiếu'}"
     return True, ""

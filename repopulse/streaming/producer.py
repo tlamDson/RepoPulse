@@ -102,8 +102,15 @@ def produce_files(
     files: Iterable[str | Path],
     *,
     flush_timeout: float = 600.0,
+    after_line: Callable[[ProduceSummary], None] | None = None,
+    after_report: Callable[[ProduceSummary, bool], None] | None = None,
 ) -> ProduceSummary:
-    """Produce every line of ``files`` (in order) to ``topic``; wait for every delivery report."""
+    """Produce every line of ``files`` (in order) to ``topic``; wait for every delivery report.
+
+    Optional hooks (used by the fault test, ``benchmarks/streaming_fault.py``):
+    ``after_line(summary)`` runs after each line is handed to the client, and
+    ``after_report(summary, ok)`` after each delivery report has been counted.
+    """
     summary = ProduceSummary()
 
     def on_delivery(error: str | None, partition: int | None) -> None:
@@ -111,10 +118,12 @@ def produce_files(
             summary.failed += 1
             if len(summary.errors) < MAX_ERRORS_KEPT:
                 summary.errors.append(error)
-            return
-        summary.delivered += 1
-        if partition is not None:
-            summary.per_partition[partition] = summary.per_partition.get(partition, 0) + 1
+        else:
+            summary.delivered += 1
+            if partition is not None:
+                summary.per_partition[partition] = summary.per_partition.get(partition, 0) + 1
+        if after_report is not None:
+            after_report(summary, error is None)
 
     start = time.perf_counter()
     for path in files:
@@ -126,6 +135,8 @@ def produce_files(
             summary.lines += 1
             summary.bytes += len(line)
             client.produce(topic, key, line, on_delivery)
+            if after_line is not None:
+                after_line(summary)
     summary.undelivered = int(client.flush(flush_timeout))
     summary.seconds = round(time.perf_counter() - start, 6)
     return summary

@@ -16,7 +16,7 @@ models:
     columns:
       - name: period
         config: {meta: {pii: none}}
-        data_type: varchar
+        data_type: string
         constraints:
           - type: not_null
         data_tests:
@@ -30,7 +30,7 @@ models:
           - type: not_null
       - name: scope
         config: {meta: {pii: none}}
-        data_type: varchar
+        data_type: string
         constraints:
           - type: not_null
         data_tests:
@@ -39,7 +39,7 @@ models:
                 values: [repo, category]
       - name: scope_key
         config: {meta: {pii: none}}
-        data_type: varchar
+        data_type: string
         constraints:
           - type: not_null
       - name: active_contributors
@@ -101,7 +101,7 @@ models:
     columns:
       - name: repo_name
         config: {meta: {pii: none}}
-        data_type: varchar
+        data_type: string
         constraints:
           - type: not_null
         data_tests:
@@ -112,7 +112,7 @@ models:
                 field: repo_name
       - name: category
         config: {meta: {pii: none}}
-        data_type: varchar
+        data_type: string
         constraints:
           - type: not_null
       - name: forkers
@@ -155,12 +155,12 @@ models:
     columns:
       - name: repo_name
         config: {meta: {pii: none}}
-        data_type: varchar
+        data_type: string
         constraints:
           - type: not_null
       - name: item_type
         config: {meta: {pii: none}}
-        data_type: varchar
+        data_type: string
         constraints:
           - type: not_null
         data_tests:
@@ -200,14 +200,14 @@ models:
     columns:
       - name: repo_name
         config: {meta: {pii: none}}
-        data_type: varchar
+        data_type: string
         constraints:
           - type: not_null
         data_tests:
           - unique
       - name: category
         config: {meta: {pii: none}}
-        data_type: varchar
+        data_type: string
         constraints:
           - type: not_null
       - name: contributions
@@ -255,14 +255,14 @@ models:
           - unique
       - name: repo_name
         config: {meta: {pii: none}}
-        data_type: varchar
+        data_type: string
         constraints:
           - type: not_null
         data_tests:
           - unique
       - name: category
         config: {meta: {pii: none}}
-        data_type: varchar
+        data_type: string
         constraints:
           - type: not_null
       - name: activity_score
@@ -346,3 +346,120 @@ unit_tests:
            prs_opened: 3, prs_merged: 2, merge_hours_p50: 6.0, merge_hours_p90: 9.2}
         - {repo_name: org/b, category: bi, forkers: 1, forkers_with_pr: 0, forkers_with_merge: 0,
            prs_opened: 0, prs_merged: 0, merge_hours_p50: null, merge_hours_p90: null}
+
+  # The unit tests below (with the two above) also run on Databricks in
+  # .github/workflows/dbt-databricks.yml: the same given/expect on both adapters is how the marts
+  # are shown to give the same result on DuckDB and on a Databricks SQL warehouse (D2).
+
+  - name: daily_active_contributors_new_vs_returning_per_day_week_repo_category
+    description: >
+      alice is new on org/a on Mon 01-05 and returning on 01-06 and in the next week; bob is new
+      on org/b (same category); the bot and the fork are not contributions. The category row
+      merges both repos.
+    model: mart_daily_active_contributors
+    given:
+      - input: ref('int_events_enriched')
+        rows:
+          - {actor_login: alice, is_bot: false, repo_name: org/a, category: compute, event_type: PullRequestEvent, event_date: "2026-01-05", event_week: "2026-01-05"}
+          - {actor_login: alice, is_bot: false, repo_name: org/a, category: compute, event_type: IssueCommentEvent, event_date: "2026-01-06", event_week: "2026-01-05"}
+          - {actor_login: bob, is_bot: false, repo_name: org/b, category: compute, event_type: IssuesEvent, event_date: "2026-01-06", event_week: "2026-01-05"}
+          - {actor_login: "x[bot]", is_bot: true, repo_name: org/a, category: compute, event_type: PullRequestReviewEvent, event_date: "2026-01-06", event_week: "2026-01-05"}
+          - {actor_login: carol, is_bot: false, repo_name: org/a, category: compute, event_type: ForkEvent, event_date: "2026-01-06", event_week: "2026-01-05"}
+          - {actor_login: alice, is_bot: false, repo_name: org/a, category: compute, event_type: PullRequestReviewCommentEvent, event_date: "2026-01-12", event_week: "2026-01-12"}
+    expect:
+      rows:
+        - {period: day, period_start: "2026-01-05", scope: repo, scope_key: org/a, active_contributors: 1, new_contributors: 1, returning_contributors: 0}
+        - {period: day, period_start: "2026-01-06", scope: repo, scope_key: org/a, active_contributors: 1, new_contributors: 0, returning_contributors: 1}
+        - {period: day, period_start: "2026-01-12", scope: repo, scope_key: org/a, active_contributors: 1, new_contributors: 0, returning_contributors: 1}
+        - {period: day, period_start: "2026-01-06", scope: repo, scope_key: org/b, active_contributors: 1, new_contributors: 1, returning_contributors: 0}
+        - {period: week, period_start: "2026-01-05", scope: repo, scope_key: org/a, active_contributors: 1, new_contributors: 1, returning_contributors: 0}
+        - {period: week, period_start: "2026-01-12", scope: repo, scope_key: org/a, active_contributors: 1, new_contributors: 0, returning_contributors: 1}
+        - {period: week, period_start: "2026-01-05", scope: repo, scope_key: org/b, active_contributors: 1, new_contributors: 1, returning_contributors: 0}
+        - {period: day, period_start: "2026-01-05", scope: category, scope_key: compute, active_contributors: 1, new_contributors: 1, returning_contributors: 0}
+        - {period: day, period_start: "2026-01-06", scope: category, scope_key: compute, active_contributors: 2, new_contributors: 1, returning_contributors: 1}
+        - {period: day, period_start: "2026-01-12", scope: category, scope_key: compute, active_contributors: 1, new_contributors: 0, returning_contributors: 1}
+        - {period: week, period_start: "2026-01-05", scope: category, scope_key: compute, active_contributors: 2, new_contributors: 2, returning_contributors: 0}
+        - {period: week, period_start: "2026-01-12", scope: category, scope_key: compute, active_contributors: 1, new_contributors: 0, returning_contributors: 1}
+
+  - name: responsiveness_first_human_response_hours_and_close_rate
+    description: >
+      Issue #1: the bot and the opener's own comment do not count, u2 answers after 30 min, closed.
+      Issue #2: answered after 2 h, open. Issue #3 has a bot opener and is left out. PR #10: a
+      review after 36 s (0.01 h), then merged (closes it); PR #11 has no answer. Issue p50 =
+      (0.5 + 2) / 2 = 1.25, p90 = 0.5 + 0.9 * 1.5 = 1.85.
+    model: mart_responsiveness
+    given:
+      - input: ref('int_events_enriched')
+        rows:
+          - {repo_name: org/a, actor_login: u1, is_bot: false, event_type: IssuesEvent, action: opened, item_number: 1, created_at: "2026-01-01 00:00:00"}
+          - {repo_name: org/a, actor_login: "x[bot]", is_bot: true, event_type: IssueCommentEvent, action: created, item_number: 1, created_at: "2026-01-01 00:05:00"}
+          - {repo_name: org/a, actor_login: u1, is_bot: false, event_type: IssueCommentEvent, action: created, item_number: 1, created_at: "2026-01-01 00:10:00"}
+          - {repo_name: org/a, actor_login: u2, is_bot: false, event_type: IssueCommentEvent, action: created, item_number: 1, created_at: "2026-01-01 00:30:00"}
+          - {repo_name: org/a, actor_login: m, is_bot: false, event_type: IssuesEvent, action: closed, item_number: 1, created_at: "2026-01-01 12:00:00"}
+          - {repo_name: org/a, actor_login: u3, is_bot: false, event_type: IssuesEvent, action: opened, item_number: 2, created_at: "2026-01-02 00:00:00"}
+          - {repo_name: org/a, actor_login: m, is_bot: false, event_type: IssueCommentEvent, action: created, item_number: 2, created_at: "2026-01-02 02:00:00"}
+          - {repo_name: org/a, actor_login: "x[bot]", is_bot: true, event_type: IssuesEvent, action: opened, item_number: 3, created_at: "2026-01-02 00:00:00"}
+          - {repo_name: org/a, actor_login: m, is_bot: false, event_type: IssueCommentEvent, action: created, item_number: 3, created_at: "2026-01-02 01:00:00"}
+          - {repo_name: org/a, actor_login: u1, is_bot: false, event_type: PullRequestEvent, action: opened, item_number: 10, created_at: "2026-01-03 00:00:00"}
+          - {repo_name: org/a, actor_login: m, is_bot: false, event_type: PullRequestReviewEvent, action: created, item_number: 10, created_at: "2026-01-03 00:00:36"}
+          - {repo_name: org/a, actor_login: m, is_bot: false, event_type: PullRequestEvent, action: merged, item_number: 10, created_at: "2026-01-03 05:00:00"}
+          - {repo_name: org/a, actor_login: u2, is_bot: false, event_type: PullRequestEvent, action: opened, item_number: 11, created_at: "2026-01-04 00:00:00"}
+    expect:
+      rows:
+        - {repo_name: org/a, item_type: issue, opened: 2, responded: 2, response_hours_p50: 1.25,
+           response_hours_p90: 1.85, closed: 1, close_rate_pct: 50.0}
+        - {repo_name: org/a, item_type: pull_request, opened: 2, responded: 1,
+           response_hours_p50: 0.01, response_hours_p90: 0.01, closed: 1, close_rate_pct: 50.0}
+
+  - name: repo_concentration_top_n_share_and_bot_share
+    description: >
+      org/a: u1 makes 3 of the 4 human contributions (top1 75 %), u2 the 4th, the bot 1 of 5
+      (20 %); the fork is not a contribution. org/b has bot contributions only: no human share.
+    model: mart_repo_concentration
+    given:
+      - input: ref('int_events_enriched')
+        rows:
+          - {repo_name: org/a, category: compute, actor_login: u1, is_bot: false, event_type: PullRequestEvent}
+          - {repo_name: org/a, category: compute, actor_login: u1, is_bot: false, event_type: IssueCommentEvent}
+          - {repo_name: org/a, category: compute, actor_login: u1, is_bot: false, event_type: IssuesEvent}
+          - {repo_name: org/a, category: compute, actor_login: u2, is_bot: false, event_type: PullRequestReviewCommentEvent}
+          - {repo_name: org/a, category: compute, actor_login: "x[bot]", is_bot: true, event_type: PullRequestReviewEvent}
+          - {repo_name: org/a, category: compute, actor_login: u3, is_bot: false, event_type: ForkEvent}
+          - {repo_name: org/b, category: bi, actor_login: "y[bot]", is_bot: true, event_type: IssueCommentEvent}
+          - {repo_name: org/b, category: bi, actor_login: "y[bot]", is_bot: true, event_type: IssueCommentEvent}
+    expect:
+      rows:
+        - {repo_name: org/a, category: compute, contributions: 5, bot_contributions: 1,
+           bot_share_pct: 20.0, human_contributors: 2, top1_share_pct: 75.0,
+           top2_share_pct: 100.0, top3_share_pct: 100.0}
+        - {repo_name: org/b, category: bi, contributions: 2, bot_contributions: 2,
+           bot_share_pct: 100.0, human_contributors: 0, top1_share_pct: null,
+           top2_share_pct: null, top3_share_pct: null}
+
+  - name: repo_health_score_components_weights_and_rank
+    description: >
+      org/a: 3 contributors (max, activity 1), 1 of 3 active in 2 weeks, its PR merged, 1 of 2
+      items answered and closed, top1 share 0.5. Score = 100 * (0.25 + 0.15 / 3 + 0.15 + 0.20 *
+      0.5 + 0.10 * 0.5 + 0.15 * 0.5) = 67.5. org/b: 1 contributor, one unanswered issue: 100 *
+      0.25 / 3 = 8.33.
+    model: mart_repo_health_score
+    given:
+      - input: ref('dim_repo')
+        rows:
+          - {repo_key: org/a, repo_name: org/a, category: compute}
+          - {repo_key: org/b, repo_name: org/b, category: bi}
+      - input: ref('int_events_enriched')
+        rows:
+          - {repo_name: org/a, actor_login: u1, is_bot: false, event_type: IssuesEvent, action: opened, item_number: 1, event_week: "2026-01-05", created_at: "2026-01-05 10:00:00"}
+          - {repo_name: org/a, actor_login: u2, is_bot: false, event_type: IssueCommentEvent, action: created, item_number: 1, event_week: "2026-01-05", created_at: "2026-01-05 11:00:00"}
+          - {repo_name: org/a, actor_login: u1, is_bot: false, event_type: PullRequestEvent, action: opened, item_number: 2, event_week: "2026-01-12", created_at: "2026-01-12 10:00:00"}
+          - {repo_name: org/a, actor_login: m, is_bot: false, event_type: PullRequestEvent, action: closed, pr_merged: true, item_number: 2, event_week: "2026-01-12", created_at: "2026-01-12 12:00:00"}
+          - {repo_name: org/b, actor_login: v1, is_bot: false, event_type: IssuesEvent, action: opened, item_number: 5, event_week: "2026-01-05", created_at: "2026-01-05 09:00:00"}
+    expect:
+      rows:
+        - {health_rank: 1, repo_name: org/a, category: compute, activity_score: 1.0,
+           retention_score: 0.3333, merge_score: 1.0, response_score: 0.5, close_score: 0.5,
+           diversity_score: 0.5, health_score: 67.5}
+        - {health_rank: 2, repo_name: org/b, category: bi, activity_score: 0.3333,
+           retention_score: 0.0, merge_score: 0.0, response_score: 0.0, close_score: 0.0,
+           diversity_score: 0.0, health_score: 8.33}

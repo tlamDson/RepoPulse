@@ -81,8 +81,8 @@ pr_stats as (
 )
 
 select
-    cast(r.repo_name as varchar) as repo_name,
-    cast(r.category as varchar) as category,
+    cast(r.repo_name as string) as repo_name,
+    cast(r.category as string) as category,
     cast(coalesce(f.forkers, 0) as bigint) as forkers,
     cast(coalesce(f.forkers_with_pr, 0) as bigint) as forkers_with_pr,
     cast(coalesce(f.forkers_with_merge, 0) as bigint) as forkers_with_merge,

@@ -45,6 +45,10 @@ Workflow `.github/workflows/databricks-bronze-silver.yml`:
   hết tác dụng.
 - Thiếu `DATABRICKS_HOST`: bước Databricks bị bỏ qua ở cấp step, có `::notice`, workflow vẫn xanh,
   không có dòng `runs.csv`.
+- Đường B của `.github/workflows/path-comparison.yml` (D3, `docs/path-comparison.md`) gọi cùng lệnh
+  `run` (không `--verify-rerun`) theo lịch hằng giờ sau release, trên cùng bảng
+  `workspace.repopulse.*`. Job đó dùng chung nhóm concurrency `databricks-bronze-silver` với
+  workflow này, nên hai bên không cùng ghi silver một lúc.
 
 Chạy tay (cần ba biến môi trường dưới đây, một thư mục landing đã ingest và một wheel):
 

@@ -125,8 +125,8 @@ scores as (
 
 select
     cast(row_number() over (order by s.score desc, s.repo_name) as bigint) as health_rank,
-    cast(s.repo_name as varchar) as repo_name,
-    cast(r.category as varchar) as category,
+    cast(s.repo_name as string) as repo_name,
+    cast(r.category as string) as category,
     cast(round(s.activity, 4) as double) as activity_score,
     cast(round(s.retention, 4) as double) as retention_score,
     cast(round(s.merge_rate, 4) as double) as merge_score,
