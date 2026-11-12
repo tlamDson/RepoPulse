@@ -395,7 +395,7 @@ def _check_bucket(checks: list[dict], name: str) -> str | None:
     for bad in ("fail", "cancel"):
         if bad in runs:
             return bad
-    return "pass" if all(b == "pass" for b in runs) else "pending"
+    return next((b or "pending" for b in runs if b != "pass"), "pass")
 
 
 def required_checks_state(checks: list[dict]) -> str:
