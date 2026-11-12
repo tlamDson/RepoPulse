@@ -12,7 +12,11 @@ Workflow `.github/workflows/dbt-databricks.yml` (chạy tay):
 
 - `workflow_dispatch` (khi file đã lên `main`), hoặc `push` lên đúng nhánh
   `feature/dbt-databricks-target` (lọc `paths`), để chạy được ngay trong PR. Không có
-  `pull_request`, không có lịch: Free Edition có quota ngày, workspace chỉ bị ghi bởi workflow này.
+  `pull_request`, không có lịch: Free Edition có quota ngày.
+- Đường B của `.github/workflows/path-comparison.yml` (D3, `docs/path-comparison.md`) chạy cùng
+  `dbt build --target databricks` với cùng `DBT_DATABRICKS_SCHEMA=repopulse_dbt` theo lịch hằng giờ
+  (sau release), nên schema `repopulse_dbt_*` cũng được ghi từ đó. Staging chỉ chèn `event_id` mới,
+  nên hai workflow ghi xen kẽ không sinh dòng trùng.
 - Thiếu `DATABRICKS_HOST` hoặc `DATABRICKS_TOKEN`: các bước Databricks bị bỏ qua ở cấp step, có
   `::notice`, workflow vẫn xanh, không có dòng `runs.csv`.
 - Các bước:
