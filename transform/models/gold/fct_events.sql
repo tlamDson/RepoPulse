@@ -7,9 +7,11 @@
 -- late event is on a repo outside the seed. So a run recomputes every fact of each touched actor:
 -- an actor with a staging row loaded after the newest loaded_at already in this table. Reworking
 -- an actor twice is harmless; skipping one is not, so the watermark comes from this table.
+-- On Databricks the strategy is merge on event_id (an upsert): the batch has one row per
+-- event_id, so it leaves the same table as delete+insert (docs/dbt-databricks.md).
 {{ config(
     materialized='incremental',
-    incremental_strategy='delete+insert',
+    incremental_strategy=('merge' if target.type == 'databricks' else 'delete+insert'),
     unique_key='event_id',
     on_schema_change='fail'
 ) }}
@@ -53,15 +55,15 @@ with_user as (
 )
 
 select
-    cast(event_id as varchar) as event_id,
-    cast(event_type as varchar) as event_type,
-    cast(action as varchar) as action,
+    cast(event_id as string) as event_id,
+    cast(event_type as string) as event_type,
+    cast(action as string) as action,
     cast(created_at as timestamp) as created_at,
     cast(event_date as date) as event_date,
     cast(date_trunc('week', created_at) as date) as event_week,
-    cast(user_key as varchar) as user_key,
+    cast(user_key as string) as user_key,
     cast(actor_id as bigint) as actor_id,
-    cast(repo_key as varchar) as repo_key,
+    cast(repo_key as string) as repo_key,
     cast(repo_id as bigint) as repo_id,
     cast(pr_number as bigint) as pr_number,
     cast(issue_number as bigint) as issue_number,

@@ -811,3 +811,249 @@ def test_review_next_merges_on_pass_fixes_once_then_gives_up():
     assert review_next(Decision("pass"), failed_rounds=1, max_rounds=2) == "merge"
     assert review_next(Decision("fail", "x"), failed_rounds=0, max_rounds=2) == "fix"
     assert review_next(Decision("fail", "x"), failed_rounds=1, max_rounds=2) == "give_up"
+
+
+# ---------- --hold-at <percent> ----------
+
+
+def _quota(five_hour, seven_day, status="allowed"):
+    return _rl(
+        status,
+        unifiedWindows={
+            "five_hour": {"utilization": five_hour, "status": status},
+            "seven_day": {"utilization": seven_day, "status": status},
+        },
+    )
+
+
+def test_quota_peak_is_the_highest_of_the_five_hour_and_seven_day_windows():
+    from repopulse.orchestrator import quota_peak
+
+    assert quota_peak(_quota(five_hour=0.04, seven_day=0.75)) == 0.75
+    assert quota_peak(_quota(five_hour=0.62, seven_day=0.10)) == 0.62
+    assert quota_peak(_rl("allowed_warning", utilization=0.93)) == 0.93
+
+
+def test_quota_peak_is_zero_when_there_is_nothing_to_hold_on():
+    from repopulse.orchestrator import quota_peak
+
+    assert quota_peak(None) == 0.0
+    assert quota_peak({"type": "assistant"}) == 0.0
+    assert quota_peak(_rl("allowed")) == 0.0
+    # a rejected event is handled as wait/stop by rate_limit_action, never as a hold (as before)
+    assert quota_peak(_rl("rejected", utilization=1.0, resetsAt=9)) == 0.0
+
+
+def test_over_hold_at_compares_the_peak_with_the_chosen_percent():
+    from repopulse.orchestrator import over_hold_at
+
+    assert over_hold_at(0.75, 70) is True
+    assert over_hold_at(0.69, 70) is False
+    assert over_hold_at(0.75, 80) is False
+    assert over_hold_at(0.05, 1) is True
+    assert over_hold_at(0.99, 100) is False
+    assert over_hold_at(1.0, 100) is True
+
+
+def test_over_hold_at_without_a_threshold_never_holds():
+    from repopulse.orchestrator import over_hold_at
+
+    assert over_hold_at(1.0, None) is False
+    assert over_hold_at(0.0, None) is False
+
+
+def test_over_hold_at_holds_exactly_at_every_percent_and_not_one_below():
+    # utilization arrives as a JSON decimal; 0.29 * 100 is 28.999999999999996 in floats, so a
+    # naive "peak * 100 >= percent" would miss the threshold
+    from repopulse.orchestrator import over_hold_at
+
+    for percent in range(1, 101):
+        at = json.loads("1.0" if percent == 100 else f"0.{percent:02d}")
+        below = json.loads(f"0.{percent - 1:02d}")
+        assert over_hold_at(at, percent) is True, percent
+        assert over_hold_at(below, percent) is False, percent
+
+
+def test_hold_at_90_holds_exactly_when_the_old_warn_did():
+    from repopulse.orchestrator import over_hold_at, quota_peak
+
+    events = [_rl("allowed_warning", utilization=u) for u in (0.5, 0.89, 0.9, 0.93, 1.0)]
+    events += [_quota(0.04, 0.95), _quota(0.04, 0.59), _rl("rejected", resetsAt=9)]
+    for ev in events:
+        warned = rate_limit_action(ev)[0] == "warn"
+        assert over_hold_at(quota_peak(ev), 90) is warned, ev
+
+
+def test_parse_hold_at_accepts_whole_percents_from_1_to_100():
+    from repopulse.orchestrator import parse_hold_at
+
+    assert parse_hold_at("1") == 1
+    assert parse_hold_at("75") == 75
+    assert parse_hold_at("100") == 100
+
+
+@pytest.mark.parametrize("bad", ["0", "101", "-5", "7.5", "abc", "", "90%"])
+def test_parse_hold_at_rejects_anything_else(bad):
+    from repopulse.orchestrator import parse_hold_at
+
+    with pytest.raises(ValueError, match="1.*100"):
+        parse_hold_at(bad)
+
+
+def test_cli_hold_at_takes_a_percent():
+    args = _load_cli().build_parser().parse_args(["run", "--hold-at", "75"])
+    assert args.hold_at == 75
+
+
+def test_cli_hold_at_90_is_the_same_as_hold_at_90_percent():
+    parser = _load_cli().build_parser()
+    old = parser.parse_args(["run", "--hold-at-90"])
+    new = parser.parse_args(["run", "--hold-at", "90"])
+    assert old.hold_at == 90
+    assert vars(old) == vars(new)
+
+
+def test_cli_without_a_hold_flag_runs_until_the_quota_is_gone():
+    assert _load_cli().build_parser().parse_args(["run"]).hold_at is None
+
+
+@pytest.mark.parametrize("bad", ["0", "101", "7.5", "abc"])
+def test_cli_rejects_a_hold_at_outside_1_to_100(bad, capsys):
+    with pytest.raises(SystemExit) as exc:
+        _load_cli().build_parser().parse_args(["run", "--hold-at", bad])
+    assert exc.value.code == 2
+    assert "--hold-at" in capsys.readouterr().err
+
+
+def test_cli_rejects_hold_at_together_with_hold_at_90(capsys):
+    with pytest.raises(SystemExit) as exc:
+        _load_cli().build_parser().parse_args(["run", "--hold-at", "50", "--hold-at-90"])
+    assert exc.value.code == 2
+    assert "not allowed with" in capsys.readouterr().err
+
+
+def test_reader_keeps_the_highest_quota_peak_a_session_reported(tasks, tmp_path: Path):
+    # the run loop compares this peak with --hold-at; it stays up after a later, lower event
+    from types import SimpleNamespace
+
+    cli = _load_cli()
+    lines = [
+        json.dumps(ev) + "\n"
+        for ev in (
+            {"type": "system", "subtype": "init", "session_id": "s1"},
+            _quota(five_hour=0.40, seven_day=0.10),
+            _quota(five_hour=0.75, seven_day=0.10),
+            _quota(five_hour=0.60, seven_day=0.10),
+        )
+    ]
+    run = cli.Run(task=tasks[0], proc=SimpleNamespace(stdout=iter(lines)), path=tmp_path, started=0)
+    assert run.peak == 0.0
+    cli._reader(run, tmp_path / "pr.jsonl")
+    assert run.peak == 0.75
+    assert run.session_id == "s1"
+
+
+def _t(needs, optional=False):
+    from repopulse.orchestrator import Task
+
+    return Task(id="x", branch="feature/x", agent="a", needs=tuple(needs), optional=optional)
+
+
+def test_unknown_need_blocks_instead_of_passing_silently():
+    g = gate_for(_t(["clod"]), CLOUD)
+    assert g is not None and g.kind == "block" and "clod" in g.reason
+
+
+def test_build_prompt_requires_foreground_agents_and_no_early_end(tasks):
+    # Regression 2026-11-11 20:18: the D1 session handed the rest of the work to a
+    # background subagent and ended its turn "waiting", with no RESULT line; the
+    # session exit killed the background agent and the run counted as failed.
+    p = build_prompt(tasks[2])
+    assert "run_in_background" in p and "foreground" in p
+    assert "không kết thúc lượt" in p
+
+
+def test_merge_failure_reason_tells_the_retry_what_to_do():
+    # 2026-11-11: four "review PASS but merge failed" retries had only "merge PR #N thất bại"
+    # as context, so the retried session did not know the branch conflicted with develop.
+    from repopulse.orchestrator import merge_failure_reason
+
+    dirty = merge_failure_reason("50", {"mergeable": "CONFLICTING", "mergeStateStatus": "DIRTY"})
+    assert "conflict" in dirty and "origin/develop" in dirty and "#50" in dirty
+    behind = merge_failure_reason("7", {"mergeable": "MERGEABLE", "mergeStateStatus": "BEHIND"})
+    assert "gh pr update-branch 7" in behind
+    blocked = merge_failure_reason("9", {"mergeable": "MERGEABLE", "mergeStateStatus": "BLOCKED"})
+    assert "check" in blocked
+    assert "#3" in merge_failure_reason("3", {})
+
+
+def test_merge_failure_reason_detects_conflict_from_either_field():
+    from repopulse.orchestrator import merge_failure_reason
+
+    for view in (
+        {"mergeable": "UNKNOWN", "mergeStateStatus": "DIRTY"},
+        {"mergeable": "CONFLICTING", "mergeStateStatus": "UNKNOWN"},
+    ):
+        assert "origin/develop" in merge_failure_reason("50", view)
+
+
+def test_merge_failure_reason_names_the_blocking_state():
+    from repopulse.orchestrator import merge_failure_reason
+
+    for state in ("BLOCKED", "UNSTABLE"):
+        msg = merge_failure_reason("9", {"mergeable": "MERGEABLE", "mergeStateStatus": state})
+        assert state in msg and "CI" in msg
+
+
+def test_required_checks_state_waits_until_required_checks_exist_and_finish():
+    # Regression 2026-11-12 03:30: release ran `gh pr checks --watch` 3 s after creating the
+    # PR, got "no checks reported" (exit 1), reported CI red and stopped the whole run.
+    from repopulse.orchestrator import required_checks_state
+
+    assert required_checks_state([]) == "pending"  # nothing registered yet
+    some = [{"name": "Lint", "bucket": "pass"}, {"name": "GitGuardian", "bucket": "pass"}]
+    assert required_checks_state(some) == "pending"  # Unit Tests / dbt not registered
+    req = [{"name": n, "bucket": "pass"} for n in ("Lint", "Unit Tests", "dbt build (DuckDB)")]
+    assert required_checks_state(req) == "pass"
+    # optional workflows on the release PR (Kafka, Trino...) never decide the release
+    extra = req + [
+        {"name": "Trino benchmark", "bucket": "fail"},
+        {"name": "Airflow", "bucket": "pending"},
+    ]
+    assert required_checks_state(extra) == "pass"
+    running = req[:2] + [{"name": "dbt build (DuckDB)", "bucket": "pending"}]
+    assert required_checks_state(running) == "pending"
+    for bad in ("fail", "cancel"):
+        red = req[:2] + [{"name": "dbt build (DuckDB)", "bucket": bad}]
+        assert required_checks_state(red) == "fail"
+
+
+def test_duplicate_check_runs_all_must_pass():
+    # Regression 2026-11-12 03:58: release PR #64 had two "Unit Tests" runs (push on develop and
+    # pull_request); a name->bucket dict kept the passing one, the merge hit the pending one and
+    # branch protection refused it, which stopped the whole run.
+    from repopulse.orchestrator import merge_ready, required_checks_state
+
+    ok = [{"name": n, "bucket": "pass"} for n in ("Lint", "Unit Tests", "dbt build (DuckDB)")]
+    for order in (
+        ok + [{"name": "Unit Tests", "bucket": "pending"}],
+        [{"name": "Unit Tests", "bucket": "pending"}] + ok,
+    ):
+        assert required_checks_state(order) == "pending"
+        assert merge_ready(order)[0] is False
+    red = ok + [{"name": "Unit Tests", "bucket": "fail"}]
+    assert required_checks_state(red) == "fail"
+    assert merge_ready(red)[0] is False
+    assert required_checks_state(ok + ok) == "pass"
+    assert merge_ready(ok + ok)[0] is True
+
+
+def test_a_failed_run_wins_even_after_an_unfinished_run_of_the_same_check():
+    from repopulse.orchestrator import required_checks_state
+
+    ok = [{"name": n, "bucket": "pass"} for n in ("Lint", "dbt build (DuckDB)")]
+    runs = ok + [
+        {"name": "Unit Tests", "bucket": "pending"},
+        {"name": "Unit Tests", "bucket": "fail"},
+    ]
+    assert required_checks_state(runs) == "fail"

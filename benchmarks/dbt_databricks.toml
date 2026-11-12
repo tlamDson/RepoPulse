@@ -1,0 +1,4 @@
+# dbt target databricks (D2, docs/dbt-databricks.md).
+# base_sha: head of develop before D2. Lines changed for Databricks =
+# added + deleted of `git diff --numstat <base_sha> HEAD -- transform` (binary files skipped).
+base_sha = "629d72ec309b1afa28703d30935f7c8a714c569d"

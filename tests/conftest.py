@@ -1,13 +1,16 @@
 """Shared pytest fixtures.
 
-``spark``: one local Delta-enabled SparkSession per test run (``local[1]``, UTC, 1 shuffle
-partition). On CI (``CI`` is set) a missing pyspark/delta/Java is an error, never a skip. Locally
-the Spark tests skip with a reason when pyspark, delta-spark, Java 17 or (Windows) winutils is
-missing.
+``spark``: one local SparkSession per test run (``local[1]``, UTC, 1 shuffle partition) with Delta
+Lake (``spark_catalog`` = ``DeltaCatalog``) and the Apache Iceberg runtime + SQL extensions loaded
+next to it (Iceberg catalogs are registered at run time by ``benchmarks/format_bench.py``, one per
+work directory). On CI (``CI`` is set) a missing pyspark/delta/Java is an error, never a skip.
+Locally the Spark tests skip with a reason when pyspark, delta-spark, Java 17 or (Windows) winutils
+is missing.
 
 ``lake`` / ``built``: one silver parquet + one ``dbt build`` of ``transform/`` per test run, shared
-by test_dbt_marts.py and test_governance.py (helpers in ``dbt_helpers.py``, imported lazily so a
-missing dbt extra only skips the dbt tests).
+by test_dbt_marts.py, test_governance.py and test_dbt_semantic_layer.py (helpers in
+``dbt_helpers.py``, imported lazily so a missing dbt extra only skips the dbt tests). ``baseline``:
+benchmarks/queries/q1..q6.sql on the same raw lines, what the marts and metrics are compared with.
 
 ``_no_motherduck`` (autouse): wraps ``duckdb.connect`` so any ``md:`` / ``motherduck:`` target
 raises ``AssertionError`` instead of reaching the real MotherDuck account; local targets pass.
@@ -25,10 +28,18 @@ from pathlib import Path
 
 import pytest
 
+# Same pin as benchmarks/format_bench.py::ICEBERG_PACKAGE (Spark 3.5, Scala 2.12).
+ICEBERG_PACKAGE = "org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.9.2"
+SQL_EXTENSIONS = (
+    "io.delta.sql.DeltaSparkSessionExtension,"
+    "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions"
+)
+
 
 def pytest_configure(config):
     config.addinivalue_line(
-        "markers", "spark: needs a local SparkSession with Delta (Java 17); always runs on CI"
+        "markers",
+        "spark: needs a local SparkSession with Delta + Iceberg (Java 17); always runs on CI",
     )
 
 
@@ -72,7 +83,7 @@ def _spark_unavailable_reason() -> str | None:
 
 
 @pytest.fixture(scope="session")
-def spark():
+def spark(tmp_path_factory):
     reason = _spark_unavailable_reason()
     if reason is not None:
         if os.environ.get("CI"):
@@ -88,7 +99,7 @@ def spark():
     builder = (
         SparkSession.builder.master("local[1]")
         .appName("repopulse-tests")
-        .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
+        .config("spark.sql.extensions", SQL_EXTENSIONS)
         .config(
             "spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog"
         )
@@ -97,9 +108,16 @@ def spark():
         .config("spark.ui.enabled", "false")
         .config("spark.sql.session.timeZone", "UTC")
         .config("spark.databricks.delta.snapshotPartitions", "1")
-        .config("spark.driver.memory", "1g")
+        # One JVM serves every Spark test of the run and its live heap only grows (query plans
+        # Spark keeps per execution). At 1g the old generation filled up before the last Spark
+        # tests and the run stalled in back-to-back full GCs until the CI job timeout.
+        .config("spark.driver.memory", "2g")
+        # Managed tables by name (test_spark_catalog_tables.py) live in tmp, not ./spark-warehouse.
+        .config("spark.sql.warehouse.dir", str(tmp_path_factory.mktemp("spark-warehouse")))
     )
-    session = configure_spark_with_delta_pip(builder).getOrCreate()
+    session = configure_spark_with_delta_pip(
+        builder, extra_packages=[ICEBERG_PACKAGE]
+    ).getOrCreate()
     yield session
     session.stop()
 
@@ -145,3 +163,11 @@ def built(lake) -> dict:
     import dbt_helpers
 
     return dbt_helpers.build_lake(lake)
+
+
+@pytest.fixture(scope="session")
+def baseline(lake) -> dict:
+    """Results of benchmarks/queries/q1..q6.sql on the raw lines of ``lake`` (naive baseline)."""
+    from benchmarks import naive_duckdb
+
+    return naive_duckdb.run_once(lake["raw"], collect=True)["results"]
