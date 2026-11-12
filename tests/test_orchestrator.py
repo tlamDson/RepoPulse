@@ -962,3 +962,12 @@ def _t(needs, optional=False):
 def test_unknown_need_blocks_instead_of_passing_silently():
     g = gate_for(_t(["clod"]), CLOUD)
     assert g is not None and g.kind == "block" and "clod" in g.reason
+
+
+def test_build_prompt_requires_foreground_agents_and_no_early_end(tasks):
+    # Regression 2026-11-11 20:18: the D1 session handed the rest of the work to a
+    # background subagent and ended its turn "waiting", with no RESULT line; the
+    # session exit killed the background agent and the run counted as failed.
+    p = build_prompt(tasks[2])
+    assert "run_in_background" in p and "foreground" in p
+    assert "không kết thúc lượt" in p

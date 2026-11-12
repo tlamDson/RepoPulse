@@ -49,6 +49,8 @@ python benchmarks/record_run.py <benchmark-row.csv> [<pipeline-row.csv> ...]   #
 python benchmarks/scale_prepare.py               # tải + lọc + rút gọn 30 ngày GH Archive cho benchmark scale (docs/benchmark-scale.md)
 python benchmarks/scale_bench.py --git-sha <sha> --out out/scale-rows.csv   # Spark vs DuckDB 1/7/30 ngày; gộp bằng record_run.py
 python benchmarks/query_opt.py --runs 10 --git-sha <sha> --out out/query-opt-rows.csv --summary out/query-opt-summary.md   # Q1-Q6 trên parquet phẳng/partition/clustering (ngày chuẩn); byte quét chỉ đo được trên Linux (docs/query-optimization.md)
+docker compose -f benchmarks/kafka/docker-compose.yml up -d --wait   # Kafka 3 broker KRaft (cần Docker; down -v để dọn)
+python benchmarks/streaming_bench.py --git-sha <sha> --partitions 1,3,6 --out out/streaming-rows.csv --summary out/streaming-summary.md   # Kafka -> Spark Structured Streaming (availableNow) -> Delta, đối chiếu đếm; cần extra spark,streaming + Java 17 (docs/streaming.md)
 python benchmarks/snowflake_port.py --engine duckdb --run-results transform/target/run_results.json --git-sha <sha> --out out/snowflake-port-rows.csv   # dòng runs.csv cho một dbt build (port Snowflake, docs/snowflake-port.md); target snowflake chỉ chạy trong workflow snowflake-port.yml
 
 python -m eventspec.generate                     # sinh lại eventspec/schemas/ từ catalog (docs/eventspec.md)
@@ -58,6 +60,7 @@ python -m repopulse.ingest --date 2026-01-05 --hour 15 --hours 2   # ingest GH A
 python -m repopulse.ingest --summary out/ingest-summary.json      # giờ (now UTC - 2h); --force để làm lại
 python -m repopulse.spark.job --source gharchive --date 2026-01-05 --hour 16 --hours 2   # bronze/silver Delta (cần PII_HASH_SALT, Java 17, extra spark); docs/spark-jobs.md
 python -m repopulse.spark.export --lake-dir data/lake --out data/silver-export   # silver Delta -> parquet cho dbt (var silver_gharchive_parquet)
+python -m repopulse.databricks_job run --source gharchive --date 2026-10-25 --hour 23 --hours 3 --landing-dir data/landing/gharchive --wheel dist/<wheel>.whl --git-sha <sha> --verify-rerun --summary out/databricks-summary.json --out out/databricks-row.csv   # cùng bronze/silver chạy serverless trên Databricks (DATABRICKS_HOST/TOKEN, PII_HASH_SALT); workflow databricks-bronze-silver.yml; docs/databricks-job.md
 python -m repopulse.pipeline {window,timed,counts,row,md-reset} --help   # helper của .github/workflows/pipeline.yml (incremental batch theo giờ); docs/pipeline.md
 python -m repopulse.dagspec {window,wait,row,check-ingest} --help   # helper của DAG Airflow dags/repopulse_pipeline.py và .github/workflows/airflow.yml (backfill N ngày, variant airflow-backfill-<N>d; Airflow chỉ chạy trên runner Linux); docs/airflow.md
 python -m dbt.cli.main build --project-dir transform --profiles-dir transform --target ci --full-refresh   # dựng lại fct_events (staging giữ lịch sử); khi nào cần: docs/dbt-models.md
