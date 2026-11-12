@@ -1,9 +1,11 @@
 """Shared pytest fixtures.
 
-``spark``: one local Delta-enabled SparkSession per test run (``local[1]``, UTC, 1 shuffle
-partition). On CI (``CI`` is set) a missing pyspark/delta/Java is an error, never a skip. Locally
-the Spark tests skip with a reason when pyspark, delta-spark, Java 17 or (Windows) winutils is
-missing.
+``spark``: one local SparkSession per test run (``local[1]``, UTC, 1 shuffle partition) with Delta
+Lake (``spark_catalog`` = ``DeltaCatalog``) and the Apache Iceberg runtime + SQL extensions loaded
+next to it (Iceberg catalogs are registered at run time by ``benchmarks/format_bench.py``, one per
+work directory). On CI (``CI`` is set) a missing pyspark/delta/Java is an error, never a skip.
+Locally the Spark tests skip with a reason when pyspark, delta-spark, Java 17 or (Windows) winutils
+is missing.
 
 ``lake`` / ``built``: one silver parquet + one ``dbt build`` of ``transform/`` per test run, shared
 by test_dbt_marts.py, test_governance.py and test_dbt_semantic_layer.py (helpers in
@@ -26,10 +28,18 @@ from pathlib import Path
 
 import pytest
 
+# Same pin as benchmarks/format_bench.py::ICEBERG_PACKAGE (Spark 3.5, Scala 2.12).
+ICEBERG_PACKAGE = "org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.9.2"
+SQL_EXTENSIONS = (
+    "io.delta.sql.DeltaSparkSessionExtension,"
+    "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions"
+)
+
 
 def pytest_configure(config):
     config.addinivalue_line(
-        "markers", "spark: needs a local SparkSession with Delta (Java 17); always runs on CI"
+        "markers",
+        "spark: needs a local SparkSession with Delta + Iceberg (Java 17); always runs on CI",
     )
 
 
@@ -89,7 +99,7 @@ def spark(tmp_path_factory):
     builder = (
         SparkSession.builder.master("local[1]")
         .appName("repopulse-tests")
-        .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
+        .config("spark.sql.extensions", SQL_EXTENSIONS)
         .config(
             "spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog"
         )
@@ -105,7 +115,9 @@ def spark(tmp_path_factory):
         # Managed tables by name (test_spark_catalog_tables.py) live in tmp, not ./spark-warehouse.
         .config("spark.sql.warehouse.dir", str(tmp_path_factory.mktemp("spark-warehouse")))
     )
-    session = configure_spark_with_delta_pip(builder).getOrCreate()
+    session = configure_spark_with_delta_pip(
+        builder, extra_packages=[ICEBERG_PACKAGE]
+    ).getOrCreate()
     yield session
     session.stop()
 
