@@ -18,20 +18,19 @@ jobs:
   debug:
     name: Debug E2 (${{ matrix.label }})
     runs-on: ubuntu-latest
-    timeout-minutes: 14
+    timeout-minutes: 16
     strategy:
       fail-fast: false
       matrix:
         include:
-          - label: tail-only
+          - label: spark-files-in-suite-order
             tests: >-
+              tests/test_format_bench_spark.py tests/test_quality_faults_spark.py
+              tests/test_spark_app_events.py
               tests/test_spark_cli.py tests/test_spark_export.py tests/test_spark_gharchive.py
               tests/test_spark_naive.py tests/test_spark_pii.py tests/test_spark_rules.py
-          - label: format-then-tail
-            tests: >-
-              tests/test_format_bench_spark.py
-              tests/test_spark_cli.py tests/test_spark_export.py tests/test_spark_gharchive.py
-              tests/test_spark_naive.py tests/test_spark_pii.py tests/test_spark_rules.py
+          - label: full-suite
+            tests: ""
     env:
       TESTS: ${{ matrix.tests }}
     steps:
@@ -49,10 +48,12 @@ jobs:
       - name: pytest (verbose, thread dumps when a test hangs)
         run: |
           (
-            for wait in 330 150 150; do
+            for wait in 420 120 120; do
               sleep "$wait"
-              echo "===== jstack after another ${wait}s ====="
+              echo "===== dumps after another ${wait}s ====="
+              ps -eo pid,ppid,etimes,rss,args | grep -E "java|python|pytest" | grep -v grep | cut -c1-300 || true
               for pid in $(pgrep -f org.apache.spark.deploy.SparkSubmit); do
+                jstat -gcutil "$pid" || true
                 jstack "$pid" || true
               done
             done
