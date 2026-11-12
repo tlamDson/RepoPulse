@@ -128,7 +128,7 @@ jobs:
           python -m repopulse.export_site --db ci.duckdb --schema main_public \
             --runs runs.csv --git-sha "$GITHUB_SHA" --out _site
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: pages-preview-${{ github.event.pull_request.number }}
           path: _site

@@ -1,71 +1,71 @@
-# eventspec — catalog event của app mô phỏng (simulated)
+# eventspec — event catalog of the simulated app
 
-`eventspec/` mô tả event của một app lập kế hoạch du lịch **mô phỏng** (simulated). Không có
-người dùng thật; dữ liệu do `simkit` (PR 3, xem `docs/simkit.md`) sinh theo catalog này, kèm các
-lỗi chèn biết trước. Đây **không** phải dữ liệu GH Archive.
+`eventspec/` describes the events of a **simulated** travel-planning app. There are no
+real users; the data is produced by `simkit` (PR 3, see `docs/simkit.md`) following this catalog, with
+known injected faults. It is **not** GH Archive data.
 
-## Định dạng catalog
+## Catalog format
 
 `eventspec/catalog/`:
 
-- `_envelope.yaml` — các trường chung của mọi event: `event_id` (tuỳ chọn), `event_name`,
-  `event_version`, `occurred_at` (date-time có offset), `received_at` (tuỳ chọn), `user_id`,
-  `session_id`, `simulated` (bắt buộc, chỉ nhận `true`). Phải khai `event_id`, `event_name`,
-  `event_version`.
-- `<event>.yaml` — một event mỗi file, tên file trùng `name`. Khoá: `name` (snake_case),
-  `description`, `dedup_fields`, `versions`. Mỗi version: `version` (số nguyên >= 1) và `fields`.
+- `_envelope.yaml` — fields common to every event: `event_id` (optional), `event_name`,
+  `event_version`, `occurred_at` (date-time with offset), `received_at` (optional), `user_id`,
+  `session_id`, `simulated` (required, accepts only `true`). `event_id`, `event_name` and
+  `event_version` must be declared.
+- `<event>.yaml` — one event per file, the file name equals `name`. Keys: `name` (snake_case),
+  `description`, `dedup_fields`, `versions`. Each version: `version` (integer >= 1) and `fields`.
 
-Mỗi trường: `type` (`string` | `integer` | `number` | `boolean`), `required` và `pii` (bắt buộc
-ghi rõ `true`/`false`), tuỳ chọn `enum`, `format` (`date-time` | `date` | `email`, chỉ cho
-`string`), `description`. Khoá lạ bị từ chối. Trường của event không được trùng tên trường
-envelope. `null` không hợp lệ ở bất kỳ trường nào; trường tuỳ chọn thì bỏ hẳn khỏi event.
+Each field: `type` (`string` | `integer` | `number` | `boolean`), `required` and `pii` (must be
+stated explicitly as `true`/`false`), optional `enum`, `format` (`date-time` | `date` | `email`, only for
+`string`), `description`. Unknown keys are rejected. An event's field may not share a name with an envelope
+field. `null` is not valid in any field; an optional field is omitted from the event entirely.
 
-`load_catalog()` kiểm toàn bộ khi đọc và ném `CatalogError` nêu file và trường sai.
+`load_catalog()` checks everything on load and raises `CatalogError` naming the wrong file and field.
 
-## Quy tắc version
+## Version rules
 
-- Đổi schema (thêm, bỏ, đổi trường) thì **thêm version mới**, không sửa version đã có. Version
-  liệt kê tăng dần, không trùng; hai version có trường giống hệt nhau bị từ chối.
-- Validator nhận **mọi version đã khai**; `event_version` chưa khai bị từ chối.
-- Ví dụ: `user_signed_up` v2 thay `country` (chữ tự do) bằng `country_code` và thêm
-  `marketing_opt_in` bắt buộc.
-- Schema sinh ra được commit ở `eventspec/schemas/<event>.v<n>.schema.json`; test
-  `test_committed_schemas_match_catalog` đỏ khi catalog lệch file đã commit. Sửa catalog xong chạy
-  `python -m eventspec.generate`. Diff làm đổi file của version cũ là dấu hiệu quên tăng version.
+- Changing the schema (adding, removing, changing a field) means **adding a new version**, never editing an existing one. Versions
+  are listed in ascending order without duplicates; two versions with identical fields are rejected.
+- The validator accepts **every declared version**; an undeclared `event_version` is rejected.
+- Example: `user_signed_up` v2 replaces `country` (free text) with `country_code` and adds a required
+  `marketing_opt_in`.
+- The generated schema is committed at `eventspec/schemas/<event>.v<n>.schema.json`; the test
+  `test_committed_schemas_match_catalog` goes red when the catalog drifts from the committed files. After editing the catalog run
+  `python -m eventspec.generate`. A diff that changes the file of an old version is a sign you forgot to bump the version.
 
-## JSON Schema và `validate`
+## JSON Schema and `validate`
 
-- Draft 2020-12, `additionalProperties: false` (trường lạ bị từ chối, để bắt đổi schema ngầm),
-  `event_name`/`event_version` là `const`, trường PII có annotation `x-pii: true`.
-- `validate(event) -> list[str]`: rỗng là hợp lệ; không bao giờ ném exception. Thông báo có dạng
+- Draft 2020-12, `additionalProperties: false` (unknown fields are rejected, to catch silent schema changes),
+  `event_name`/`event_version` are `const`, PII fields carry the annotation `x-pii: true`.
+- `validate(event) -> list[str]`: empty means valid; it never raises. Messages look like
   `missing required field 'email'`, `field 'traveler_count' must be of type integer, got string`,
   `field 'occurred_at' is not a valid date-time`, `unexpected field 'utm_source'`,
   `unknown event_name 'x'`, `event_version 3 is not declared for event 'user_signed_up' (declared: 1, 2)`.
-- Kiểm `format` bằng checker riêng (date-time bắt buộc có offset), không phụ thuộc gói
-  `rfc3339-validator`.
+- `format` is checked by a dedicated checker (date-time must have an offset), independent of the
+  `rfc3339-validator` package.
 
-## Khoá chống trùng
+## Dedup key
 
 `dedup_key(event)`:
 
-1. `event_id` là chuỗi khác rỗng → `event_id:<event_id>`.
-2. Ngược lại → `sha256:<hex>` của JSON
-   `{"event_name": ..., "fields": {<dedup_fields>: giá trị}}` với `sort_keys=True`,
-   `separators=(",", ":")`, `ensure_ascii=False`, mã hoá UTF-8. Thứ tự key của dict không ảnh
-   hưởng. `event_version` không nằm trong khoá: cùng hành động gửi lại ở version mới vẫn là trùng.
-   Thiếu trường định danh thì ném `EventSpecError`.
+1. `event_id` is a non-empty string → `event_id:<event_id>`.
+2. Otherwise → `sha256:<hex>` of the JSON
+   `{"event_name": ..., "fields": {<dedup_fields>: value}}` with `sort_keys=True`,
+   `separators=(",", ":")`, `ensure_ascii=False`, UTF-8 encoded. Dict key order has no
+   effect. `event_version` is not part of the key: resending the same action at a new version is still a duplicate.
+   A missing identifying field raises `EventSpecError`.
 
-`dedup_fields` phải là trường bắt buộc ở mọi version. `find_duplicates(events)` giữ event đầu,
-trả `Duplicate(index, first_index, key)` cho các bản sau.
+`dedup_fields` must be required fields in every version. `find_duplicates(events)` keeps the first event and
+returns `Duplicate(index, first_index, key)` for the later copies.
 
 ## PII
 
-Trường có `pii: true` (hiện là `user_signed_up.email`, `trip_shared.recipient_email`) phải được
-băm trước silver (PR 5). Lấy danh sách bằng `pii_fields(event_name, version)`.
+Fields with `pii: true` (currently `user_signed_up.email`, `trip_shared.recipient_email`) must be
+hashed before silver (PR 5). Get the list with `pii_fields(event_name, version)`.
 
-## Lệnh
+## Commands
 
 ```bash
-python -m eventspec.generate               # ghi lại eventspec/schemas/
-python -m eventspec.generate --out <dir>   # ghi ra thư mục khác
+python -m eventspec.generate               # rewrite eventspec/schemas/
+python -m eventspec.generate --out <dir>   # write to another directory
 ```

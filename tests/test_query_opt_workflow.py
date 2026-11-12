@@ -126,7 +126,7 @@ def test_steps_run_in_order_fetch_baseline_query_opt_summary_upload():
     baseline = _index(all_steps, _runs("benchmarks/naive_duckdb.py"))
     qopt = _index(all_steps, _runs("benchmarks/query_opt.py"))
     summary = _index(all_steps, _runs("GITHUB_STEP_SUMMARY"))
-    upload = _index(all_steps, _uses("actions/upload-artifact@v4"))
+    upload = _index(all_steps, _uses("actions/upload-artifact@v7"))
     assert cache < fetch < baseline < qopt < summary < upload
 
 
@@ -157,7 +157,7 @@ def test_job_summary_runs_always():
 
 def test_uploads_baseline_rows_and_summary_even_on_failure():
     all_steps = steps(load())
-    upload = all_steps[_index(all_steps, _uses("actions/upload-artifact@v4"))]
+    upload = all_steps[_index(all_steps, _uses("actions/upload-artifact@v7"))]
     assert upload.get("if") == "always()"
     with_ = upload["with"]
     assert with_["name"] == "query-opt"

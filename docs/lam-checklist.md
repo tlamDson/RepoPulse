@@ -1,19 +1,19 @@
-# RepoPulse · Việc cần chủ repo làm
+# RepoPulse · Tasks for the repo owner
 
-Agent không làm thay được các việc dưới đây. Không dán token hay mật khẩu vào chat hoặc vào file trong repo.
+Agents cannot do the tasks below on your behalf. Do not paste tokens or passwords into chat or into files in the repo.
 
-## Trước khi chạy giai đoạn 1 (khoảng 30 phút)
+## Before running phase 1 (about 30 minutes)
 
-| # | Việc | Ghi chú | Xong |
+| # | Task | Notes | Done |
 |---|---|---|---|
-| 1 | Duyệt PR harness `chore/claude-harness` | Đọc danh sách allow, ask, deny trong `.claude/settings.json` trước khi merge | ☐ |
-| 2 | Đăng ký Databricks Free Edition | Không cần thẻ. Tạo một personal access token trong User Settings → Developer | ☐ |
-| 3 | Đăng ký MotherDuck Lite | Dự phòng cho trường hợp Databricks không điều khiển được từ ngoài. Không cần thẻ | ☐ |
-| 4 | Đăng ký Tableau Public, cài Tableau Desktop Public Edition | Dùng ở PR dashboard | ☐ |
-| 5 | Thêm secret vào repo | Lệnh ở dưới | ☐ |
-| 6 | Xem `docs/harness-check.md` rồi cho chạy tiếp | Cổng giữa S0 và giai đoạn 1 | ☐ |
+| 1 | Review the harness PR `chore/claude-harness` | Read the allow, ask and deny lists in `.claude/settings.json` before merging | ☐ |
+| 2 | Sign up for Databricks Free Edition | No card needed. Create a personal access token in User Settings → Developer | ☐ |
+| 3 | Sign up for MotherDuck Lite | Fallback in case Databricks cannot be controlled from outside. No card needed | ☐ |
+| 4 | Sign up for Tableau Public and install Tableau Desktop Public Edition | Used in the dashboard PR | ☐ |
+| 5 | Add secrets to the repo | Commands below | ☐ |
+| 6 | Read `docs/harness-check.md`, then let the run continue | Gate between S0 and phase 1 | ☐ |
 
-Thêm secret (chạy trong thư mục repo; mỗi lệnh sẽ hỏi giá trị, không hiện lên màn hình):
+Add secrets (run in the repo directory; each command prompts for the value, which is not echoed to the screen):
 
 ```
 gh secret set DATABRICKS_HOST
@@ -21,14 +21,14 @@ gh secret set DATABRICKS_TOKEN
 gh secret set MOTHERDUCK_TOKEN
 ```
 
-## Trong lúc chạy
+## While the run is in progress
 
-| Việc | Khi nào |
+| Task | When |
 |---|---|
-| Đăng ký Snowflake trial rồi thêm secret `SNOWFLAKE_*` | Khi agent báo tới PR 13. Đồng hồ 30 ngày tính ngay lúc đăng ký |
-| Publish dashboard lên Tableau Public | Sau PR 11, khoảng 30–60 phút, làm một lần |
-| Thêm secret chỉ đọc tới nguồn event thật | Tuỳ chọn, nếu muốn có event thật của một app |
+| Sign up for the Snowflake trial, then add the `SNOWFLAKE_*` secrets | When the agent reports it has reached PR 13. The 30-day clock starts at sign-up |
+| Publish the dashboard to Tableau Public | After PR 11, about 30–60 minutes, done once |
+| Add a read-only secret for a real event source | Optional, if you want real events from an app |
 
-## Giai đoạn 2 (trên máy)
+## Phase 2 (on your machine)
 
-Bật Docker Desktop khi tới từng đợt. Mỗi đợt ước 5–8 GB RAM; đợt đầu đo RAM thật trước.
+Start Docker Desktop when each batch begins. Each batch needs an estimated 5–8 GB of RAM; measure the real RAM in the first batch.

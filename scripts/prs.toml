@@ -6,13 +6,13 @@
 
 [[task]]
 id = "S0.4"
-title = "PR mẫu kiểm harness: module ghi runs.csv"
+title = "Sample PR to check the harness: the runs.csv writer module"
 branch = "feature/runs-log"
 agent = "pipeline-ops"
 
 [[task]]
 id = "B"
-title = "Baseline ngây thơ DuckDB, bộ query Q1-Q6, benchmark.yml"
+title = "Naive DuckDB baseline, the Q1-Q6 query set, benchmark.yml"
 branch = "feature/baseline-naive"
 deps = ["S0.4"]
 needs = ["harness"]
@@ -21,21 +21,21 @@ release_after = true
 
 [[task]]
 id = "2"
-title = "eventspec: catalog event YAML -> JSON Schema"
+title = "eventspec: YAML event catalog -> JSON Schema"
 branch = "feature/event-spec"
 deps = ["B"]
 agent = "event-schema-engineer"
 
 [[task]]
 id = "4"
-title = "Ingest GH Archive theo giờ, idempotent"
+title = "Hourly GH Archive ingest, idempotent"
 branch = "feature/ingest-gharchive"
 deps = ["B"]
 agent = "pipeline-ops"
 
 [[task]]
 id = "3"
-title = "simkit: sinh dữ liệu mô phỏng có seed, chèn 6 loại lỗi"
+title = "simkit: seeded simulated data generator, injects 6 kinds of faults"
 branch = "feature/simkit-generator"
 deps = ["2"]
 agent = "event-schema-engineer"
@@ -49,29 +49,29 @@ agent = "spark-engineer"
 
 [[task]]
 id = "6"
-title = "dbt star schema và các mart Q1-Q6"
+title = "dbt star schema and the Q1-Q6 marts"
 branch = "feature/dbt-star-schema"
 deps = ["5"]
 agent = "analytics-engineer"
 
 [[task]]
 id = "12"
-title = "Benchmark Spark và DuckDB ở 1, 7, 30 ngày"
+title = "Spark vs DuckDB benchmark at 1, 7, 30 days"
 branch = "feature/spark-vs-duckdb-benchmark"
 deps = ["5"]
 agent = "spark-engineer"
 
 [[task]]
 id = "probe"
-title = "Bước thử số 1: Databricks Free Edition / MotherDuck, chọn đường chính hay dự phòng"
+title = "Probe number 1: Databricks Free Edition / MotherDuck, choose the primary or fallback path"
 branch = "docs/probe-result"
 deps = ["S0.4"]
-needs = ["cloud", "harness"]  # chạy workflow có secret thật: chỉ sau khi harness đã kiểm
+needs = ["cloud", "harness"]  # runs a workflow with real secrets: only after the harness has been checked
 agent = "pipeline-ops"
 
 [[task]]
 id = "7"
-title = "Model incremental và workflow chạy theo lịch"
+title = "Incremental models and the scheduled workflow"
 branch = "feature/incremental-and-schedule"
 deps = ["6", "probe"]
 needs = ["cloud"]
@@ -80,14 +80,14 @@ release_after = true
 
 [[task]]
 id = "8"
-title = "Cảnh báo chất lượng dữ liệu"
+title = "Data quality alerts"
 branch = "feature/data-quality-alerts"
 deps = ["3", "7"]
 agent = "data-quality-governance"
 
 [[task]]
 id = "9"
-title = "Governance: phân quyền, nhãn và che cột PII"
+title = "Governance: role-based access, PII labels and column masking"
 branch = "feature/governance"
 deps = ["6", "probe"]
 needs = ["cloud"]
@@ -95,14 +95,14 @@ agent = "data-quality-governance"
 
 [[task]]
 id = "10"
-title = "Tối ưu query: partition, clustering, đo trước và sau"
+title = "Query optimization: partitioning, clustering, measured before and after"
 branch = "feature/query-optimization"
 deps = ["7"]
 agent = "analytics-engineer"
 
 [[task]]
 id = "11"
-title = "Dashboard tĩnh trên GitHub Pages"
+title = "Static dashboard on GitHub Pages"
 branch = "feature/dashboard-site"
 deps = ["7"]
 agent = "dashboard-builder"
@@ -110,7 +110,7 @@ release_after = true
 
 [[task]]
 id = "13"
-title = "Port project dbt sang Snowflake trial"
+title = "Port the dbt project to a Snowflake trial"
 branch = "feature/snowflake-port"
 deps = ["6"]
 needs = ["snowflake"]
@@ -119,25 +119,25 @@ agent = "analytics-engineer"
 
 [[task]]
 id = "14"
-title = "README kết quả từ runs.csv"
+title = "Results README from runs.csv"
 branch = "docs/results"
 deps = ["8", "9", "10", "11", "12", "13"]
 agent = "release-manager"
 release_after = true
 
-# ---------- Plan v2 (2026-11-11): docs/plan.md mục "Plan v2" ----------
+# ---------- Plan v2 (2026-11-11): docs/plan.md section "Plan v2" ----------
 
 [[task]]
 id = "D1"
 title = "Databricks serverless bronze/silver"
 branch = "feature/databricks-bronze-silver"
-deps = ["14"]  # plan v2 xây trên kết quả giai đoạn 1
+deps = ["14"]  # plan v2 builds on the phase 1 results
 needs = ["cloud"]
 agent = "spark-engineer"
 
 [[task]]
 id = "D2"
-title = "Target dbt databricks trên SQL warehouse"
+title = "dbt databricks target on a SQL warehouse"
 branch = "feature/dbt-databricks-target"
 deps = ["D1"]
 needs = ["cloud"]
@@ -145,7 +145,7 @@ agent = "analytics-engineer"
 
 [[task]]
 id = "D3"
-title = "So sánh hai đường end-to-end (runner+MotherDuck vs Databricks)"
+title = "Compare the two end-to-end paths (runner+MotherDuck vs Databricks)"
 branch = "feature/pipeline-path-comparison"
 deps = ["D2"]
 needs = ["cloud"]
@@ -153,7 +153,7 @@ agent = "pipeline-ops"
 
 [[task]]
 id = "D4"
-title = "Áp luật chọn đường chính đã chốt trong plan"
+title = "Apply the primary-path selection rule fixed in the plan"
 branch = "feature/primary-path-switch"
 deps = ["D3"]
 agent = "pipeline-ops"
@@ -161,7 +161,7 @@ release_after = true
 
 [[task]]
 id = "E1"
-title = "Ma trận engine Q1-Q6 (DuckDB, Spark, Databricks, MotherDuck, Snowflake)"
+title = "Q1-Q6 engine matrix (DuckDB, Spark, Databricks, MotherDuck, Snowflake)"
 branch = "feature/engine-matrix"
 deps = ["D2"]
 needs = ["cloud"]
@@ -171,54 +171,54 @@ agent = "analytics-engineer"
 id = "E2"
 title = "Delta Lake vs Apache Iceberg"
 branch = "feature/iceberg-vs-delta"
-deps = ["14"]  # plan v2 xây trên kết quả giai đoạn 1
+deps = ["14"]  # plan v2 builds on the phase 1 results
 agent = "spark-engineer"
 
 [[task]]
 id = "P2a"
-title = "Streaming Apache Kafka (KRaft, 3 broker) + Spark Structured Streaming trên runner"
+title = "Streaming with Apache Kafka (KRaft, 3 brokers) + Spark Structured Streaming on the runner"
 branch = "feature/streaming-kafka"
-deps = ["14"]  # plan v2 xây trên kết quả giai đoạn 1
+deps = ["14"]  # plan v2 builds on the phase 1 results
 agent = "spark-engineer"
 
 [[task]]
 id = "P2b"
-title = "Thử chịu lỗi streaming: kill broker/consumer, đo mất/trùng/phục hồi"
+title = "Streaming fault tolerance test: kill broker/consumer, measure loss/duplicates/recovery"
 branch = "feature/streaming-fault-tolerance"
 deps = ["P2a"]
 agent = "pipeline-ops"
 
 [[task]]
 id = "P2c"
-title = "Trino + Hive Metastore + MinIO, tối ưu query trên Trino"
+title = "Trino + Hive Metastore + MinIO, query optimization on Trino"
 branch = "feature/trino-hive"
-deps = ["14"]  # plan v2 xây trên kết quả giai đoạn 1
+deps = ["14"]  # plan v2 builds on the phase 1 results
 agent = "analytics-engineer"
 
 [[task]]
 id = "P2d"
 title = "Airflow DAG: backfill, retry, SLA"
 branch = "feature/airflow-dags"
-deps = ["14"]  # plan v2 xây trên kết quả giai đoạn 1
+deps = ["14"]  # plan v2 builds on the phase 1 results
 agent = "pipeline-ops"
 
 [[task]]
 id = "AI1"
-title = "dbt semantic layer (MetricFlow) cho Q1-Q6"
+title = "dbt semantic layer (MetricFlow) for Q1-Q6"
 branch = "feature/dbt-semantic-layer"
-deps = ["14"]  # plan v2 xây trên kết quả giai đoạn 1
+deps = ["14"]  # plan v2 builds on the phase 1 results
 agent = "analytics-engineer"
 
 [[task]]
 id = "AI2"
-title = "SQL agent OpenAI-compatible (model local), chỉ đọc, có bộ đánh giá"
+title = "OpenAI-compatible SQL agent (local model), read-only, with an evaluation set"
 branch = "feature/sql-agent"
 deps = ["AI1"]
 agent = "analytics-engineer"
 
 [[task]]
 id = "R2"
-title = "README kết quả v2 từ runs.csv"
+title = "Results README v2 from runs.csv"
 branch = "docs/results-v2"
 deps = ["D4", "E1", "E2", "P2b", "P2c", "P2d", "AI2"]
 agent = "release-manager"

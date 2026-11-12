@@ -222,7 +222,7 @@ jobs:
               || echo "::warning::could not pack every Airflow log"
           fi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: airflow-backfill-${{ github.run_id }}

@@ -1,13 +1,15 @@
 ---
-description: Dọn worktree của các PR đã merge (xem trước rồi mới xoá)
+description: Clean up worktrees of merged PRs (preview first, then delete)
 ---
 
-Dọn worktree dưới `.claude/worktrees/` bằng script, không tự `rm -rf`:
+Clean up the worktrees under `.claude/worktrees/` with the script, never with a manual `rm -rf`:
 
-1. Chạy `python scripts/orchestrate.py clean --dry-run` và cho tôi xem bảng: worktree nào sẽ bị
-   xoá (PR đã merge, cây sạch, không còn phiên chạy), worktree nào giữ lại và vì sao.
-2. Nếu có ít nhất một dòng `remove`, chạy `python scripts/orchestrate.py clean`.
-3. Báo lại kết quả và các worktree còn giữ (kèm lý do: PR còn mở, còn thay đổi chưa commit...).
+1. Run `python scripts/orchestrate.py clean --dry-run` and show me the table: which worktrees
+   will be removed (PR merged, clean tree, no session running), and which are kept and why.
+2. If there is at least one `remove` row, run `python scripts/orchestrate.py clean`.
+3. Report the result and the worktrees that were kept (with the reason: PR still open,
+   uncommitted changes...).
 
-Không xoá worktree đang có phiên `claude` chạy trong đó. Nếu Windows báo "Permission denied" khi
-xoá thì có tiến trình còn mở thư mục đó — báo tôi, không thử xoá bằng cách khác.
+Do not remove a worktree that has a `claude` session running in it. If Windows reports
+"Permission denied" while deleting, some process still has that folder open; tell me, and do not
+try to delete it another way.

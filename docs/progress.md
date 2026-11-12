@@ -1,45 +1,45 @@
-# RepoPulse · Tiến độ
+# RepoPulse · Progress
 
-Plan: [`plan.md`](plan.md). Phiên điều phối cập nhật file này sau mỗi PR, để phiên mới đọc là làm tiếp được.
+Plan: [`plan.md`](plan.md). The orchestrating session updates this file after every PR, so a new session can read it and continue.
 
 ## Subplan S0
 
-| Bước | Việc | Trạng thái | PR | Ghi chú |
+| Step | Task | Status | PR | Notes |
 |---|---|---|---|---|
-| S0.1 | Tạo repo, cấu hình merge, file gốc, tài liệu | xong | — | 2026-11-10: repo public `tlamDson/RepoPulse`, chỉ squash merge, tự xoá nhánh sau merge |
-| S0.2 | GitHub DevOps: CI, mẫu PR, Dependabot, pre-commit, bảo vệ nhánh `main`, bảo mật, Pages | đang làm | | |
-| S0.3 | Harness `.claude` lấy từ TravelPlan | đang làm | | Chờ chủ repo duyệt |
-| S0.4 | Kiểm harness bằng PR mẫu `feature/runs-log` | chưa làm | | Làm trong phiên mở tại repo này; kết quả ghi `harness-check.md` |
+| S0.1 | Create the repo, configure merging, root files, documentation | done | — | 2026-11-10: public repo `tlamDson/RepoPulse`, squash merge only, branches auto-deleted after merge |
+| S0.2 | GitHub DevOps: CI, PR template, Dependabot, pre-commit, `main` branch protection, security, Pages | in progress | | |
+| S0.3 | `.claude` harness taken from TravelPlan | in progress | | Waiting for the repo owner to review |
+| S0.4 | Check the harness with the sample PR `feature/runs-log` | not started | | Done in a session opened in this repo; result recorded in `harness-check.md` |
 
-## Giai đoạn 1
+## Phase 1
 
-| # | PR | Trạng thái | Số PR | Ghi chú |
+| # | PR | Status | PR number | Notes |
 |---|---|---|---|---|
-| 1 | Bước thử Databricks Free Edition (không PR) | chờ secret | — | |
-| 2 | `feature/event-spec` | chưa làm | | |
-| 3 | `feature/simkit-generator` | chưa làm | | |
-| 4 | `feature/ingest-gharchive` | chưa làm | | |
-| 5 | `feature/bronze-silver-spark` | chưa làm | | |
-| 6 | `feature/dbt-star-schema` | chưa làm | | |
-| 7 | `feature/incremental-and-schedule` | chưa làm | | |
-| 8 | `feature/data-quality-alerts` | chưa làm | | |
-| 9 | `feature/governance` | chưa làm | | |
-| 10 | `feature/query-optimization` | chưa làm | | |
-| 11 | `feature/dashboard-site` | chưa làm | | |
-| 12 | `feature/spark-vs-duckdb-benchmark` | chưa làm | | |
-| 13 | `feature/snowflake-port` | chờ đăng ký trial | | |
-| 14 | `docs/results` | chưa làm | | |
+| 1 | Databricks Free Edition probe (no PR) | waiting for secrets | — | |
+| 2 | `feature/event-spec` | not started | | |
+| 3 | `feature/simkit-generator` | not started | | |
+| 4 | `feature/ingest-gharchive` | not started | | |
+| 5 | `feature/bronze-silver-spark` | not started | | |
+| 6 | `feature/dbt-star-schema` | not started | | |
+| 7 | `feature/incremental-and-schedule` | not started | | |
+| 8 | `feature/data-quality-alerts` | not started | | |
+| 9 | `feature/governance` | not started | | |
+| 10 | `feature/query-optimization` | not started | | |
+| 11 | `feature/dashboard-site` | not started | | |
+| 12 | `feature/spark-vs-duckdb-benchmark` | not started | | |
+| 13 | `feature/snowflake-port` | waiting for trial sign-up | | |
+| 14 | `docs/results` | not started | | |
 
-## Việc chờ chủ repo
+## Tasks waiting for the repo owner
 
-Xem [`lam-checklist.md`](lam-checklist.md).
+See [`lam-checklist.md`](lam-checklist.md).
 
-## Giả định của người thực thi
+## Executor assumptions
 
-(mỗi quyết định nhỏ một dòng)
+(one line per small decision)
 
-- S0.1: phiên bản thư viện Python mới khai theo khoảng (`>=`), chưa có file khoá. Việc khoá phiên bản làm trong S0.4, khi có môi trường cài được `pip-tools` hoặc `uv`.
+- S0.1: new Python library versions are declared as ranges (`>=`), with no lock file yet. Pinning versions is done in S0.4, once an environment that can install `pip-tools` or `uv` is available.
 
-## Số đo đã có
+## Measurements so far
 
-(chỉ ghi số lấy từ `runs.csv`)
+(only record numbers taken from `runs.csv`)
