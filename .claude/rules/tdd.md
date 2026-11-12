@@ -22,7 +22,7 @@ that must be pasted as evidence).
 **New first-party package** (`eventspec`, `simkit`, `benchmarks`...): when the tests-only commit imports
 a package that does not exist yet, ruff (isort) classifies it as third-party and reports `I001`. Add the
 package name to `[tool.ruff.lint.isort] known-first-party` in `pyproject.toml` **in the test commit
-itself** and record it in the `## Giả định` (Assumptions) section — this is lint configuration and does not violate "the first commit contains only tests".
+itself** and record it in the `## Assumptions` section — this is lint configuration and does not violate "the first commit contains only tests".
 
 ## Where tests live
 

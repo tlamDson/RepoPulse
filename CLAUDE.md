@@ -14,7 +14,7 @@ The detailed rules below always apply, not only when asked:
 ## Mandatory rules (must not be violated)
 
 - **Git flow:** feature → `develop` (squash), release `develop` → `main` (merge commit). No direct push to `develop`/`main`, no force push, no `--admin`. `main` is the default branch (cron only runs there).
-- **One PR, one task.** Each feature/fix/docs PR does exactly one thing: one task in `scripts/prs.toml` (always counted as one task, exactly as described), or one improvement/bug fix outside `prs.toml`. Other things found along the way are not merged in: a manual session opens a separate PR, a headless session records them under Technical debt or `## Giả định` (Assumptions). Release PRs and Dependabot PRs are exempt. Details: `.claude/rules/developer-guide.md`.
+- **One PR, one task.** Each feature/fix/docs PR does exactly one thing: one task in `scripts/prs.toml` (always counted as one task, exactly as described), or one improvement/bug fix outside `prs.toml`. Other things found along the way are not merged in: a manual session opens a separate PR, a headless session records them under Technical debt or `## Assumptions`. Release PRs and Dependabot PRs are exempt. Details: `.claude/rules/developer-guide.md`.
 - **Merge a feature into `develop` when CI is green on all 3 jobs** (`Lint`, `Unit Tests`, `dbt build (DuckDB)`) **and `code-reviewer` is PASS**. When both hold, merge immediately without asking again.
 - **Release `develop` → `main`** at the `release_after` milestones in `scripts/prs.toml`, once the release PR's CI is green.
 - **A PR that changes `.claude/settings.json`, `.claude/auto-mode.json` or a hook is reviewed by the repo owner**, never self-merged.

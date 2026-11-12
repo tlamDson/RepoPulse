@@ -15,6 +15,7 @@ from repopulse.daily_report import (
     denials_between,
     metrics_row,
     needs_lam,
+    needs_lam_section,
     propose_rules,
     read_metrics,
     rows_for_day,
@@ -154,6 +155,18 @@ def test_needs_lam_reads_unticked_items_of_its_section():
     assert needs_lam(md) == ["develop-ci: CI red", "9: needs secret"]
     assert needs_lam("## Needs Lam\n- None\n") == []
     assert needs_lam("") == []
+
+
+def test_needs_lam_reads_back_what_the_run_report_writes():
+    # The writer (scripts/orchestrate.py write_report) and the reader share one heading.
+    md = "\n".join(needs_lam_section(["- [ ] develop-ci: CI red", "- [ ] 9: needs secret"]))
+    assert needs_lam(md + "\n## Results per task\n") == ["develop-ci: CI red", "9: needs secret"]
+    assert needs_lam("\n".join(needs_lam_section([]))) == []
+
+
+def test_needs_lam_still_reads_run_reports_written_before_the_english_heading():
+    md = "# Orchestrator run\n\n## Việc cần Lam\n- [ ] probe: needs secret\n\n## Kết quả\n"
+    assert needs_lam(md) == ["probe: needs secret"]
 
 
 # ---------- daily report ----------

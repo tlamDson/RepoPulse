@@ -37,12 +37,12 @@
 - Do not change anything in `.claude/` (outside `.claude/worktrees/`), and do not edit
   `.github/workflows/ci.yml` unless the PR was assigned exactly that task.
 - Do not read `.env`, do not run `gh secret`, do not print tokens.
-- No `AskUserQuestion`, no `EnterPlanMode`. Record small decisions in the PR's `## Giả định` (Assumptions) section.
+- No `AskUserQuestion`, no `EnterPlanMode`. Record small decisions in the PR's `## Assumptions` section.
 
 ## If a command is refused
 
 1. Read the reason. Rewrite the command following the rules above (usually: split the command, drop
    `cd`, replace a heredoc with Write).
 2. Retry **once**.
-3. Still refused: record the command and the reason in the PR (the `## Giả định` section), skip the step
+3. Still refused: record the command and the reason in the PR (the `## Assumptions` section), skip the step
    if it is not mandatory; if it is mandatory, finish with `RESULT: blocked <blocked command>`.
