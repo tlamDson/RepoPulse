@@ -161,6 +161,7 @@ Most pages are in Vietnamese; the two benchmark pages are in English.
 | [`docs/query-optimization.md`](docs/query-optimization.md) | Partitioned and clustered layouts against the baseline |
 | [`docs/benchmark-scale.md`](docs/benchmark-scale.md) | Spark against DuckDB at 1, 7 and 30 days |
 | [`docs/snowflake-port.md`](docs/snowflake-port.md) | Running the dbt project on Snowflake |
+| [`docs/databricks-job.md`](docs/databricks-job.md) | The same bronze/silver incremental batch as a serverless Databricks job (Plan v2, outside this deployment) |
 
 ## Baseline benchmark
 
