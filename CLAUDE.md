@@ -85,7 +85,7 @@ python -m repopulse.quality alert --report out/dq-report.json --run-url <url> --
 python -m repopulse.export_site --db ci.duckdb --runs runs.csv --out _site   # 6 mart public + runs.csv -> trang + CSV Tableau; thiếu mart/cột thì exit 1 (docs/dashboard.md)
 python -m http.server 8000 --bind 127.0.0.1 --directory _site                # xem thử trang local
 
-python -m repopulse.readme_results               # sinh lại mục Results của README.md (giữa marker results:start/end) từ runs.csv; --check exit 1 khi lệch. Engine thiếu trong bảng Engine matrix chỉ in cảnh báo ra stderr, không đổi exit code. Chạy lại sau mỗi lần record_run.py thêm dòng (tests/test_readme_content.py đỏ nếu quên); không sửa tay bảng đó
+python -m repopulse.readme_results               # sinh lại mục Results của README.md (giữa marker results:start/end) từ runs.csv; --check exit 1 khi lệch. Thiếu một biến thể bắt buộc của các mục giai đoạn 2 (hai đường, format-delta/iceberg, streaming-throughput-p<N>, streaming-fault-*, trino-*, airflow-backfill-<N>d, sql-agent-*; danh sách ở `REQUIRED_VARIANTS`) thì exit 2, in `error:` nêu từng biến thể thiếu và không ghi README (cả khi --check). Engine thiếu trong bảng Engine matrix vẫn chỉ in cảnh báo ra stderr, không đổi exit code. Chạy lại sau mỗi lần record_run.py thêm dòng (tests/test_readme_content.py đỏ nếu quên); không sửa tay bảng đó
 
 python scripts/orchestrate.py run --dry-run      # xem sẽ chạy việc nào
 python scripts/orchestrate.py run                # chạy headless, không cần người (mặc định 5 phiên)

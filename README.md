@@ -2,7 +2,7 @@
 
 RepoPulse is a small data platform that measures the health of open-source projects from public GitHub event data.
 
-**Status:** the cloud phase is built: ingest, Spark and Delta Lake, dbt, data quality checks, governance, a static dashboard and the benchmarks. Measured results are in [Results](#results), taken from `runs.csv`, the run log this repo keeps. The local phase is planned, not built.
+**Status:** both phases are built. The first phase is ingest, Spark and Delta Lake, dbt, data quality checks, governance, a static dashboard and the benchmarks. The second adds a comparison of two end-to-end paths, Delta Lake against Apache Iceberg, a Kafka benchmark with fault injection, Trino on Hive-partitioned tables, an Airflow backfill and an SQL agent. These are measured on GitHub Actions runners, except the SQL agent, whose model runs on the repo owner's machine. Measured results are in [Results](#results), taken from `runs.csv`, the run log this repo keeps.
 
 ## What it does
 
@@ -48,7 +48,7 @@ flowchart LR
 - **Layers:** Spark writes bronze (raw lines kept), silver (typed, deduplicated, late events accepted inside a window, PII hashed) and quarantine (events that fail the schema, with a reason). dbt builds staging, the star schema, the six marts for Q1–Q6 and a `public` schema whose identifier columns are masked.
 - **Rows for `runs.csv`:** the benchmark, pipeline and quality workflows upload a row as an artifact. `benchmarks/record_run.py` checks its schema and appends it to `runs.csv`.
 
-**This deployment does not use Databricks.** The cloud probe chose the fallback path: PySpark and Delta Lake run on the GitHub Actions runner, and the gold layer lives in MotherDuck. The Databricks token stored as a secret was not a personal access token, so Databricks was not tested far enough to say whether Free Edition can be driven from outside; see [`docs/probe-result.md`](docs/probe-result.md). The pipeline is an incremental batch that runs every hour, not a stream.
+**The scheduled pipeline runs on a GitHub Actions runner, with gold in MotherDuck.** PySpark and Delta Lake run on the runner and dbt builds the gold layer in MotherDuck: this is path A, and the diagram above draws it. Databricks is measured next to it as path B: the same bronze/silver job runs as a serverless Databricks job and dbt builds on a Databricks SQL warehouse. A first cloud probe was rejected by Databricks, because the token then stored as a secret was of the wrong kind; a second probe, with a personal access token, showed that Databricks can be driven from GitHub Actions, and both paths now have rows in `runs.csv`. Which path becomes the primary one is decided by a rule fixed before measuring, applied to scheduled runs only by `python -m repopulse.pathdecision`. Until scheduled runs of both paths cover enough days the rule keeps path A: that is a lack of data, not a result against Databricks. The rule, the outcome and when to apply it again are in [`docs/probe-result.md`](docs/probe-result.md). The pipeline is an incremental batch that runs every hour, not a stream.
 
 ## Results
 
@@ -59,9 +59,12 @@ How to read it:
 - A row is compared with `variant=baseline` only when it has the same `data_date`, so the same day of data and the same queries Q1–Q6. Only the first table does this.
 - The Spark and DuckDB rows use another data date. They are compared with each other, not with `baseline`.
 - The engine matrix runs Q1–Q6 on the day of `baseline` on each engine, one row per engine. Its Snowflake row is reused from the dbt build on the seed fixture, so it is not comparable with the others.
-- The dbt rows build a small seed fixture, not GH Archive data.
-- The fault-injection rows are **simulated** data. The baseline, layout, Spark and DuckDB rows use real GH Archive data.
+- The two-paths table times a whole pipeline, so the paths are compared with each other and not with `baseline`. Its second table counts every run by variant and trigger and gives the nearest-rank p50 and p95 of `total_seconds` over the successful runs; each is the cell of one run. Only runs with `trigger=schedule` enter the primary-path rule.
+- The Delta against Iceberg, Kafka, fault-injection, Trino and Airflow tables use the day of `baseline` or a sample of the pipeline, but they time other steps. Each section says what its `total_seconds` covers and what it can be compared with; compare rows inside a table.
+- The dbt rows on DuckDB and Snowflake build a small seed fixture, not GH Archive data. The dbt row on a Databricks SQL warehouse builds the silver table of real data.
+- The `dq-fault-injection` rows are **simulated** data, and the SQL agent row runs on the hand-made fixture of CI, not on GH Archive. Every other row uses real GH Archive data.
 - `run_at`, `git_sha` (first 7 characters) and `data_date` identify the row in `runs.csv`.
+- `python -m repopulse.readme_results` exits 2 and writes nothing when `runs.csv` has no row for a variant that one of the second-phase tables needs.
 
 <!-- results:start -->
 Generated by `python -m repopulse.readme_results` from `runs.csv`: for each variant and data date the newest run is shown, and every cell is copied from `runs.csv` as written (`—` is an empty cell). Do not edit this block by hand.
@@ -129,28 +132,84 @@ Real GH Archive data (not simulated): the dbt project builds on a Databricks SQL
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | dbt-build-databricks | 2026-10-25 | 121.6275634765625 | 10.2672700881958 | 7.4214441776275635 | 9.794240236282349 | 9.563957691192627 | 7.928206205368042 | 7.523385286331177 | — | — | 206827 | 2026-10-25 | 501 | 2026-11-12T06:15:38+00:00 | 4553df1 |
 
+### Two paths, end to end: runner + MotherDuck vs Databricks (real GH Archive data)
+
+Real GH Archive data (not simulated): the same incremental batch (ingest, bronze/silver, gold, then Q1 to Q6) on the same window of data, run by a GitHub Actions workflow. `path-a-runner` runs PySpark and Delta Lake on the runner and builds gold in MotherDuck; `path-b-databricks` runs bronze/silver as a serverless Databricks job and builds gold with dbt on a Databricks SQL warehouse. These rows are not compared with `baseline`: they time a whole pipeline, not Q1 to Q6 alone. `total_seconds` is the sum of the timed steps (`ingest_seconds` and the other step times in `notes`), without runner setup and queueing, which have their own columns; `q1_seconds` to `q6_seconds` are the time to read the mart of each question from the gold; `row_count` is the number of rows the bronze/silver step inserted into silver (none when the silver table already held the hours of the window, while `bronze_rows` in `notes` is the number of rows the step read); `status`, `trigger` and the step times are read from `notes`. The first table is the newest run of each path. The second counts every run by variant and `trigger`, failed runs included; `e2e_p50_seconds` and `e2e_p95_seconds` are nearest-rank percentiles of `total_seconds` over the successful runs of the group, so each is the `total_seconds` of one run, copied from `runs.csv`. Only runs with `trigger=schedule` enter the primary-path rule; a `push` run only tests the workflow. The rule and where it stands are in [`docs/probe-result.md`](docs/probe-result.md), the method in [`docs/path-comparison.md`](docs/path-comparison.md).
+
+| variant | data_date | total_seconds | q1_seconds | q2_seconds | q3_seconds | q4_seconds | q5_seconds | q6_seconds | row_count | status | trigger | ingest_seconds | spark_seconds | export_seconds | databricks_seconds | warehouse_seconds | dbt_seconds | queries_seconds | queue_seconds | setup_seconds | job_queue_seconds | job_setup_seconds | warehouse_start_seconds | bronze_rows | run_id | run_at | git_sha |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| path-a-runner | 2026-10-25 | 56.49300000000001 | 0.25826 | 0.059017 | 0.059248 | 0.05919 | 0.059446 | 0.059322 | 68488 | success | push | 1.635 | 24.605 | 11.017 | — | — | 17.795 | 1.441 | 2.0 | 22.149878 | — | — | — | 68488 | 43175427031 | 2026-11-12T07:27:53+00:00 | 52c9d56 |
+| path-b-databricks | 2026-10-25 | 162.142 | 0.822 | 0.758 | 0.833 | 0.76 | 0.724 | 0.778 | 0 | success | push | 2.095 | — | — | 50.846 | 0.206 | 104.253 | 4.742 | 2.0 | 28.303435 | — | 3.0 | 0.0 | 68488 | 43175427031 | 2026-11-12T07:27:52+00:00 | 52c9d56 |
+
+Every run, counted by variant and trigger:
+
+| variant | trigger | runs | successes | e2e_p50_seconds | e2e_p95_seconds |
+| --- | --- | --- | --- | --- | --- |
+| path-a-runner | push | 2 | 2 | 55.344 | 56.49300000000001 |
+| path-b-databricks | push | 2 | 2 | 162.142 | 217.882 |
+
+### Delta Lake vs Apache Iceberg (real GH Archive data)
+
+Real GH Archive data (not simulated): the reference day of `baseline`, written once as a Delta table and once as an Iceberg table with PySpark (local mode) on a GitHub Actions runner. Both tables are unpartitioned and use the default settings of their format. Each run writes the table, runs Q1 to Q6, merges the last two hours of the day into it (`MERGE INTO`, then the same statement again to check it is idempotent) and reads the version from before the merge (time travel). `total_seconds` is the write, Q1 to Q6, both merges and the time travel; it leaves out starting Spark and loading the JSON (`load_seconds` in `notes`), so it is not comparable with `baseline` or `spark-Nd`: compare `format-delta` with `format-iceberg` only. `table_bytes` and `table_files` are the data files after the write, before the merge. `row_count` is the rows of the table after the merges; `cross_check=full` means the other format gave the same row counts. Method and limits: [`docs/iceberg-vs-delta.md`](docs/iceberg-vs-delta.md).
+
+| variant | data_date | total_seconds | q1_seconds | q2_seconds | q3_seconds | q4_seconds | q5_seconds | q6_seconds | peak_rss_mb | row_count | write_seconds | merge_seconds | merge_rerun_seconds | time_travel_seconds | load_seconds | table_bytes | table_files | cross_check | run_at | git_sha |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| format-delta | 2026-10-25 | 71.87834 | 7.64757 | 4.878722 | 13.089235 | 12.407299 | 2.199803 | 7.016043 | 9039.9 | 1670400 | 8.116 | 8.259 | 6.927 | 1.105 | 15.958 | 352367811 | 5 | full | 2026-11-12T02:13:36+00:00 | 39d76aa |
+| format-iceberg | 2026-10-25 | 56.041629 | 7.251662 | 3.726932 | 10.22701 | 9.219515 | 1.486354 | 5.14486 | 8368.2 | 1670400 | 5.841 | 6.147 | 6.823 | 0.068 | 16.217 | 214203312 | 5 | full | 2026-11-12T02:13:36+00:00 | 39d76aa |
+
+### Kafka to Spark Structured Streaming to Delta: throughput (real GH Archive data)
+
+Real GH Archive data (not simulated): the reference day is produced into an Apache Kafka cluster (KRaft mode, replicated topic) that runs in Docker Compose on a GitHub Actions runner, read back with Spark Structured Streaming into a bronze Delta table, and reconciled with the line count of the source files. A row is written only when every count matches (`match=true`); `row_count` is the rows in Delta and `bytes_read` the bytes of the produced values. `total_seconds` is `produce_seconds` plus `consume_seconds`; creating the topic, starting Spark and the reconciliation are not timed. The trigger is `availableNow`: production finishes before consumption starts, so `consume_events_per_s` is the rate at which Spark drains an existing backlog into Delta, not the latency of a stream that runs continuously, and `produce_events_per_s` is one Python producer writing to brokers that share the runner's CPU and disk. Each partition count is measured once, with no warm-up, in one Spark session, so the first one also pays one-time initialisation. These rows move the day through Kafka instead of running Q1 to Q6, so they are not compared with `baseline`. The scheduled pipeline is an incremental batch, not this benchmark. Method: [`docs/streaming.md`](docs/streaming.md).
+
+| variant | data_date | total_seconds | bytes_read | row_count | partitions | brokers | rf | min_isr | produce_seconds | consume_seconds | produce_events_per_s | consume_events_per_s | batch_rows | match | trigger | micro_batches | max_offsets_per_trigger | kafka | run_at | git_sha |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| streaming-throughput-p1 | 2026-10-25 | 72.101 | 1371864797 | 1670400 | 1 | 3 | 3 | 2 | 24.132 | 47.969 | 69219.3 | 34822.5 | 1670400 | true | availableNow | 9 | 200000 | apache/kafka:4.0.0 | 2026-11-12T01:18:30+00:00 | d5df6de |
+| streaming-throughput-p3 | 2026-10-25 | 49.884 | 1371864797 | 1670400 | 3 | 3 | 3 | 2 | 25.261 | 24.623 | 66125.6 | 67839.0 | 1670400 | true | availableNow | 9 | 200000 | apache/kafka:4.0.0 | 2026-11-12T01:18:30+00:00 | d5df6de |
+| streaming-throughput-p6 | 2026-10-25 | 50.067 | 1371864797 | 1670400 | 6 | 3 | 3 | 2 | 26.947 | 23.12 | 61988.3 | 72249.1 | 1670400 | true | availableNow | 9 | 200000 | apache/kafka:4.0.0 | 2026-11-12T01:18:30+00:00 | d5df6de |
+
+### Streaming fault tolerance: broker kill and consumer kill (real GH Archive data)
+
+Real GH Archive data (not simulated): the Kafka and Spark path above with one fault injected in the middle of a run. In `broker-kill` a broker is killed (SIGKILL on its container) while the producer is writing, and the topic is then drained into Delta with the remaining brokers; in `consumer-kill` the Spark consumer process, JVM included, is killed after a few micro-batches have been committed and restarted on the same checkpoint and Delta table. After each case the source and the sink are compared by content (a multiset of the SHA-256 of every line), not only by count: `lost` is source lines with no message in Delta, `duplicates` is `offset_duplicates` (the same Kafka message written twice) plus `content_duplicates` (the same content at another offset). They are measured, not assumed, and a case whose fault did not land in the middle of the run writes no row. `failover_seconds` and `resync_seconds` (broker) and `restart_first_commit_seconds` and `restart_drain_seconds` (consumer) are read by polling, so they are upper bounds. `total_seconds` adds up the produce and consume times (or the produce time and the two consumer runs) of the case, so these rows are not comparable with each other or with the throughput table. There is one run per case, not a median, and the brokers share one runner, so a kill here is a process crash, not a machine or network failure. Method: [`docs/streaming-fault.md`](docs/streaming-fault.md).
+
+| variant | data_date | total_seconds | row_count | lost | duplicates | offset_duplicates | content_duplicates | unexpected | source_rows | delta_rows | failover_seconds | resync_seconds | max_delivery_gap_after_kill_seconds | restart_first_commit_seconds | restart_drain_seconds | micro_batches_before_kill | micro_batches_after_kill | uncommitted_batches_at_kill | partitions | hours | run_at | git_sha |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| streaming-fault-broker-kill | 2026-10-25 | 105.89 | 1670400 | 0 | 0 | 0 | 0 | 0 | 1670400 | 1670400 | 6.071 | 4.904 | 8.359 | — | — | 0 | 34 | — | 3 | 24 | 2026-11-12T02:40:47+00:00 | 19eaaa2 |
+| streaming-fault-consumer-kill | 2026-10-25 | 138.041 | 1670400 | 0 | 0 | 0 | 0 | 0 | 1670400 | 1670400 | — | — | — | 18.46 | 81.363 | 5 | 29 | 1 | 3 | 24 | 2026-11-12T02:40:47+00:00 | 19eaaa2 |
+
+### Trino on Hive-partitioned parquet (real GH Archive data)
+
+Real GH Archive data (not simulated): the reference day in the four parquet layouts of the `qopt-*` rows (flat, partitioned by event type, clustered by sort order, and both), written to MinIO, registered as external tables in a Hive Metastore and queried with Q1 to Q6 on one Trino node. Everything runs in Docker Compose on a GitHub Actions runner. `qN_seconds` is the client-side wall time of query N and `total_seconds` the sum of Q1 to Q6 without any loading, as the median of several timed runs after one untimed warm-up per layout. `bytes_read` is what Trino read from storage (`physicalInputBytes`) summed over Q1 to Q6 in the first timed run; the bytes and rows of each query are in `notes`. Every result was checked against DuckDB (`cross_check`). The server stays up and the data goes over HTTP, while `baseline` loads the files in its own process, so these rows are not comparable with `baseline` or `qopt-*`: compare the `trino-*` rows with each other, `trino-flat` being the layout before. Method: [`docs/trino-hive.md`](docs/trino-hive.md).
+
+| variant | data_date | total_seconds | q1_seconds | q2_seconds | q3_seconds | q4_seconds | q5_seconds | q6_seconds | bytes_read | row_count | partition_by | sort_by | files | layout_bytes | trino | bytes_equal_across_runs | cross_check | run_at | git_sha |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| trino-flat | 2026-10-25 | 11.065254 | 1.064501 | 1.071864 | 2.365977 | 4.24397 | 0.363652 | 1.994511 | 5272074760 | 1670400 | none | none | 1 | 370155952 | 484 | true | full | 2026-11-12T01:26:14+00:00 | 5866025 |
+| trino-partitioned | 2026-10-25 | 4.031387 | 0.378627 | 0.248051 | 0.456132 | 1.685715 | 0.171349 | 1.086085 | 439061897 | 1670400 | type | none | 16 | 350231636 | 484 | true | full | 2026-11-12T01:26:14+00:00 | 5866025 |
+| trino-clustered | 2026-10-25 | 4.732549 | 0.292307 | 0.402464 | 0.840337 | 1.958731 | 0.138126 | 1.031803 | 1283007819 | 1670400 | none | type+repo.name+created_at | 1 | 302287930 | 484 | true | full | 2026-11-12T01:26:14+00:00 | 5866025 |
+| trino-partitioned-clustered | 2026-10-25 | 3.844165 | 0.309468 | 0.214639 | 0.380599 | 1.704482 | 0.150717 | 1.005081 | 408029209 | 1670400 | type | repo.name+created_at | 16 | 302247116 | 484 | true | full | 2026-11-12T01:26:14+00:00 | 5866025 |
+
+### Airflow backfill (real GH Archive data)
+
+Real GH Archive data (not simulated): the Airflow DAG `dags/repopulse_pipeline.py` runs the chain of the scheduled pipeline (ingest, Spark bronze/silver, export, dbt build), an incremental batch, as a backfill of N daily runs with `airflow standalone` on a GitHub Actions runner. dbt builds on a local DuckDB file (`target=ci`), not on MotherDuck. Each daily run processes only `hours_per_day` hours of its day, ending at `last_hour`: a sample of the day, not the whole day. `total_seconds` is the wall-clock time from creating the backfill to the end of the last run, Airflow's scheduling delay included; `row_count` is the sum of the silver rows inserted over the days; `sla_missed` is counted from the duration of each run against `sla_minutes`, not from the Airflow callback. A row is written only when the backfill succeeded. These rows are not compared with `baseline` or with the two paths. The cron of the scheduled pipeline is unchanged: the two ways of orchestrating are measured side by side. Method: [`docs/airflow.md`](docs/airflow.md).
+
+| variant | data_date | total_seconds | row_count | engine | days | hours_per_day | last_hour | runs_success | runs_failed | sla_minutes | sla_missed | max_active_runs | target | trigger | run_at | git_sha |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| airflow-backfill-2d | 2026-10-25 | 88.716 | 105070 | airflow-3.4.0 | 2 | 1 | 15 | 2 | 0 | 30 | 0 | 1 | ci | pull_request | 2026-11-12T02:32:40+00:00 | d1cc3f5 |
+
+### SQL agent on a local model (CI fixture data, not GH Archive)
+
+This is not GH Archive data: the questions run on the fixture that CI builds with dbt (hand-made events, no real users), so `data_date` is the latest event date of that fixture and `dataset=ci-fixture`. A language model running locally on the repo owner's machine (model and hardware in `notes`) answers each question of `repopulse/sql_agent_eval.toml` by writing DuckDB SQL against the read-only `public` schema. `accuracy` is execution accuracy, correct answers over questions: an answer is correct when its result equals the result of the reference SQL on the same database. `row_count` is the number of questions, `total_seconds` the sum of the time per question and `p50_question_s` the median time per question, as written by the evaluation. CI never calls a real model, so this row is a one-off measurement of one model on a small set of questions, not a CI result and not a comparison with other models or with `baseline`. The `hw` value in `notes` has spaces in it, so it is only shown in the `notes` column. Method: [`docs/sql-agent.md`](docs/sql-agent.md).
+
+| variant | data_date | total_seconds | row_count | accuracy | p50_question_s | model | dataset | run_at | git_sha | notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| sql-agent-qwen3-6-35b-a3b | 2026-04-07 | 354.638 | 16 | 14/16 | 19.037 | Qwen3.6-35B-A3B | ci-fixture | 2026-11-12T07:36:34+00:00 | 13adca6 | accuracy=14/16; p50_question_s=19.037; model=Qwen3.6-35B-A3B; hw=RTX4060-laptop-8GB llama.cpp -ngl99 --cpu-moe; dataset=ci-fixture |
+
 ### Other runs
 
 Not compared with `baseline`: either there is no baseline row with the same `data_date`, or the variant is not one of the groups above. `notes` is copied from `runs.csv`.
 
 | variant | data_date | total_seconds | q1_seconds | q2_seconds | q3_seconds | q4_seconds | q5_seconds | q6_seconds | peak_rss_mb | bytes_read | row_count | run_at | git_sha | notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| airflow-backfill-2d | 2026-10-25 | 88.716 | — | — | — | — | — | — | — | — | 105070 | 2026-11-12T02:32:40+00:00 | d1cc3f5 | engine=airflow-3.4.0 days=2 hours_per_day=1 last_hour=15 runs_success=2 runs_failed=0 sla_minutes=30 sla_missed=0 max_active_runs=1 target=ci run_id=43142141658 trigger=pull_request |
 | databricks-bronze-silver | 2026-10-25 | 107.948 | — | — | — | — | — | — | — | — | 206827 | 2026-11-12T01:32:05+00:00 | b965514 | source=gharchive last_hour=2026-10-25T23 hours=3 bronze_rows=206827 quarantined_total=0 duplicates_dropped=0 upload_s=3.79 setup_s=3.0 execution_s=88.0 cleanup_s=1.0 run_s=92.42 run_id=43134787015 trigger=push rerun_silver_inserted=0 |
-| format-delta | 2026-10-25 | 71.87834 | 7.64757 | 4.878722 | 13.089235 | 12.407299 | 2.199803 | 7.016043 | 9039.9 | 295319902 | 1670400 | 2026-11-12T02:13:36+00:00 | 39d76aa | format=delta runs=5 stat=median write_seconds=8.116 merge_seconds=8.259 merge_rerun_seconds=6.927 time_travel_seconds=1.105 load_seconds=15.958 startup_seconds=6.609 base_rows=1590485 merge_source_rows=161510 table_bytes=352367811 table_files=5 spark=3.5.9 delta=3.3.3 iceberg=1.9.2 cross_check=full |
-| format-iceberg | 2026-10-25 | 56.041629 | 7.251662 | 3.726932 | 10.22701 | 9.219515 | 1.486354 | 5.14486 | 8368.2 | 295319902 | 1670400 | 2026-11-12T02:13:36+00:00 | 39d76aa | format=iceberg runs=5 stat=median write_seconds=5.841 merge_seconds=6.147 merge_rerun_seconds=6.823 time_travel_seconds=0.068 load_seconds=16.217 startup_seconds=6.347 base_rows=1590485 merge_source_rows=161510 table_bytes=214203312 table_files=5 spark=3.5.9 delta=3.3.3 iceberg=1.9.2 cross_check=full |
-| path-a-runner | 2026-10-25 | 56.49300000000001 | 0.25826 | 0.059017 | 0.059248 | 0.05919 | 0.059446 | 0.059322 | — | — | 68488 | 2026-11-12T07:27:53+00:00 | 52c9d56 | status=success hour=23 hours=1 ingest_seconds=1.635 spark_seconds=24.605 export_seconds=11.017 dbt_seconds=17.795 queries_seconds=1.441 queue_seconds=2.0 setup_seconds=22.149878 missing_hours=0 bronze_rows=68488 run_id=43175427031 trigger=push |
-| path-b-databricks | 2026-10-25 | 162.142 | 0.822 | 0.758 | 0.833 | 0.76 | 0.724 | 0.778 | — | — | 0 | 2026-11-12T07:27:52+00:00 | 52c9d56 | status=success hour=23 hours=1 ingest_seconds=2.095 databricks_seconds=50.846 warehouse_seconds=0.206 dbt_seconds=104.253 queries_seconds=4.742 queue_seconds=2.0 setup_seconds=28.303435 job_setup_seconds=3.0 warehouse_start_seconds=0.0 missing_hours=0 bronze_rows=68488 run_id=43175427031 trigger=push |
-| sql-agent-qwen3-6-35b-a3b | 2026-04-07 | 354.638 | — | — | — | — | — | — | — | — | 16 | 2026-11-12T07:36:34+00:00 | 13adca6 | accuracy=14/16; p50_question_s=19.037; model=Qwen3.6-35B-A3B; hw=RTX4060-laptop-8GB llama.cpp -ngl99 --cpu-moe; dataset=ci-fixture |
-| streaming-fault-broker-kill | 2026-10-25 | 105.89 | — | — | — | — | — | — | — | — | 1670400 | 2026-11-12T02:40:47+00:00 | 19eaaa2 | case=broker-kill lost=0 duplicates=0 offset_duplicates=0 content_duplicates=0 unexpected=0 source_rows=1670400 delta_rows=1670400 distinct_offsets=1670400 failover_seconds=6.071 resync_seconds=4.904 max_delivery_gap_after_kill_seconds=8.359 max_delivery_gap_before_kill_seconds=0.048 killed_broker=kafka-3 kill_at_fraction=0.3 kill_threshold=501120 delivered_at_kill=507002 sent_at_kill=687702 produce_seconds=30.049 produced=1670400 produce_failed=0 undelivered=0 kill_at_seconds=13.929 consume_seconds=75.841 topic_messages=1670400 micro_batches_before_kill=0 micro_batches_after_kill=34 partitions=3 brokers=3 rf=3 min_isr=2 hours=24 max_offsets_per_trigger=50000 kafka=apache/kafka:4.0.0 |
-| streaming-fault-consumer-kill | 2026-10-25 | 138.041 | — | — | — | — | — | — | — | — | 1670400 | 2026-11-12T02:40:47+00:00 | 19eaaa2 | case=consumer-kill lost=0 duplicates=0 offset_duplicates=0 content_duplicates=0 unexpected=0 source_rows=1670400 delta_rows=1670400 distinct_offsets=1670400 restart_first_commit_seconds=18.46 restart_drain_seconds=81.363 kill_after_batches=5 micro_batches_before_kill=5 uncommitted_batches_at_kill=1 rows_before_restart=249992 run1_seconds=27.911 produce_seconds=28.167 produced=1670400 topic_messages=1670400 micro_batches_after_kill=29 input_rows_after_restart=1420408 run2_seconds=81.964 partitions=3 brokers=3 rf=3 min_isr=2 hours=24 max_offsets_per_trigger=50000 kafka=apache/kafka:4.0.0 |
-| streaming-throughput-p1 | 2026-10-25 | 72.101 | — | — | — | — | — | — | — | 1371864797 | 1670400 | 2026-11-12T01:18:30+00:00 | d5df6de | partitions=1 brokers=3 rf=3 min_isr=2 produce_seconds=24.132 consume_seconds=47.969 produce_events_per_s=69219.3 consume_events_per_s=34822.5 batch_rows=1670400 match=true trigger=availableNow micro_batches=9 max_offsets_per_trigger=200000 unkeyed=0 kafka=apache/kafka:4.0.0 |
-| streaming-throughput-p3 | 2026-10-25 | 49.884 | — | — | — | — | — | — | — | 1371864797 | 1670400 | 2026-11-12T01:18:30+00:00 | d5df6de | partitions=3 brokers=3 rf=3 min_isr=2 produce_seconds=25.261 consume_seconds=24.623 produce_events_per_s=66125.6 consume_events_per_s=67839.0 batch_rows=1670400 match=true trigger=availableNow micro_batches=9 max_offsets_per_trigger=200000 unkeyed=0 kafka=apache/kafka:4.0.0 |
-| streaming-throughput-p6 | 2026-10-25 | 50.067 | — | — | — | — | — | — | — | 1371864797 | 1670400 | 2026-11-12T01:18:30+00:00 | d5df6de | partitions=6 brokers=3 rf=3 min_isr=2 produce_seconds=26.947 consume_seconds=23.12 produce_events_per_s=61988.3 consume_events_per_s=72249.1 batch_rows=1670400 match=true trigger=availableNow micro_batches=9 max_offsets_per_trigger=200000 unkeyed=0 kafka=apache/kafka:4.0.0 |
-| trino-clustered | 2026-10-25 | 4.732549 | 0.292307 | 0.402464 | 0.840337 | 1.958731 | 0.138126 | 1.031803 | — | 1283007819 | 1670400 | 2026-11-12T01:26:14+00:00 | 5866025 | runs=10 stat=median warmup=1 engine=trino trino=484 partition_by=none sort_by=type+repo.name+created_at files=1 layout_bytes=302287930 bytes=physical_input_bytes bytes_from=run1 bytes_equal_across_runs=true cross_check=full q1_input_bytes=23910714 q1_input_rows=737628 q2_input_bytes=111396772 q2_input_rows=368814 q3_input_bytes=414674636 q3_input_rows=614748 q4_input_bytes=514114714 q4_input_rows=614690 q5_input_bytes=6386958 q5_input_rows=245876 q6_input_bytes=212524025 q6_input_rows=491810 |
-| trino-flat | 2026-10-25 | 11.065254 | 1.064501 | 1.071864 | 2.365977 | 4.24397 | 0.363652 | 1.994511 | — | 5272074760 | 1670400 | 2026-11-12T01:26:14+00:00 | 5866025 | runs=10 stat=median warmup=1 engine=trino trino=484 partition_by=none sort_by=none files=1 layout_bytes=370155952 bytes=physical_input_bytes bytes_from=run1 bytes_equal_across_runs=true cross_check=full q1_input_bytes=482142870 q1_input_rows=10022748 q2_input_bytes=528842439 q2_input_rows=5011374 q3_input_bytes=1487135678 q3_input_rows=8352348 q4_input_bytes=1774905345 q4_input_rows=8352290 q5_input_bytes=143534232 q5_input_rows=3340916 q6_input_bytes=855514196 q6_input_rows=6681890 |
-| trino-partitioned | 2026-10-25 | 4.031387 | 0.378627 | 0.248051 | 0.456132 | 1.685715 | 0.171349 | 1.086085 | — | 439061897 | 1670400 | 2026-11-12T01:26:14+00:00 | 5866025 | runs=10 stat=median warmup=1 engine=trino trino=484 partition_by=type sort_by=none files=16 layout_bytes=350231636 bytes=physical_input_bytes bytes_from=run1 bytes_equal_across_runs=true cross_check=full q1_input_bytes=13607700 q1_input_rows=305856 q2_input_bytes=11122234 q2_input_rows=124341 q3_input_bytes=26344702 q3_input_rows=90452 q4_input_bytes=253263286 q4_input_rows=165078 q5_input_bytes=3965774 q5_input_rows=101952 q6_input_bytes=130758201 q6_input_rows=184520 |
-| trino-partitioned-clustered | 2026-10-25 | 3.844165 | 0.309468 | 0.214639 | 0.380599 | 1.704482 | 0.150717 | 1.005081 | — | 408029209 | 1670400 | 2026-11-12T01:26:14+00:00 | 5866025 | runs=10 stat=median warmup=1 engine=trino trino=484 partition_by=type sort_by=repo.name+created_at files=16 layout_bytes=302247116 bytes=physical_input_bytes bytes_from=run1 bytes_equal_across_runs=true cross_check=full q1_input_bytes=12123984 q1_input_rows=305856 q2_input_bytes=10088866 q2_input_rows=124341 q3_input_bytes=24277752 q3_input_rows=90452 q4_input_bytes=236368867 q4_input_rows=165078 q5_input_bytes=3381196 q5_input_rows=101952 q6_input_bytes=121788544 q6_input_rows=184520 |
 
 The full log, with every run and not only the newest, is [`runs.csv`](runs.csv).
 <!-- results:end -->
@@ -161,14 +220,15 @@ Nothing in this list has a row in `runs.csv`, so this README gives no number for
 
 - Event counts and sizes at bronze, silver and gold, the time to add one day of data compared with a full refresh, and the share of events rejected for schema or duplicates (measures M1, M2 and M9 of [`docs/plan.md`](docs/plan.md)).
 - Data freshness at p50 and p95 (M3). It needs many scheduled runs to accumulate.
-- Anything on Databricks, which this deployment does not use.
+- Which path wins under the primary-path rule. The rule needs scheduled runs of both paths on several UTC days, and the generated table in [`docs/probe-result.md`](docs/probe-result.md) shows where the count stands.
+- The daily quota of Databricks Free Edition and the capacity of its Volumes. The probe checks that they can be used, not how large they are.
 - The Tableau Public workbook. The dashboard build writes the CSV files; publishing is a manual step by the repo owner.
 
-The scheduled pipeline uploads its `pipeline-incremental` rows as workflow artifacts. They reach `runs.csv` only when someone merges them with `record_run.py`; a merged row then appears above under "Other runs".
+The scheduled pipeline uploads its `pipeline-incremental` rows as workflow artifacts. They reach `runs.csv` only when someone merges them with `record_run.py`; a merged row then appears above under "Other runs". The rows of the two paths are merged the same way and appear in the two-paths table.
 
 ## Design decisions
 
-- **Fallback path instead of Databricks.** The probe could reach MotherDuck from GitHub Actions but could not authenticate to Databricks. Spark and Delta run on the runner and gold goes to MotherDuck. The choice can be reversed; [`docs/probe-result.md`](docs/probe-result.md) says how to retry.
+- **Path A on the schedule, Databricks measured as path B.** The first probe reached MotherDuck from GitHub Actions but was rejected by Databricks, so Spark and Delta run on the runner and gold goes to MotherDuck. Once a second probe showed that Databricks can be driven from Actions, the choice became a measurement: both paths run the same incremental batch on the same window of data, and a rule fixed before measuring picks the primary one from the scheduled runs. Until there are enough of them the rule keeps path A. See [`docs/probe-result.md`](docs/probe-result.md) and [`docs/path-comparison.md`](docs/path-comparison.md).
 - **DuckDB in CI, MotherDuck for gold.** CI builds the dbt project on DuckDB with a seed fixture, so it needs no secret and no network data. The scheduled run builds the same project on MotherDuck. MotherDuck rejects DuckDB clients newer than it supports, so the workflows pin the DuckDB version. See [`docs/dbt-models.md`](docs/dbt-models.md) and [`docs/pipeline.md`](docs/pipeline.md).
 - **Spark and Delta Lake for bronze and silver.** Delta gives the merge that makes silver inserts safe to repeat. Spark runs in local mode on the runner and each run handles a few hours of data, because the runner has 14 GB of disk. See [`docs/spark-jobs.md`](docs/spark-jobs.md).
 - **Idempotent per (date, hour).** Ingest skips hours it has already landed, bronze and quarantine overwrite exactly their hour, silver inserts only new event ids, and staging skips ids it has seen. Running the same hour twice does not change row counts.
@@ -176,7 +236,7 @@ The scheduled pipeline uploads its `pipeline-incremental` rows as workflow artif
 - **Quarantine instead of silent drops.** An event that fails the schema, arrives outside the late window or cannot be parsed goes to a quarantine table with a reason. The Spark summary reconciles bronze rows with silver inserts, dropped duplicates and quarantine.
 - **A fixed set of questions, Q1–Q6.** The same SQL files define the dbt marts and are the queries every benchmark runs, and a test checks that the marts return the same results. Optimisations are therefore measured on the work the product does.
 - **`runs.csv` is the only source of numbers.** Rows are schema-checked before they are written, and this README's results are generated from the file and checked by a test.
-- **A static dashboard on GitHub Pages.** Databricks dashboards cannot be shared publicly, and this deployment does not use Databricks. The site reads only the `public` schema, and the same data is exported as CSV for Tableau. See [`docs/dashboard.md`](docs/dashboard.md).
+- **A static dashboard on GitHub Pages.** Databricks dashboards cannot be shared publicly, and the gold layer of the scheduled pipeline is in MotherDuck. The site reads only the `public` schema, and the same data is exported as CSV for Tableau. See [`docs/dashboard.md`](docs/dashboard.md).
 - **Application events are simulated.** There is no app with real users, so `simkit` generates events from the catalog with a fixed seed and injects faults that are known in advance. That is what makes fault detection measurable. Wherever these events are reported they are labelled simulated. See [`docs/simkit.md`](docs/simkit.md).
 - **One dbt project for two engines.** The SQL avoids DuckDB-only syntax outside a small macro file, and a test enforces it, so the same project also builds on Snowflake. See [`docs/snowflake-port.md`](docs/snowflake-port.md).
 
@@ -185,7 +245,7 @@ The scheduled pipeline uploads its `pipeline-incremental` rows as workflow artif
 The work runs in two phases:
 
 1. **Cloud phase (built):** everything runs on free cloud services and GitHub Actions. No local Docker is needed.
-2. **Local phase (planned):** adds what free cloud tiers cannot offer: Kafka, Trino on Hive-partitioned tables, Airflow, and fault-injection tests.
+2. **Second phase (built):** adds what free cloud tiers cannot offer: a Kafka benchmark with fault-injection tests, Trino on Hive-partitioned tables, and an Airflow backfill. It ran on GitHub Actions runners, with Docker Compose inside the workflows, not on the owner's machine. Alongside it, the repo compares the two paths, Delta Lake with Iceberg and six engines, and has a semantic layer and an SQL agent.
 
 Details are in [`docs/plan.md`](docs/plan.md) (Vietnamese). Progress is tracked in [`docs/progress.md`](docs/progress.md).
 
@@ -195,7 +255,7 @@ Most pages are in Vietnamese; the benchmark pages are in English.
 
 | Page | Topic |
 |---|---|
-| [`docs/probe-result.md`](docs/probe-result.md) | Why the fallback path was chosen, and how to retry Databricks |
+| [`docs/probe-result.md`](docs/probe-result.md) | The cloud probe, the rule that picks the primary path, and where it stands |
 | [`docs/eventspec.md`](docs/eventspec.md), [`docs/simkit.md`](docs/simkit.md) | Event catalog and schemas; the simulated event generator with known faults |
 | [`docs/spark-jobs.md`](docs/spark-jobs.md) | Bronze, silver and quarantine tables, rules, PII hashing |
 | [`docs/dbt-models.md`](docs/dbt-models.md) | Staging, star schema, marts Q1–Q6, incremental models |
@@ -208,7 +268,14 @@ Most pages are in Vietnamese; the benchmark pages are in English.
 | [`docs/iceberg-vs-delta.md`](docs/iceberg-vs-delta.md) | Delta Lake against Apache Iceberg: write, Q1–Q6, MERGE, time travel |
 | [`docs/engine-matrix.md`](docs/engine-matrix.md) | Q1–Q6 on the reference day on six engines, one README table |
 | [`docs/snowflake-port.md`](docs/snowflake-port.md) | Running the dbt project on Snowflake |
-| [`docs/databricks-job.md`](docs/databricks-job.md) | The same bronze/silver incremental batch as a serverless Databricks job (Plan v2, outside this deployment) |
+| [`docs/databricks-job.md`](docs/databricks-job.md) | The same bronze/silver incremental batch as a serverless Databricks job (path B) |
+| [`docs/dbt-databricks.md`](docs/dbt-databricks.md) | The dbt project built on a Databricks SQL warehouse (path B) |
+| [`docs/path-comparison.md`](docs/path-comparison.md) | The two end-to-end paths run on the same data window, and how they are compared |
+| [`docs/streaming.md`](docs/streaming.md), [`docs/streaming-fault.md`](docs/streaming-fault.md) | The Kafka benchmark (produce, read into Delta, reconcile) and the tests that kill a broker or the consumer |
+| [`docs/trino-hive.md`](docs/trino-hive.md) | Q1–Q6 on Trino over Hive-partitioned parquet |
+| [`docs/airflow.md`](docs/airflow.md) | The Airflow DAG and its backfill on a runner |
+| [`docs/semantic-layer.md`](docs/semantic-layer.md) | MetricFlow metrics on the public marts |
+| [`docs/sql-agent.md`](docs/sql-agent.md) | The read-only SQL agent over the public schema, and its evaluation |
 
 ## Baseline benchmark
 
