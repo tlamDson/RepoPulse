@@ -93,6 +93,13 @@ hay workflow. Checkout trong workflow dùng `fetch-depth: 0` để có commit g�
 Kết quả trên DuckDB không đổi: `tests/test_dbt_marts.py` vẫn so khớp 6 mart với
 `benchmarks/queries/q*.sql`.
 
+Sau port này, target Databricks (D2, `docs/dbt-databricks.md`) đổi thêm vài chỗ dùng chung cho
+cả ba engine: `varchar` thành `string` (model, contract, seed), `cohort_week + n` thành macro
+`add_days`, và `mask_pii`/`hashed_pii`/`no_raw_email` đi qua macro `sha256_hex`, `trim_chars`,
+`regex_full_match`, `regex_contains`, `string_array_elements` (nhánh `snowflake__` của chúng là
+`sha2(x, 256)`, `trim(x, chars)`, `regexp_like`, `regexp_instr`, `lateral flatten`). Các nhánh
+`snowflake__` mới chưa chạy trên Snowflake (workflow `snowflake-port.yml` chạy tay).
+
 Giả định của port:
 
 - `date_trunc('week', …)` trên Snowflake theo tham số `WEEK_START`; mặc định (0) là tuần bắt đầu
