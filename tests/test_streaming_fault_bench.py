@@ -455,6 +455,62 @@ def test_broker_kill_waits_for_three_brokers_before_starting(tmp_path):
     assert all(e[0] != "create" for e in env.log)
 
 
+class LaggingMetadataEnv(FakeEnv):
+    """The broker that answers ``state()`` has not learnt the new topic yet.
+
+    Seen on the runner: right after ``create_topic`` a metadata request served by another
+    broker answered UNKNOWN_TOPIC_OR_PART, then the topic without a leader.
+    """
+
+    def __init__(self, *, unknown_polls: int = 0, leaderless_polls: int = 0, **kwargs):
+        super().__init__(**kwargs)
+        self.unknown_polls, self.leaderless_polls = unknown_polls, leaderless_polls
+        self._unknown_left = self._leaderless_left = 0
+
+    def create_topic(self, topic, partitions):
+        super().create_topic(topic, partitions)
+        self._unknown_left, self._leaderless_left = self.unknown_polls, self.leaderless_polls
+
+    def state(self, topic):
+        if self._unknown_left > 0:
+            self._unknown_left -= 1
+            raise RuntimeError(f"topic {topic}: UNKNOWN_TOPIC_OR_PART")
+        if self._leaderless_left > 0:
+            self._leaderless_left -= 1
+            n = len(self.topics[topic])
+            return fault.TopicState(
+                brokers=frozenset(self.alive),
+                partitions={p: fault.PartitionState(leader=-1, isr=()) for p in range(n)},
+            )
+        return super().state(topic)
+
+
+def test_broker_kill_waits_for_the_metadata_of_the_new_topic(tmp_path):
+    env = LaggingMetadataEnv(unknown_polls=3)
+    result = streaming_fault.run_broker_kill(env, config(tmp_path, FakeClock()))
+    assert result.problems == []
+    assert result.recon.ok is True
+    assert result.notes["killed_broker"] == "kafka-1"  # leader of partition 0 once it is known
+    assert ("kill", 1) in env.log
+
+
+def test_broker_kill_waits_until_partition_0_has_a_leader(tmp_path):
+    env = LaggingMetadataEnv(leaderless_polls=2)
+    result = streaming_fault.run_broker_kill(env, config(tmp_path, FakeClock()))
+    assert result.problems == []
+    assert result.notes["killed_broker"] == "kafka-1"
+    assert [e for e in env.log if e[0] == "kill"] == [("kill", 1)]  # never "broker -1"
+
+
+def test_broker_kill_fails_cleanly_when_the_topic_metadata_never_arrives(tmp_path):
+    env = LaggingMetadataEnv(unknown_polls=10_000)
+    with pytest.raises(TimeoutError, match="UNKNOWN_TOPIC_OR_PART"):
+        streaming_fault.run_broker_kill(env, config(tmp_path, FakeClock(), timeout=5.0))
+    assert all(e[0] != "kill" for e in env.log)
+    assert env.log[-1] == ("delete", "gharchive-2026-10-25-p3-broker-kill")
+    assert env.alive == {1, 2, 3}
+
+
 # ---------------------------------------------------------------- consumer-kill
 
 
