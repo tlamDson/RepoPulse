@@ -88,7 +88,9 @@ secret, không đụng MotherDuck. Job fail khi có run backfill `failed` hoặc
 (`25 × days` phút).
 
 Artifact `airflow-backfill-<run_id>`: `out/` (dòng đo, `backfill-summary.json`, JSON thô của
-`list-runs`, summary từng ngày, `sla-miss.jsonl` nếu có), `standalone.log` và log task của Airflow.
+`list-runs`, summary từng ngày, `sla-miss.jsonl` nếu có) và `out/airflow/airflow-logs.tar.gz`
+(`standalone.log` + log task của Airflow; đóng gói vì đường dẫn log task chứa dấu `:` mà
+`upload-artifact` không nhận).
 
 Lệnh tương đương chạy tay (Linux; Airflow không chạy trên Windows):
 

@@ -135,7 +135,7 @@ def test_steps_in_order():
         step_index(data, "tests/test_airflow_dag.py"),
         step_index(data, "-m repopulse.dagspec window"),
         step_index(data, "db migrate"),
-        step_index(data, "standalone"),
+        step_index(data, '"$AIRFLOW" standalone'),
         step_index(data, "dags unpause"),
         step_index(data, "backfill create"),
         step_index(data, "-m repopulse.dagspec wait"),
@@ -146,7 +146,7 @@ def test_steps_in_order():
 
 def test_standalone_runs_in_background_with_a_log_file():
     data = load()
-    run = steps(data)[step_index(data, "standalone")]["run"]
+    run = steps(data)[step_index(data, '"$AIRFLOW" standalone')]["run"]
     assert '"$AIRFLOW" standalone >' in run
     assert "standalone.log" in run
     assert run.rstrip().endswith("&") or "&\n" in run
@@ -201,8 +201,14 @@ def test_summary_and_artifact_always():
     assert len(uploads) == 1
     up = uploads[0]
     assert up.get("if") == "always()"
-    assert "out/" in up["with"]["path"]
-    assert "airflow-home" in up["with"]["path"]
+    # Only out/ is uploaded. Airflow task log paths hold ':' (run_id=backfill__<ISO time>), which
+    # upload-artifact rejects (run 43141124498): the logs go into one tar file under out/ first.
+    assert up["with"]["path"].strip() == "out/"
+    pack = [s for s in steps(data) if "airflow-logs.tar.gz" in s.get("run", "")]
+    assert len(pack) == 1
+    assert pack[0].get("if") == "always()"
+    assert 'tar -czf out/airflow/airflow-logs.tar.gz -C "$AIRFLOW_HOME"' in pack[0]["run"]
+    assert steps(data).index(pack[0]) < steps(data).index(up)
 
 
 def test_no_secrets_no_motherduck_no_runs_csv():

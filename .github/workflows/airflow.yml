@@ -211,13 +211,21 @@ jobs:
             done
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # Airflow task log paths hold ':' (run_id=backfill__<ISO time>), which upload-artifact
+      # rejects: the logs go into one tar file under out/.
+      - name: Pack Airflow logs
+        if: always()
+        run: |
+          mkdir -p out/airflow
+          if [ -d "$AIRFLOW_HOME" ]; then
+            tar -czf out/airflow/airflow-logs.tar.gz -C "$AIRFLOW_HOME" standalone.log logs \
+              || echo "::warning::could not pack every Airflow log"
+          fi
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: airflow-backfill-${{ github.run_id }}
-          path: |
-            out/
-            ${{ runner.temp }}/airflow-home/standalone.log
-            ${{ runner.temp }}/airflow-home/logs/
+          path: out/
           if-no-files-found: warn
           retention-days: 30
