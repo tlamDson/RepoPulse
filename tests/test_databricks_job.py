@@ -132,10 +132,12 @@ class FakeDatabricks:
         pending_polls=1,
         final=("TERMINATED", "SUCCESS", ""),
         raw_output=None,
+        error_output=None,
         fail=None,
         down=None,
     ):
         self.summaries = list(summaries)
+        self.error_output = error_output
         self.pending_polls = pending_polls
         self.final = final
         self.raw_output = raw_output
@@ -232,6 +234,8 @@ class FakeDatabricks:
             asked = int(query_of(req)["run_id"])
             run_id = asked - TASK_OFFSET if asked - TASK_OFFSET in self.runs else asked
             index = self.runs[run_id]["index"]
+            if self.error_output is not None:
+                return ok({"error": self.error_output, "error_trace": "Traceback: long trace"})
             if self.raw_output is not None:
                 result = self.raw_output
             else:
@@ -721,7 +725,60 @@ def test_failed_run_raises_with_the_state_message():
 
     assert "FAILED" in str(info.value)
     assert "boom" in str(info.value)
-    assert fake.count("GET", RUNS_OUTPUT) == 0
+
+
+def test_failed_run_reports_the_task_error_from_its_run_output():
+    # The run-level state_message of a failed notebook task is generic; the cause (e.g. the
+    # Spark exception) is only in runs/get-output of the task run.
+    fake = FakeDatabricks(
+        final=("TERMINATED", "FAILED", "Workload failed, see run output for details"),
+        error_output="AnalysisException: [TABLE_OR_VIEW_NOT_FOUND] bronze_gharchive_events",
+    )
+    clock = FakeClock()
+    client, run_id = submitted(fake, clock)
+
+    with pytest.raises(dj.JobError) as info:
+        dj.wait_for_run(
+            client, run_id, timeout=600, poll_interval=10, clock=clock, sleep=clock.sleep
+        )
+
+    message = str(info.value)
+    assert "Workload failed" in message
+    assert "AnalysisException: [TABLE_OR_VIEW_NOT_FOUND] bronze_gharchive_events" in message
+    assert "long trace" not in message
+    asked = [query_of(r)["run_id"] for r in fake.requests("GET", RUNS_OUTPUT)]
+    assert asked == [str(run_id + TASK_OFFSET)]
+
+
+def test_failed_run_error_is_truncated():
+    fake = FakeDatabricks(final=("TERMINATED", "FAILED", "failed"), error_output="x" * 5000)
+    clock = FakeClock()
+    client, run_id = submitted(fake, clock)
+
+    with pytest.raises(dj.JobError) as info:
+        dj.wait_for_run(
+            client, run_id, timeout=600, poll_interval=10, clock=clock, sleep=clock.sleep
+        )
+
+    assert "x" * 100 in str(info.value)
+    assert len(str(info.value)) < 1000
+
+
+def test_failed_run_still_raises_its_state_when_run_output_is_unavailable():
+    fake = FakeDatabricks(
+        final=("TERMINATED", "FAILED", "Notebook raised: boom"),
+        fail={("GET", RUNS_OUTPUT): [err(404, "RESOURCE_DOES_NOT_EXIST", "gone")]},
+    )
+    clock = FakeClock()
+    client, run_id = submitted(fake, clock)
+
+    with pytest.raises(dj.JobError) as info:
+        dj.wait_for_run(
+            client, run_id, timeout=600, poll_interval=10, clock=clock, sleep=clock.sleep
+        )
+
+    assert "FAILED" in str(info.value)
+    assert "boom" in str(info.value)
 
 
 def test_internal_error_life_cycle_is_a_failure():
@@ -1138,6 +1195,18 @@ def test_cli_failed_run_exits_1_without_leaking_secrets(tmp_path, capsys):
     captured = capsys.readouterr()
     assert code == 1
     assert "FAILED" in captured.err
+    assert_no_secret(captured.out + captured.err, "stdout/stderr")
+
+
+def test_cli_failed_run_task_error_is_shown_without_leaking_secrets(tmp_path, capsys):
+    error = f"FileNotFoundError: /Users/{USER}/x on {NETLOC} salt {SALT}"
+    fake = FakeDatabricks(final=("TERMINATED", "FAILED", "Workload failed"), error_output=error)
+
+    code = run_cli(tmp_path, fake)
+
+    captured = capsys.readouterr()
+    assert code == 1
+    assert "FileNotFoundError" in captured.err
     assert_no_secret(captured.out + captured.err, "stdout/stderr")
 
 
