@@ -1046,3 +1046,14 @@ def test_duplicate_check_runs_all_must_pass():
     assert merge_ready(red)[0] is False
     assert required_checks_state(ok + ok) == "pass"
     assert merge_ready(ok + ok)[0] is True
+
+
+def test_a_failed_run_wins_even_after_an_unfinished_run_of_the_same_check():
+    from repopulse.orchestrator import required_checks_state
+
+    ok = [{"name": n, "bucket": "pass"} for n in ("Lint", "dbt build (DuckDB)")]
+    runs = ok + [
+        {"name": "Unit Tests", "bucket": "pending"},
+        {"name": "Unit Tests", "bucket": "fail"},
+    ]
+    assert required_checks_state(runs) == "fail"
