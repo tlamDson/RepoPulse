@@ -23,9 +23,11 @@ Engines (the six of ``repopulse.engine_matrix.ENGINES``):
 - ``databricks-sql``: files pushed to a Unity Catalog Volume with the Files API, tables in
   ``workspace.repopulse_matrix`` by ``CREATE OR REPLACE TABLE ... read_files``, Q1-Q6 of
   ``benchmarks/queries_spark/`` through the SQL Statement Execution API on the SQL warehouse.
-  Every statement gets a unique trailing comment so the warehouse result cache cannot answer it,
-  and the query history (``metrics.result_from_cache``) is checked afterwards: a cached timed
-  statement makes the measurement invalid. ``timing=client`` (includes the network).
+  The warehouse result cache ignores comments, so before every timed run both tables get a new
+  Delta version (metadata-only ``ALTER TABLE ... SET TBLPROPERTIES``, not timed), which
+  invalidates cached results; the query history (``metrics.result_from_cache``) is checked
+  afterwards and a cached timed statement makes the measurement invalid.
+  ``timing=client`` (includes the network).
 - ``databricks-serverless``: the same Volume files, a notebook (Spark SQL of
   ``benchmarks/queries_spark/`` embedded) submitted as a one-off serverless run through the Jobs
   API; the notebook loads, warms up, times each query itself and returns JSON through
@@ -149,7 +151,8 @@ def query_sql(directory: Path) -> dict[str, str]:
 
 
 def tagged(sql: str, tag: str) -> str:
-    """The query with a trailing comment: unique text per statement defeats a result cache."""
+    """The query with a trailing comment naming the run: every statement is found by its text in
+    query history. It does NOT defeat the Databricks SQL result cache (see bump_tables)."""
     return sql.rstrip().rstrip(";").rstrip() + f"\n-- repopulse engine-matrix {tag}"
 
 
@@ -315,15 +318,24 @@ Execute = Callable[[str, str, str], tuple[list[str], list[tuple]]]
 
 
 def timed_queries(
-    execute: Execute, sql: Mapping[str, str], runs: int
+    execute: Execute,
+    sql: Mapping[str, str],
+    runs: int,
+    *,
+    before_run: Callable[[int], None] | None = None,
 ) -> tuple[dict[str, dict], list[dict]]:
-    """Warm-up of Q1..Q6 (results kept), then ``runs`` timed runs (row counts kept)."""
+    """Warm-up of Q1..Q6 (results kept), then ``runs`` timed runs (row counts kept).
+
+    ``before_run(i)`` runs before timed run ``i``, outside the clock.
+    """
     results: dict[str, dict] = {}
     for q in QUERIES:
         columns, rows = execute(q, sql[q], "warmup")
         results[q] = {"columns": columns, "rows": rows}
     timed: list[dict] = []
     for i in range(1, runs + 1):
+        if before_run is not None:
+            before_run(i)
         run: dict[str, object] = {}
         for q in QUERIES:
             t0 = time.perf_counter()
@@ -487,7 +499,6 @@ def measure_motherduck(
     finally:
         con.close()
     extra = {"md_database": database, "md_database_type": re.sub(r"\W", "_", db_type)}
-    extra["result_cache"] = "unique_comment"
     return {
         "row_count": row_count,
         "load_seconds": load_seconds,
@@ -677,6 +688,15 @@ def dbx_load_statements(catalog: str, schema: str, data_dir: str, seed_path: str
     ]
 
 
+def dbx_bump_statements(catalog: str, schema: str, value: str) -> list[str]:
+    """Metadata-only commits: a new Delta version of both tables, the data is unchanged."""
+    return [
+        f"ALTER TABLE {catalog}.{schema}.{table} SET TBLPROPERTIES "
+        f"('repopulse.matrix_run' = {_sql_str(value)})"
+        for table in ("raw_events", "repos")
+    ]
+
+
 def dbx_count_sql(catalog: str, schema: str) -> str:
     return f"SELECT count(*) AS row_count FROM {catalog}.{schema}.raw_events"
 
@@ -735,7 +755,7 @@ def check_result_cache(
 ) -> str:
     """``query_history``: every timed statement is in the history and none came from the result
     cache. A cached one raises (the measurement is invalid). ``unavailable``/``incomplete`` when
-    the history cannot confirm it (recorded in notes, the unique comments still apply)."""
+    the history cannot confirm it (recorded in notes; the table version bumps still apply)."""
     params = [("filter_by.statement_ids", i) for i in statement_ids]
     params += [("include_metrics", "true"), ("max_results", str(max(100, len(statement_ids))))]
     path = "/api/2.0/sql/history/queries?" + urlencode(params)
@@ -805,8 +825,18 @@ def measure_databricks_sql(
             timed_ids.append(res["statement_id"])
         return res["columns"], res["rows"]
 
-    results, timed = timed_queries(execute, query_sql(spark_naive.QUERY_DIR), runs)
-    extra["result_cache"] = "unique_comment"
+    def bump_tables(i: int) -> None:
+        # The result cache ignores comments (run 43173868610: 26 of 30 timed statements were
+        # hits) but is "invalidated when the underlying tables are updated" (Databricks docs,
+        # query caching): a metadata-only commit gives both tables a new version before every
+        # timed run. Not timed.
+        for stmt in dbx_bump_statements(ctx.catalog, ctx.schema, f"{nonce}-run{i}"):
+            execute_statement(ctx, warehouse_id, stmt, f"table version bump {i}")
+
+    results, timed = timed_queries(
+        execute, query_sql(spark_naive.QUERY_DIR), runs, before_run=bump_tables
+    )
+    extra["result_cache"] = "table_version_bump"
     extra["cache_check"] = check_result_cache(ctx, timed_ids)
     versions: dict[str, str] = {}
     try:
@@ -964,7 +994,6 @@ def measure_databricks_serverless(
             f"databricks-serverless: notebook returned {len(summary['runs'])} runs, asked {runs}"
         )
     extra: dict[str, object] = {"schema": f"{ctx.catalog}.{ctx.schema}"}
-    extra["result_cache"] = "unique_comment"
     for name, seconds in outcome.timings.items():
         extra[f"job_{name}_s"] = round(float(seconds), 3)
     return {

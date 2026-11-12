@@ -65,9 +65,9 @@ costs the row of another one.
 |---|---|---|---|
 | `duckdb` | in-process, in memory | `CREATE OR REPLACE TABLE ... read_json` | `duckdb=<version>` |
 | `spark` | PySpark `local[*]` in a fresh child process on the runner (Java 17, extra `spark`) | `spark.read.json` + `cache()` + `count()`, as `spark_naive` | `spark`, `master`, `startup_seconds` |
-| `motherduck` | DuckDB client on `md:`, tables in MotherDuck | `CREATE OR REPLACE TABLE` in database `repopulse_matrix` from the local files | `duckdb` (client), `md_database`, `md_database_type`, `result_cache` |
+| `motherduck` | DuckDB client on `md:`, tables in MotherDuck | `CREATE OR REPLACE TABLE` in database `repopulse_matrix` from the local files | `duckdb` (client), `md_database`, `md_database_type` |
 | `databricks-sql` | SQL Statement Execution API on the SQL warehouse | Files API to the Volume, `CREATE OR REPLACE TABLE ... read_files` in `workspace.repopulse_matrix` | `dbsql` (when the warehouse reports it), `schema`, `warehouse_size`, `warehouse_type`, `serverless`, `result_cache`, `cache_check` |
-| `databricks-serverless` | notebook submitted as a one-off serverless run (Jobs API, no cluster declared) | same Volume files, `CREATE OR REPLACE TABLE ... read_files` in the notebook | `spark` (of the serverless runtime), `schema`, `result_cache`, `job_*_s` |
+| `databricks-serverless` | notebook submitted as a one-off serverless run (Jobs API, no cluster declared) | same Volume files, `CREATE OR REPLACE TABLE ... read_files` in the notebook | `spark` (of the serverless runtime), `schema`, `job_*_s` |
 | `snowflake` | not measured | - | - |
 
 Details:
@@ -84,17 +84,24 @@ Details:
   Volume `workspace.repopulse_matrix.repopulse_matrix_data` (`overwrite=true`). The script refuses
   the schemas of the other Databricks jobs (`repopulse`, `repopulse_dbt*`, `repopulse_probe`).
 - **Result cache (Databricks SQL).** The warehouse can answer a repeated query from its result
-  cache, which would make every timed run after the first one meaningless. The SQL Statement
-  Execution API has no session settings (no `SET use_cached_result = false`), so every statement
-  gets a unique trailing comment (`-- repopulse engine-matrix <nonce> <query> <run>`); the text
-  of no two statements is the same. After the runs, the query history
+  cache (local and remote), which would make every timed run after the first one meaningless.
+  The Databricks documentation on query caching gives two levers: `SET use_cached_result = false`
+  (a session setting; the SQL Statement Execution API runs each statement on its own, with no
+  session to carry it) and "both caches are invalidated when the underlying tables are updated".
+  A first attempt gave every statement a unique trailing comment
+  (`-- repopulse engine-matrix <nonce> <query> <run>`): the query history showed most timed
+  statements still came from the cache (workflow run 43173868610, no row written), so comments
+  are not part of the cache key. The method used: right before every timed run, outside the
+  clock, both tables get a metadata-only commit (`ALTER TABLE ... SET TBLPROPERTIES
+  ('repopulse.matrix_run' = '<nonce>-run<i>')`), a new Delta version with unchanged data
+  (`result_cache=table_version_bump`). After the runs the query history
   (`GET /api/2.0/sql/history/queries`, `include_metrics=true`) is read for the timed statements:
   if any reports `metrics.result_from_cache = true` the measurement is invalid and no row is
   written. `cache_check=query_history` means every timed statement was found and none came from
-  the cache; `unavailable` or `incomplete` means the history could not confirm it (the unique
-  comments still apply). MotherDuck and the serverless notebook get the same unique comments
-  (`result_cache=unique_comment`); neither is known to cache query results, and no cache check is
-  made for them.
+  the cache; `unavailable` or `incomplete` means the history could not confirm it. The first
+  query of each run may also read the new table version's log; that small cost is inside the
+  timed run. MotherDuck and the serverless notebook (Spark SQL) are not known to cache query
+  results; no cache check is made for them (their statements still carry the comment).
 - **Databricks serverless.** The notebook embeds the Spark SQL of Q1-Q6 and the load
   statements, gets `runs`, a nonce, catalog and schema as job parameters, and returns JSON (times
   per query and run, row count, load time, Spark version, warm-up results) through
