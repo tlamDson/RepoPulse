@@ -1,47 +1,48 @@
-# Command style — chạy headless không bị chặn
+# Command style — running headless without being blocked
 
-> Bắt buộc cho phiên chính và mọi subagent. Phiên điều phối dán **nguyên văn** file này vào brief
-> của từng agent. Lý do: phiên headless chạy `--permission-prompts none`, lệnh nào lẽ ra phải hỏi
-> sẽ bị **từ chối ngay**. Trong lịch sử Auto_Apply, 221/414 lần phải hỏi người đến từ đúng các kiểu
-> lệnh bị cấm dưới đây.
+> Mandatory for the main session and every subagent. The orchestrating session pastes this file
+> **verbatim** into each agent's brief. Reason: headless sessions run with `--permission-prompts none`,
+> so any command that would normally have to ask is **refused immediately**. In the Auto_Apply history,
+> 221 of 414 permission prompts came from exactly the command styles forbidden below.
 
-## Làm
+## Do
 
-- **Một lệnh mỗi lần gọi Bash.** Không nối bằng `&&`, `;`, `|` nếu không thật cần. Cần pipe thì giữ
-  ngắn và chỉ dùng lệnh đọc (`| head`, `| tail`, `| grep`).
-- **Không `cd`.** Dùng `git -C <path>`, `dbt --project-dir transform --profiles-dir transform`,
-  `pytest <đường dẫn>`, đường dẫn tuyệt đối hoặc tương đối từ thư mục hiện tại.
-- **Ghi file bằng tool Write/Edit**, không dùng `cat > file <<EOF`, `echo > file`, `tee`.
-  Bằng chứng (output test đỏ, kết quả review) cũng ghi bằng Write.
-- **Đọc và tìm bằng Read/Grep/Glob**, không dùng `cat`, `grep -r`, `find`, `python -c` để dò code.
-- **git và gh chạy qua Bash**, không qua PowerShell.
-- **File tạm** để trong scratchpad của phiên (đường dẫn tuyệt đối), tạo bằng Write.
-- **Thử mutation**: chỉ trên file **đã commit**, sửa bằng Edit, chạy test, rồi hoàn tác bằng
-  `git checkout -- <file>` và kiểm `git status --porcelain` sạch. `git checkout --` **không** hoàn
-  tác được file chưa được theo dõi.
-- **Gọi công cụ Python bằng `python -m`**: `python -m pytest`, `python -m ruff`,
-  `python -m dbt.cli.main build …`. Lệnh trần `pytest`/`ruff`/`dbt` không có trong PATH trên máy
-  local (exit code 127).
-- **Chờ CI**: `gh pr checks <số> --watch --interval 30` chạy foreground với timeout 600000; hết giờ
-  thì gọi lại, tới khi xong. Ngay sau khi push, lệnh có thể báo `no checks reported` (exit 1) vì check
-  chưa kịp đăng ký: đợi rồi gọi lại. Exit 1 cũng xảy ra khi có job đỏ — đọc output, đừng chỉ nhìn
-  exit code.
+- **One command per Bash call.** Do not chain with `&&`, `;`, `|` unless really necessary. If a pipe
+  is needed, keep it short and use read-only commands only (`| head`, `| tail`, `| grep`).
+- **No `cd`.** Use `git -C <path>`, `dbt --project-dir transform --profiles-dir transform`,
+  `pytest <path>`, absolute paths, or paths relative to the current directory.
+- **Write files with the Write/Edit tools**, not `cat > file <<EOF`, `echo > file`, `tee`.
+  Evidence (red test output, review results) is also written with Write.
+- **Read and search with Read/Grep/Glob**, not `cat`, `grep -r`, `find`, `python -c` to probe code.
+- **git and gh run through Bash**, not PowerShell.
+- **Temporary files** go in the session scratchpad (absolute path), created with Write.
+- **Mutation testing**: only on **committed** files, edit with Edit, run the tests, then revert with
+  `git checkout -- <file>` and check that `git status --porcelain` is clean. `git checkout --`
+  **cannot** revert an untracked file.
+- **Call Python tools with `python -m`**: `python -m pytest`, `python -m ruff`,
+  `python -m dbt.cli.main build …`. Bare `pytest`/`ruff`/`dbt` commands are not on the PATH of the
+  local machine (exit code 127).
+- **Waiting for CI**: run `gh pr checks <number> --watch --interval 30` in the foreground with a
+  timeout of 600000; when it times out, call it again until it finishes. Right after a push the command
+  may report `no checks reported` (exit 1) because the checks have not registered yet: wait and call it
+  again. Exit 1 also happens when a job is red — read the output, do not look only at the exit code.
 
-## Không làm
+## Do not
 
-- Không dùng biến shell cho đường dẫn (`S=...; ... "$S/x"`), không `$(...)` chứa lệnh ghi.
-- Không `rm -rf`, không xoá thư mục. Worktree do `scripts/orchestrate.py clean` dọn.
-- Không `git stash` (dùng chung giữa mọi worktree), không `git reset --hard`, không `git clean`,
-  không rebase, không force push.
-- Không push lên `develop` hay `main`; chỉ push nhánh của việc đang làm.
-- Không sửa gì trong `.claude/` (ngoài `.claude/worktrees/`), không sửa `.github/workflows/ci.yml`
-  trừ khi PR được giao đúng việc đó.
-- Không đọc `.env`, không chạy `gh secret`, không in token.
-- Không `AskUserQuestion`, không `EnterPlanMode`. Quyết định nhỏ ghi vào mục `## Giả định` của PR.
+- Do not use shell variables for paths (`S=...; ... "$S/x"`), and no `$(...)` containing a write command.
+- No `rm -rf`, no deleting directories. Worktrees are cleaned by `scripts/orchestrate.py clean`.
+- No `git stash` (shared across all worktrees), no `git reset --hard`, no `git clean`,
+  no rebase, no force push.
+- Do not push to `develop` or `main`; only push the branch of the task at hand.
+- Do not change anything in `.claude/` (outside `.claude/worktrees/`), and do not edit
+  `.github/workflows/ci.yml` unless the PR was assigned exactly that task.
+- Do not read `.env`, do not run `gh secret`, do not print tokens.
+- No `AskUserQuestion`, no `EnterPlanMode`. Record small decisions in the PR's `## Assumptions` section.
 
-## Bị từ chối thì sao
+## If a command is refused
 
-1. Đọc lý do. Viết lại lệnh theo các luật trên (thường là tách lệnh, bỏ `cd`, đổi heredoc sang Write).
-2. Thử lại **một** lần.
-3. Vẫn bị từ chối: ghi lệnh và lý do vào PR (mục `## Giả định`), bỏ qua bước đó nếu không bắt buộc;
-   nếu bắt buộc thì kết thúc với `RESULT: blocked <lệnh bị chặn>`.
+1. Read the reason. Rewrite the command following the rules above (usually: split the command, drop
+   `cd`, replace a heredoc with Write).
+2. Retry **once**.
+3. Still refused: record the command and the reason in the PR (the `## Assumptions` section), skip the step
+   if it is not mandatory; if it is mandatory, finish with `RESULT: blocked <blocked command>`.

@@ -121,7 +121,7 @@ def test_writes_job_summary():
 
 def test_uploads_landing_artifact():
     upload = [
-        s for s in steps(load()) if str(s.get("uses", "")).startswith("actions/upload-artifact@v4")
+        s for s in steps(load()) if str(s.get("uses", "")).startswith("actions/upload-artifact@v7")
     ]
     assert len(upload) == 1
     with_ = upload[0]["with"]

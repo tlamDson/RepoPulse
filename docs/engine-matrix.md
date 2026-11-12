@@ -107,7 +107,7 @@ Details:
   per query and run, row count, load time, Spark version, warm-up results) through
   `dbutils.notebook.exit`. Serverless compute cannot `cache()` a DataFrame, so the day is loaded
   into Delta tables instead of a cached view (the Spark engine on the runner caches it).
-- **Snowflake.** The plan says "lấy lại số đã có" and the trial has 30 days of credits, so
+- **Snowflake.** The plan says "reuse the existing numbers" and the trial has 30 days of credits, so
   `--engine snowflake` exits 2 and no workflow step measures it. The README reuses the newest
   `dbt-build-snowflake` row ([`snowflake-port.md`](snowflake-port.md)) and labels it reused and not
   comparable: it is the build time of the marts with `dbt build` on the seed fixture, not Q1-Q6

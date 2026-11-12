@@ -1,124 +1,124 @@
-# SQL agent chỉ đọc schema `public` (AI2)
+# Read-only SQL agent over the `public` schema (AI2)
 
-Agent nhận câu hỏi tiếng Anh, gọi một LLM qua API OpenAI-compatible (`base_url` và model là cấu
-hình, ví dụ `llama-server` chạy model local), lấy SQL trong câu trả lời rồi chạy trên file DuckDB do
-dbt build. Agent đóng vai `public` của `docs/governance.md`: **chỉ** đọc schema `public`
-(`main_public` trên DuckDB), không ghi gì. Mã ở `repopulse/sql_agent.py`, bộ câu hỏi đánh giá ở
-`repopulse/sql_agent_eval.toml`, test ở `tests/test_sql_agent.py` và
+The agent takes an English question, calls an LLM through an OpenAI-compatible API (`base_url` and model are
+configuration, for example `llama-server` running a local model), extracts the SQL from the answer and runs it on the DuckDB file
+built by dbt. The agent plays the `public` role of `docs/governance.md`: it **only** reads the `public` schema
+(`main_public` on DuckDB) and writes nothing. The code is in `repopulse/sql_agent.py`, the evaluation question set in
+`repopulse/sql_agent_eval.toml`, the tests in `tests/test_sql_agent.py` and
 `tests/test_sql_agent_eval.py`.
 
-Tài liệu này không có số đo nào. CI và mọi test chỉ dùng LLM giả lập (kịch bản trả lời cố định,
-hoặc server HTTP giả trên `127.0.0.1`), nên kết quả test **không phải** số đo độ chính xác của
-model nào. Số đo thật (độ chính xác, thời gian mỗi câu) do việc AI3 ghi vào `runs.csv` bằng lệnh
-`eval` dưới đây.
+This document contains no measurements. CI and all tests only use a mock LLM (a fixed answer script,
+or a fake HTTP server on `127.0.0.1`), so test results are **not** accuracy measurements of
+any model. The real measurements (accuracy, time per question) are recorded in `runs.csv` by task AI3 with the `eval`
+command below.
 
-## Ranh giới chỉ đọc (từng lớp)
+## Read-only boundary (layer by layer)
 
-Các lớp không tin nhau: lớp sau vẫn chặn khi lớp trước sót.
+The layers do not trust each other: a later layer still blocks when an earlier one lets something through.
 
-1. **Guard** (`Guard.check`) dùng parser của chính DuckDB, không dùng regex từ khoá:
-   `extract_statements` đếm câu lệnh và lấy loại; `json_serialize_sql` cho cây cú pháp, duyệt đệ
-   quy mọi dict/list (không phụ thuộc vị trí khoá, để chạy được trên cả DuckDB 1.4 và 2.0).
-   Fail closed: parse lỗi, cây không serialize được, hay gặp mục FROM lạ đều bị từ chối.
-   - Đúng **một** câu lệnh loại `SELECT` (kể cả `WITH … SELECT`). `SHOW`/`DESCRIBE`/`SUMMARIZE`
-     (DuckDB coi là SELECT trên `SHOW_REF`) và `PIVOT` dạng câu lệnh cũng bị từ chối.
-   - Mọi bảng phải là quan hệ của schema public, danh sách đọc từ `information_schema` của chính
-     database lúc dựng guard. Nhận tên không kèm schema (khi kết nối phân giải tên trần về
-     `main_public`, hoặc là CTE **trong phạm vi**) và `main_public.<bảng>` (có thể kèm catalog của
-     database). Từ chối `main_gold`, `main_staging`, `main`, `information_schema`, `pg_catalog`,
-     view hệ thống (`duckdb_tables`, `pg_tables`), bảng không tồn tại, đường dẫn file
-     (`FROM 'x.csv'`), dù nằm trong subquery ở WHERE, scalar subquery, CTE, nhánh UNION, JOIN hay
-     LATERAL. CTE chỉ có hiệu lực trong query định nghĩa nó: tên CTE ở subquery không che được bảng
-     thật bên ngoài.
-   - Table function bị từ chối hết (`read_csv`, `read_parquet`, `read_json`, `read_text`, `glob`,
-     `query`, `duckdb_*()`, `pragma_*`…), trừ `range`, `generate_series`, `unnest`.
-   - Hàm lộ cấu hình/secret bị từ chối: `current_setting` (trên MotherDuck
-     `current_setting('motherduck_token')` lộ token), `getenv`, `which_secret`, mọi `duckdb_*`,
+1. **Guard** (`Guard.check`) uses DuckDB's own parser, not keyword regexes:
+   `extract_statements` counts statements and gets the type; `json_serialize_sql` gives the syntax tree, walked
+   recursively over every dict/list (independent of key position, so it works on both DuckDB 1.4 and 2.0).
+   Fail closed: a parse error, a tree that cannot be serialized, or an unknown FROM item is rejected.
+   - Exactly **one** statement of type `SELECT` (including `WITH … SELECT`). `SHOW`/`DESCRIBE`/`SUMMARIZE`
+     (which DuckDB treats as a SELECT over `SHOW_REF`) and statement-form `PIVOT` are also rejected.
+   - Every table must be a relation of the public schema, with the list read from the `information_schema` of the
+     database itself when the guard is built. Accepts names without a schema (when the connection resolves bare names to
+     `main_public`, or a CTE **in scope**) and `main_public.<table>` (optionally with the database's catalog).
+     Rejects `main_gold`, `main_staging`, `main`, `information_schema`, `pg_catalog`,
+     system views (`duckdb_tables`, `pg_tables`), nonexistent tables, file paths
+     (`FROM 'x.csv'`), even inside a subquery in WHERE, a scalar subquery, a CTE, a UNION branch, a JOIN or
+     LATERAL. A CTE only takes effect inside the query that defines it: a CTE name in a subquery cannot shadow a
+     real table outside.
+   - All table functions are rejected (`read_csv`, `read_parquet`, `read_json`, `read_text`, `glob`,
+     `query`, `duckdb_*()`, `pragma_*`…), except `range`, `generate_series`, `unnest`.
+   - Functions that expose configuration/secrets are rejected: `current_setting` (on MotherDuck
+     `current_setting('motherduck_token')` leaks the token), `getenv`, `which_secret`, every `duckdb_*`,
      `pragma_*`.
-   - Tên so không phân biệt hoa thường, có hay không ngoặc kép. Chuỗi `'drop table x'`, comment
-     chứa `delete`, cột `updated_at` không bị chặn nhầm (test chứng minh guard không phải regex).
-2. **Kết nối** (`open_readonly`): chỉ file DuckDB local, `read_only=True`,
-   `enable_external_access=false` (không đọc/ghi file, không mạng), tắt autoinstall/autoload
-   extension, tắt replacement scan của Python, `search_path` = schema public, rồi
-   `lock_configuration=true` (không `SET` lại được). Test chạy thẳng `DROP`, `INSERT`, `CREATE`,
-   `read_csv`, `COPY … TO`, `SET enable_external_access`, `LOAD` trên kết nối (bỏ qua guard): tất
-   cả lỗi, file database không đổi (so sha256).
-3. **Giới hạn dòng** (`run_query`): fetch tối đa `max_rows + 1` dòng, trả `max_rows` dòng và cờ
-   `truncated`, bất kể LLM viết `LIMIT` gì. Mặc định 200 (`--max-rows`).
+   - Names are compared case-insensitively, with or without double quotes. The string `'drop table x'`, a comment
+     containing `delete`, and a column `updated_at` are not wrongly blocked (tests prove the guard is not a regex).
+2. **Connection** (`open_readonly`): only local DuckDB files, `read_only=True`,
+   `enable_external_access=false` (no file read/write, no network), autoinstall/autoload of
+   extensions off, Python replacement scans off, `search_path` = public schema, then
+   `lock_configuration=true` (cannot `SET` again). Tests run `DROP`, `INSERT`, `CREATE`,
+   `read_csv`, `COPY … TO`, `SET enable_external_access`, `LOAD` directly on the connection (bypassing the guard): all
+   fail and the database file is unchanged (compared by sha256).
+3. **Row limit** (`run_query`): fetches at most `max_rows + 1` rows, returns `max_rows` rows and a `truncated` flag,
+   regardless of what `LIMIT` the LLM wrote. Default 200 (`--max-rows`).
 
-Target MotherDuck (`md:`, `motherduck:`) bị từ chối với lỗi rõ ràng: bản này chỉ hỗ trợ file local.
+MotherDuck targets (`md:`, `motherduck:`) are rejected with a clear error: this version only supports local files.
 
-## Cấu hình LLM
+## LLM configuration
 
-| Biến môi trường | Cờ CLI | Mặc định |
+| Environment variable | CLI flag | Default |
 |---|---|---|
-| `REPOPULSE_LLM_BASE_URL` | `--base-url` | `http://127.0.0.1:8080/v1` (cổng mặc định của `llama-server`) |
-| `REPOPULSE_LLM_MODEL` | `--model` | không có: thiếu thì lỗi cấu hình (exit 2) |
-| `REPOPULSE_LLM_API_KEY` | — | không gửi header `Authorization` |
+| `REPOPULSE_LLM_BASE_URL` | `--base-url` | `http://127.0.0.1:8080/v1` (the default port of `llama-server`) |
+| `REPOPULSE_LLM_MODEL` | `--model` | none: if missing it is a configuration error (exit 2) |
+| `REPOPULSE_LLM_API_KEY` | — | no `Authorization` header is sent |
 
-Cờ đè biến môi trường. Module không đọc file `.env`; key không bao giờ xuất hiện trong thông báo lỗi,
-`repr` của client hay report. Client gửi `POST {base_url}/chat/completions` với
-`{"model", "messages", "temperature": 0}` và đọc `choices[0].message.content`; lỗi HTTP, lỗi kết
-nối, JSON sai dạng thành `LLMError`. `extract_sql` bỏ khối `<think>…</think>` (model Qwen suy
-luận), lấy khối ```` ```sql ```` cuối cùng (không có thì lấy cả câu trả lời), bỏ `;` cuối.
+Flags override environment variables. The module does not read `.env` files; the key never appears in error messages,
+the client's `repr` or reports. The client sends `POST {base_url}/chat/completions` with
+`{"model", "messages", "temperature": 0}` and reads `choices[0].message.content`; HTTP errors, connection
+errors and malformed JSON become `LLMError`. `extract_sql` drops `<think>…</think>` blocks (reasoning Qwen
+models), takes the last ```` ```sql ```` block (or the whole answer if there is none), and drops a trailing `;`.
 
-## Chạy với `llama-server`
+## Running with `llama-server`
 
 ```bash
-llama-server -m <model>.gguf --port 8080          # server OpenAI-compatible trên 127.0.0.1:8080
-python -m dbt.cli.main build --project-dir transform --profiles-dir transform --target ci   # ghi ci.duckdb
-python -m repopulse.sql_agent ask --db ci.duckdb --model <tên model> "Which 3 repositories have the highest health score?"
+llama-server -m <model>.gguf --port 8080          # OpenAI-compatible server on 127.0.0.1:8080
+python -m dbt.cli.main build --project-dir transform --profiles-dir transform --target ci   # writes ci.duckdb
+python -m repopulse.sql_agent ask --db ci.duckdb --model <model name> "Which 3 repositories have the highest health score?"
 ```
 
-`ask` in SQL, bảng kết quả (tab), số lần thử. Exit 0 khi trả lời được, 1 khi hết lượt thử mà không
-có SQL hợp lệ, 2 khi lỗi cấu hình, không gọi được LLM hoặc không mở được database.
+`ask` prints the SQL, the result table (tab-separated) and the number of attempts. Exit 0 when it can answer, 1 when attempts run out without
+valid SQL, 2 for a configuration error, when the LLM cannot be called or the database cannot be opened.
 
-Vòng lặp (`ask`): prompt hệ thống gồm luật (một câu SELECT, dialect DuckDB, chỉ bảng liệt kê) và mô
-tả schema (bảng + cột + kiểu của **chỉ** `main_public`, do code đọc từ `information_schema`, không
-qua LLM). SQL bị guard chặn hoặc DuckDB báo lỗi thì lỗi được gửi lại cho LLM để sửa, tối đa
-`--max-attempts` lần (mặc định 3).
+The loop (`ask`): the system prompt contains the rules (a single SELECT, DuckDB dialect, only the listed tables) and the schema
+description (tables + columns + types of **only** `main_public`, read by the code from `information_schema`, not
+through the LLM). If the SQL is blocked by the guard or DuckDB reports an error, the error is sent back to the LLM to fix, at most
+`--max-attempts` times (default 3).
 
-## Bộ đánh giá
+## Evaluation set
 
 ```bash
-python -m repopulse.sql_agent eval --db ci.duckdb --model <tên model> --report out/sql-agent-eval.json \
+python -m repopulse.sql_agent eval --db ci.duckdb --model <model name> --report out/sql-agent-eval.json \
     --out out/sql-agent-row.csv --git-sha <sha>
-python benchmarks/record_run.py out/sql-agent-row.csv   # gộp vào runs.csv (việc AI3)
+python benchmarks/record_run.py out/sql-agent-row.csv   # merge into runs.csv (task AI3)
 ```
 
-- `repopulse/sql_agent_eval.toml`: mỗi `[[question]]` có `id`, `question` (tiếng Anh, nói rõ cột cần
-  trả), `sql` (đáp án chuẩn trên `main_public`), `ordered` (mặc định `false`). 16 câu, phủ 6 mart
-  Q1–Q6, `fct_events`, `dim_repo`, `dim_user`; từ lọc một bảng, top-N có thứ tự, gộp, tới join
-  fact–dim.
-- **Execution accuracy**: đáp án là kết quả của SQL chuẩn chạy trên **cùng database lúc đánh giá**
-  (qua cùng guard), không gõ cứng giá trị vì dữ liệu đổi theo giờ. Giới hạn dòng của agent được
-  nâng lên bằng số dòng đáp án, để riêng giới hạn không làm câu trả lời đúng thành sai.
-- **Chấm** (`score`): đúng khi có một ánh xạ đơn ánh từ cột đáp án sang cột kết quả mà các dòng
-  chiếu ra bằng nhau. Bỏ qua tên cột, cho phép thừa cột và đổi thứ tự cột; so đa tập khi
-  `ordered = false`, so dãy khi `ordered = true`; số so với dung sai tuyệt đối `1e-6`
-  (`1 == 1.0`, `Decimal` so với `float`), `NULL == NULL`, bool không phải số. Sai giá trị,
-  thiếu/thừa dòng, sai số lần lặp dòng, sai thứ tự khi `ordered`, kết quả bị cắt (`truncated`) hay
-  agent lỗi đều tính sai.
-- Report JSON: từng câu `{id, question, correct, sql, error, attempts, seconds}`, tổng
-  `{questions, correct, accuracy, total_seconds, p50_seconds}`, kèm `model`, `base_url` (không có
-  key). `eval` exit 0 khi chạy trọn bộ: độ chính xác là số đo, không phải pass/fail.
-- **LLM không gọi được thì phép đo vô hiệu**: exit 2, không ghi report, không ghi dòng CSV (không
-  tính thành "sai hết").
-- Dòng `runs.csv` (`--out`, cần `--git-sha`): `variant` = `--variant` hoặc `sql-agent-<slug model>`
-  (chữ thường, ký tự ngoài `[a-z0-9_-]` thành `-`, ví dụ `Qwen3.6-35B-A3B` →
-  `sql-agent-qwen3-6-35b-a3b`), `data_date` = `max(event_date)` của `main_public.fct_events`,
-  `total_seconds` = tổng thời gian các câu, `row_count` = số câu, `notes` =
-  `accuracy=<đúng>/<tổng>; p50_question_s=<giây>; model=<model>`. File một dòng cùng dạng các
-  benchmark khác, gộp bằng `benchmarks/record_run.py`.
+- `repopulse/sql_agent_eval.toml`: each `[[question]]` has `id`, `question` (English, stating clearly the columns to
+  return), `sql` (the reference answer on `main_public`), `ordered` (default `false`). 16 questions covering the 6 marts
+  Q1–Q6, `fct_events`, `dim_repo`, `dim_user`; from single-table filters, ordered top-N and aggregation, to fact–dim
+  joins.
+- **Execution accuracy**: the reference answer is the result of the reference SQL run on the **same database at evaluation time**
+  (through the same guard), with no hard-coded values since the data changes hourly. The agent's row limit is
+  raised to the number of reference rows, so the limit alone does not turn a correct answer into a wrong one.
+- **Scoring** (`score`): correct when there is an injective mapping from reference columns to result columns such that the projected
+  rows are equal. Column names are ignored, extra columns and column reordering are allowed; multisets are compared when
+  `ordered = false`, sequences when `ordered = true`; numbers compare with an absolute tolerance of `1e-6`
+  (`1 == 1.0`, `Decimal` against `float`), `NULL == NULL`, bool is not a number. A wrong value,
+  missing/extra rows, a wrong number of repeated rows, wrong order when `ordered`, a truncated result (`truncated`) or an
+  agent error all count as wrong.
+- JSON report: per question `{id, question, correct, sql, error, attempts, seconds}`, totals
+  `{questions, correct, accuracy, total_seconds, p50_seconds}`, plus `model`, `base_url` (no
+  key). `eval` exits 0 when the full set ran: accuracy is a measurement, not pass/fail.
+- **If the LLM cannot be called the measurement is void**: exit 2, no report, no CSV row (it is not
+  counted as "all wrong").
+- `runs.csv` row (`--out`, needs `--git-sha`): `variant` = `--variant` or `sql-agent-<model slug>`
+  (lowercase, characters outside `[a-z0-9_-]` become `-`, for example `Qwen3.6-35B-A3B` →
+  `sql-agent-qwen3-6-35b-a3b`), `data_date` = `max(event_date)` of `main_public.fct_events`,
+  `total_seconds` = total time of all questions, `row_count` = number of questions, `notes` =
+  `accuracy=<correct>/<total>; p50_question_s=<seconds>; model=<model>`. A one-row file of the same shape as the other
+  benchmarks, merged with `benchmarks/record_run.py`.
 
-## Giới hạn đã biết
+## Known limitations
 
-- Chỉ file DuckDB local; chưa hỗ trợ MotherDuck (kết nối `md:` không có `read_only` theo file và
-  có `current_setting('motherduck_token')`, cần thiết kế riêng).
-- Chưa có timeout cho query chạy lâu (DuckDB có `conn.interrupt()`); giới hạn dòng chỉ giới hạn kết
-  quả trả về, không giới hạn công tính.
-- Guard từ chối cả những thứ vô hại nằm ngoài danh sách (ví dụ table function khác ba hàm sinh dãy,
-  `DESCRIBE`): fail closed là có chủ ý.
-- Mô tả schema chỉ có tên cột và kiểu, chưa có mô tả cột của dbt (`persist_docs` chưa bật).
-- Bộ câu hỏi nhỏ, chấm theo kết quả: câu trả lời đúng bằng may mắn (cùng kết quả trên dữ liệu hiện
-  tại) vẫn tính đúng.
+- Only local DuckDB files; MotherDuck is not supported yet (an `md:` connection has no per-file `read_only` and
+  has `current_setting('motherduck_token')`, so it needs its own design).
+- No timeout yet for long-running queries (DuckDB has `conn.interrupt()`); the row limit only limits the returned
+  result, not the compute.
+- The guard also rejects harmless things outside the list (for example table functions other than the three sequence generators,
+  `DESCRIBE`): failing closed is intentional.
+- The schema description has only column names and types, no dbt column descriptions (`persist_docs` is not enabled).
+- The question set is small and scored by result: an answer that is correct by luck (same result on the current
+  data) still counts as correct.

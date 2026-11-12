@@ -1,24 +1,24 @@
 ---
 name: Data incident
-about: Pipeline chạy lỗi, dữ liệu trễ, hoặc kiểm tra chất lượng báo động
+about: A pipeline run failed, data is late, or a data quality check raised an alert
 labels: data-incident
 ---
 
-## Triệu chứng
+## Symptoms
 
-<!-- Hệ thống hoặc người xem dashboard thấy gì. Kèm link lần chạy GitHub Actions. -->
+<!-- What the system or a dashboard viewer sees. Include the GitHub Actions run link. -->
 
-## Phạm vi
+## Scope
 
-- Bảng hoặc mart bị ảnh hưởng:
-- Khoảng thời gian dữ liệu:
+- Affected tables or marts:
+- Data time span:
 
-## Nguyên nhân
+## Cause
 
-<!-- Chỗ nào trong code hoặc nguồn dữ liệu, kèm file:line nếu biết. -->
+<!-- Where in the code or the data source, with file:line if known. -->
 
-## Điều kiện kích hoạt
+## Trigger condition
 
-<!-- Khi nào nó thành lỗi thật. -->
+<!-- When it becomes a real failure. -->
 
-## Cách xử lý và chạy bù
+## Resolution and backfill

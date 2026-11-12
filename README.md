@@ -2,7 +2,7 @@
 
 RepoPulse is a small data platform that measures the health of open-source projects from public GitHub event data.
 
-**Status:** both phases are built. The first phase is ingest, Spark and Delta Lake, dbt, data quality checks, governance, a static dashboard and the benchmarks. The second adds a comparison of two end-to-end paths, Delta Lake against Apache Iceberg, a Kafka benchmark with fault injection, Trino on Hive-partitioned tables, an Airflow backfill and an SQL agent. These are measured on GitHub Actions runners, except the SQL agent, whose model runs on the repo owner's machine. Measured results are in [Results](#results), taken from `runs.csv`, the run log this repo keeps.
+**Status:** both phases are built. The first phase is ingest, Spark and Delta Lake, dbt, data quality checks, governance, a static dashboard and the benchmarks. The second adds a comparison of two end-to-end paths, Delta Lake against Apache Iceberg, a Kafka benchmark with fault injection, Trino on Hive-partitioned tables, an Airflow backfill and an SQL agent. These are measured on GitHub Actions runners, except the SQL agent, whose model runs on the repo owner's machine. Measured results are in [Results](#results), taken from `runs.csv`, the run log this repo keeps. To run or change the code, see the [developer guide](docs/developer-guide.md).
 
 ## What it does
 
@@ -240,60 +240,16 @@ The scheduled pipeline uploads its `pipeline-incremental` rows as workflow artif
 - **Application events are simulated.** There is no app with real users, so `simkit` generates events from the catalog with a fixed seed and injects faults that are known in advance. That is what makes fault detection measurable. Wherever these events are reported they are labelled simulated. See [`docs/simkit.md`](docs/simkit.md).
 - **One dbt project for two engines.** The SQL avoids DuckDB-only syntax outside a small macro file, and a test enforces it, so the same project also builds on Snowflake. See [`docs/snowflake-port.md`](docs/snowflake-port.md).
 
-## Plan
+## Method pages
 
-The work runs in two phases:
+Each measurement has a page with its method and limits. The full documentation index is in [`docs/developer-guide.md`](docs/developer-guide.md#documentation-index); the plan (in Vietnamese) is [`docs/plan.md`](docs/plan.md).
 
-1. **Cloud phase (built):** everything runs on free cloud services and GitHub Actions. No local Docker is needed.
-2. **Second phase (built):** adds what free cloud tiers cannot offer: a Kafka benchmark with fault-injection tests, Trino on Hive-partitioned tables, and an Airflow backfill. It ran on GitHub Actions runners, with Docker Compose inside the workflows, not on the owner's machine. Alongside it, the repo compares the two paths, Delta Lake with Iceberg and six engines, and has a semantic layer and an SQL agent.
+- Two paths and the primary-path rule: [`docs/probe-result.md`](docs/probe-result.md), [`docs/path-comparison.md`](docs/path-comparison.md), [`docs/databricks-job.md`](docs/databricks-job.md), [`docs/dbt-databricks.md`](docs/dbt-databricks.md)
+- Engines and formats: [`docs/engine-matrix.md`](docs/engine-matrix.md), [`docs/iceberg-vs-delta.md`](docs/iceberg-vs-delta.md), [`docs/trino-hive.md`](docs/trino-hive.md), [`docs/benchmark-scale.md`](docs/benchmark-scale.md), [`docs/query-optimization.md`](docs/query-optimization.md)
+- Kafka benchmark and fault tests: [`docs/streaming.md`](docs/streaming.md), [`docs/streaming-fault.md`](docs/streaming-fault.md)
+- Orchestration, metrics and the SQL agent: [`docs/airflow.md`](docs/airflow.md), [`docs/semantic-layer.md`](docs/semantic-layer.md), [`docs/sql-agent.md`](docs/sql-agent.md)
 
-Details are in [`docs/plan.md`](docs/plan.md) (Vietnamese). Progress is tracked in [`docs/progress.md`](docs/progress.md).
-
-## Documentation
-
-Most pages are in Vietnamese; the benchmark pages are in English.
-
-| Page | Topic |
-|---|---|
-| [`docs/probe-result.md`](docs/probe-result.md) | The cloud probe, the rule that picks the primary path, and where it stands |
-| [`docs/eventspec.md`](docs/eventspec.md), [`docs/simkit.md`](docs/simkit.md) | Event catalog and schemas; the simulated event generator with known faults |
-| [`docs/spark-jobs.md`](docs/spark-jobs.md) | Bronze, silver and quarantine tables, rules, PII hashing |
-| [`docs/dbt-models.md`](docs/dbt-models.md) | Staging, star schema, marts Q1–Q6, incremental models |
-| [`docs/pipeline.md`](docs/pipeline.md) | The scheduled incremental batch workflow |
-| [`docs/data-quality.md`](docs/data-quality.md) | Fault injection, volume and freshness checks, Issue alerts |
-| [`docs/governance.md`](docs/governance.md) | PII labels, roles, the masked `public` schema |
-| [`docs/dashboard.md`](docs/dashboard.md) | The static site and the Tableau CSV export |
-| [`docs/query-optimization.md`](docs/query-optimization.md) | Partitioned and clustered layouts against the baseline |
-| [`docs/benchmark-scale.md`](docs/benchmark-scale.md) | Spark against DuckDB at 1, 7 and 30 days |
-| [`docs/iceberg-vs-delta.md`](docs/iceberg-vs-delta.md) | Delta Lake against Apache Iceberg: write, Q1–Q6, MERGE, time travel |
-| [`docs/engine-matrix.md`](docs/engine-matrix.md) | Q1–Q6 on the reference day on six engines, one README table |
-| [`docs/snowflake-port.md`](docs/snowflake-port.md) | Running the dbt project on Snowflake |
-| [`docs/databricks-job.md`](docs/databricks-job.md) | The same bronze/silver incremental batch as a serverless Databricks job (path B) |
-| [`docs/dbt-databricks.md`](docs/dbt-databricks.md) | The dbt project built on a Databricks SQL warehouse (path B) |
-| [`docs/path-comparison.md`](docs/path-comparison.md) | The two end-to-end paths run on the same data window, and how they are compared |
-| [`docs/streaming.md`](docs/streaming.md), [`docs/streaming-fault.md`](docs/streaming-fault.md) | The Kafka benchmark (produce, read into Delta, reconcile) and the tests that kill a broker or the consumer |
-| [`docs/trino-hive.md`](docs/trino-hive.md) | Q1–Q6 on Trino over Hive-partitioned parquet |
-| [`docs/airflow.md`](docs/airflow.md) | The Airflow DAG and its backfill on a runner |
-| [`docs/semantic-layer.md`](docs/semantic-layer.md) | MetricFlow metrics on the public marts |
-| [`docs/sql-agent.md`](docs/sql-agent.md) | The read-only SQL agent over the public schema, and its evaluation |
-
-## Baseline benchmark
-
-Every optimisation is measured against one naive baseline, on the same day of data and the same six questions (Q1–Q6).
-
-- **Reference day:** one full day of real GH Archive data. The date, the selection criteria and the sha256 and size of each of the 24 hourly files are in [`benchmarks/reference.toml`](benchmarks/reference.toml), generated by `benchmarks/select_reference_day.py`. A day qualifies when all 24 hours exist, every hour has PushEvents (some recent GH Archive hours lost whole event types), and no hour's size is more than `max_size_ratio` away from the median hour.
-- **Naive pipeline:** [`benchmarks/naive_duckdb.py`](benchmarks/naive_duckdb.py) reads every `*.json.gz` straight into one DuckDB table (full refresh, no partitioning, no deduplication), then runs [`benchmarks/queries/q1.sql`](benchmarks/queries) … `q6.sql`. Repos are scoped by the seed [`transform/seeds/repos_data_ecosystem.csv`](transform/seeds/repos_data_ecosystem.csv). The queries use pull requests, issues, reviews, comments and forks only, never PushEvent/CreateEvent/DeleteEvent. Each SQL file starts with the definitions it uses (bot, contribution, first response…).
-- **Measurements:** total time, time per query, peak RSS, bytes read and raw row count; median of the runs on a GitHub-hosted `ubuntu-latest` runner via [`.github/workflows/benchmark.yml`](.github/workflows/benchmark.yml). The workflow uploads one `runs.csv` row as the `benchmark-row` artifact; `python benchmarks/record_run.py benchmark-row.csv` appends it to `runs.csv` after a schema check. The results are in [Results](#results).
-
-Run it locally:
-
-```bash
-pip install -e ".[dev]"
-python benchmarks/fetch_reference.py        # download + verify checksums; non-zero exit on mismatch
-python benchmarks/naive_duckdb.py --runs 5 --variant baseline --git-sha "$(git rev-parse --short HEAD)" --out out/benchmark-row.csv
-```
-
-### Q6 health score
+## Q6 health score
 
 For each seed repo with at least one contribution in the data, six components in [0, 1]:
 
@@ -312,6 +268,10 @@ For each seed repo with at least one contribution in the data, six components in
 
 - GH Archive data is real public GitHub activity, not simulated. GH Archive publishes no explicit licence for its event data. This repo downloads it at run time and does not redistribute raw files.
 - Application events in the cloud phase are simulated and are labelled as simulated wherever they are reported.
+
+## Getting started and contributing
+
+Installing, running the pipeline and the benchmarks, the test and lint commands, git flow and the TDD rule are in the [developer guide](docs/developer-guide.md). Please read the [code of conduct](.github/CODE_OF_CONDUCT.md) before contributing.
 
 ## Licence
 
