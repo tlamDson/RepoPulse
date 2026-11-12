@@ -47,7 +47,14 @@ from dbt_helpers import (  # noqa: E402
 )
 
 POLICY = PROJECT / "governance.yml"
-PUBLIC_RELATIONS = {"dim_repo", "dim_user", "fct_events", *(m for m, _ in MARTS.values())}
+# metricflow_time_spine: calendar of the semantic layer (docs/semantic-layer.md), no personal data
+PUBLIC_RELATIONS = {
+    "dim_repo",
+    "dim_user",
+    "fct_events",
+    "metricflow_time_spine",
+    *(m for m, _ in MARTS.values()),
+}
 EMAIL_TEXT = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 SILVER_SALT = "silver-test-salt-not-a-secret"
 
