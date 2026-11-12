@@ -269,6 +269,27 @@ def _prepare(env: FaultEnv, cfg: CaseConfig, case: str) -> tuple[str, Path]:
     return topic, cell
 
 
+def _partition_0_leader(env: FaultEnv, cfg: CaseConfig, topic: str) -> int:
+    """Leader of partition 0, once the metadata of the new topic names a live broker.
+
+    ``create_topic`` waits on its own client. A metadata request served by another broker can
+    still answer UNKNOWN_TOPIC_OR_PART, or the topic without a leader, for a moment (seen on the
+    runner), so the first answer is not trusted: poll until the leader is a registered broker.
+    """
+    seen: dict[str, int] = {}
+
+    def known() -> bool:
+        state = env.state(topic)
+        leader = fault.leader_of(state, 0)
+        if leader < 0 or leader not in state.brokers:
+            return False
+        seen["leader"] = leader
+        return True
+
+    _wait(cfg, known, f"metadata of {topic}: a live leader for partition 0")
+    return seen["leader"]
+
+
 def _cleanup(env: FaultEnv, topic: str, cell: Path) -> None:
     try:
         env.delete_topic(topic)
@@ -296,7 +317,7 @@ def run_broker_kill(env: FaultEnv, cfg: CaseConfig) -> CaseResult:
         if cfg.kill_broker is not None:
             dead = int(cfg.kill_broker)
         else:
-            dead = fault.leader_of(env.state(topic), 0)
+            dead = _partition_0_leader(env, cfg, topic)
         threshold = max(1, math.ceil(cfg.kill_at_fraction * cfg.source_rows))
         reports = array("d")  # clock time of every successful delivery report
         task: Task | None = None
