@@ -107,6 +107,14 @@ Simulated data: app events from `simkit` (no real users) with a known number of 
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | dq-fault-injection | 2026-11-01 | 81.907 | 677 | true | 42 | 60 | 2 | 27 | 27 | 0 | 3 | 5/5 | 5/5 | 5/5 | 5/5 | 5/5 | 2/2 | 2026-11-11T18:22:59+00:00 | 0bc1ad4 |
 
+### Other runs
+
+Not compared with `baseline`: either there is no baseline row with the same `data_date`, or the variant is not one of the groups above. `notes` is copied from `runs.csv`.
+
+| variant | data_date | total_seconds | q1_seconds | q2_seconds | q3_seconds | q4_seconds | q5_seconds | q6_seconds | peak_rss_mb | bytes_read | row_count | run_at | git_sha | notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| airflow-backfill-2d | 2026-10-25 | 88.716 | — | — | — | — | — | — | — | — | 105070 | 2026-11-12T02:32:40+00:00 | d1cc3f5 | engine=airflow-3.4.0 days=2 hours_per_day=1 last_hour=15 runs_success=2 runs_failed=0 sla_minutes=30 sla_missed=0 max_active_runs=1 target=ci run_id=43142141658 trigger=pull_request |
+
 The full log, with every run and not only the newest, is [`runs.csv`](runs.csv).
 <!-- results:end -->
 
