@@ -19,7 +19,7 @@ from __future__ import annotations
 import importlib
 import json
 import os
-from datetime import date
+from datetime import date, datetime, time
 
 import duckdb
 import pytest
@@ -153,6 +153,19 @@ def _built_semantic_manifest(built):
     return built["base"] / "target" / "semantic_manifest.json"
 
 
+def _day(value):
+    """Time-dimension value as a date.
+
+    MetricFlow wraps time dimensions in DATE_TRUNC; on a DATE column DuckDB 1.4.1 returns a
+    DATE and DuckDB 2.0.0 (CI) a midnight TIMESTAMP. Anything that is not exactly midnight is
+    a real difference and must not be hidden.
+    """
+    if isinstance(value, datetime):
+        assert value.time() == time(0), value
+        return value.date()
+    return value
+
+
 def _metrics(sm: dict) -> dict[str, dict]:
     return {m["name"]: m for m in sm["metrics"]}
 
@@ -282,7 +295,7 @@ def test_metrics_match_baseline_query(q, built, gold, baseline):
     assert len(rows) == len(expected), (rows, expected)
 
     def key(row: dict, mf: bool) -> tuple:
-        return tuple(row[grain[c] if mf else c] for c in grain)
+        return tuple(_day(row[grain[c] if mf else c]) for c in grain)
 
     actual = {key(r, True): r for r in rows}
     wanted = {key(r, False): r for r in expected}

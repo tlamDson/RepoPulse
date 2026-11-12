@@ -71,6 +71,9 @@ test kiểm cả `node_relation.schema_name` lẫn `depends_on` trong `manifest.
   `all_time_anchor` khai bằng `expr: cast('1970-01-01' as date)`: **mốc quy ước, hằng số, không
   phải thời gian sự kiện**. `metric_time` của các metric này luôn là 1970-01-01; đừng lọc hay nhóm
   theo nó. Cột của mart public không đổi.
+- Kiểu trả về của dimension thời gian tuỳ phiên bản DuckDB: MetricFlow bọc cột trong
+  `DATE_TRUNC`; trên cột `DATE`, DuckDB 1.4.1 trả `DATE` còn DuckDB 2.0.0 trả `TIMESTAMP` lúc nửa đêm.
+  Người dùng SQL sinh ra nên ép về `DATE` khi so với cột của mart.
 
 ## Sinh và chạy SQL metric local
 
