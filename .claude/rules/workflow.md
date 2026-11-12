@@ -16,13 +16,13 @@
 5. **TDD is mandatory**, the first commit contains only tests, seen red for real. Details: `.claude/rules/tdd.md`.
 6. **Measurements come only from `runs.csv`; simulated data is clearly labelled "simulated".**
 7. **Update `CLAUDE.md` + `.claude/rules/*`** when a task changes a convention, tooling or process.
-8. **One PR, one task.** One task in `scripts/prs.toml`, or one improvement/bug fix; other things found along the way are split out (headless: record under Technical debt or `## Giả định`). Details: the "One PR, one task" section of `.claude/rules/developer-guide.md`.
+8. **One PR, one task.** One task in `scripts/prs.toml`, or one improvement/bug fix; other things found along the way are split out (headless: record under Technical debt or `## Assumptions`). Details: the "One PR, one task" section of `.claude/rules/developer-guide.md`.
 
 ## Running headless (`scripts/orchestrate.py`)
 
 Each PR is a `claude -p --permission-mode auto --permission-prompts none` session running in its own worktree `.claude/worktrees/pr-<id>`, created by the script from `origin/develop`. There is no human to ask:
 
-1. **Do not ask.** `AskUserQuestion` is removed; record every small decision as one line in the `## Giả định` (Assumptions) section of the PR description.
+1. **Do not ask.** `AskUserQuestion` is removed; record every small decision as one line in the `## Assumptions` section of the PR description.
 2. **Do not create child worktrees.** The PR session and every subagent work right in the PR's worktree; no `isolation: "worktree"`, no `EnterWorktree`.
 3. **Delegate to the specialist agent** named in the `agent` column of `scripts/prs.toml`, pasting `.claude/rules/command-style.md` verbatim into the brief.
 4. **Wait for CI** with `gh pr checks <number> --watch --interval 30` in the foreground, timeout 600000, looping until it finishes. If CI is red, fix and push again.

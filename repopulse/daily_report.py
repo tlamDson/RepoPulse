@@ -146,13 +146,23 @@ def propose_rules(denials: list[dict], min_count: int = 2) -> list[str]:
     return rules
 
 
+NEEDS_LAM_HEADING = "## Needs Lam"
+# Run reports written before the switch to English used this heading.
+_OLD_NEEDS_LAM_HEADINGS = frozenset({"## Việc cần Lam"})
+
+
+def needs_lam_section(todo: list[str]) -> list[str]:
+    """Lines of the ``## Needs Lam`` section that a run report writes."""
+    return [NEEDS_LAM_HEADING, *(todo or ["- None"]), ""]
+
+
 def needs_lam(run_report_md: str) -> list[str]:
     """Unticked items of the ``## Needs Lam`` section of a ``logs/run-*.md`` report."""
     items: list[str] = []
     inside = False
     for line in (run_report_md or "").splitlines():
         if line.startswith("## "):
-            inside = line.strip() == "## Needs Lam"
+            inside = line.strip() == NEEDS_LAM_HEADING or line.strip() in _OLD_NEEDS_LAM_HEADINGS
             continue
         if inside and line.startswith("- [ ] "):
             items.append(line[len("- [ ] ") :].strip())
@@ -219,7 +229,7 @@ def build_daily_report(
     lines += ["", "## Commands asked about or denied", "", f"Total: {len(denials)}"]
     lines += ["", "## Proposed rules (Lam approves, then adds to `.claude/rules/`)", ""]
     lines += [f"- {r}" for r in rules] or ["- None"]
-    lines += ["", "## Needs Lam", ""]
+    lines += ["", NEEDS_LAM_HEADING, ""]
     lines += [f"- [ ] {t}" for t in todo] or ["- None"]
     return subject, "\n".join(lines) + "\n"
 

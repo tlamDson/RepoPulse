@@ -49,13 +49,13 @@ Each PR does exactly **one** task, so that each can be reviewed, reverted and me
   - an out-of-scope bug handled per the "Technical debt" section of `workflow.md`: a `# [BUG]` test asserting the current behavior + an entry in `tech-defaults.md` (do not fix the bug).
 - **Does not belong** (do not merge in): fixing an out-of-scope bug, a refactor this task does not need, review suggestions about other code, CI/tooling changes this task does not require.
   - Manual session: open a separate PR.
-  - Headless session (one session = one PR, a second PR cannot be opened): record under Technical debt (bug) or one line in `## Giả định` (something worth doing later).
-  - If the main task *must* change something else to go green, it may be done in this PR, but state the reason in `## Giả định`.
+  - Headless session (one session = one PR, a second PR cannot be opened): record under Technical debt (bug) or one line in `## Assumptions` (something worth doing later).
+  - If the main task *must* change something else to go green, it may be done in this PR, but state the reason in `## Assumptions`.
 - Several improvements approved at once: one PR each, even when they edit the same file. Branch after the previous PR merges, or use `gh pr update-branch <number>` when the branch falls behind `develop`.
 - Does not apply to `develop → main` release PRs and Dependabot PRs.
-- `code-reviewer` treats a PR that does more than one task as a `[chặn]` (blocking) finding.
+- `code-reviewer` treats a PR that does more than one task as a `[blocking]` finding.
 
-Features target `develop`; only release PRs target `main`. Title `<type>: <short description>` (< 72 characters): `feat:`, `fix:`, `test:`, `docs:`, `chore:`, `refactor:`, `release:`. The description follows `.github/pull_request_template.md`, with a `## Giả định` (Assumptions) section added when running headless:
+Features target `develop`; only release PRs target `main`. Title `<type>: <short description>` (< 72 characters): `feat:`, `fix:`, `test:`, `docs:`, `chore:`, `refactor:`, `release:`. The description follows `.github/pull_request_template.md`, with a `## Assumptions` section added when running headless:
 
 ```markdown
 ## Summary
@@ -65,7 +65,7 @@ Features target `develop`; only release PRs target `main`. Title `<type>: <short
 ## RED
 <real red test output, pasted from the run on the tests-only commit>
 
-## Giả định
+## Assumptions
 - <small decision made on one's own>
 
 ## Test plan

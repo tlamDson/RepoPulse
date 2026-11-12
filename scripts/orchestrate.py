@@ -39,6 +39,7 @@ from repopulse.daily_report import (  # noqa: E402
     denials_between,
     metrics_row,
     needs_lam,
+    needs_lam_section,
     read_metrics,
     rows_between,
     run_metrics,
@@ -709,7 +710,7 @@ def write_report(tasks, done, blocked, skipped, final, started, stop_all, held_a
         todo.append(f"- [ ] Stopped early: {stop_all}")
     if held_at is not None:
         todo.append(f"- [ ] Quota above {held_at}%: no new tasks opened, rerun after the reset")
-    lines += ["## Needs Lam", *(todo or ["- None"]), ""]
+    lines += needs_lam_section(todo)
     lines += ["## Results per task", ""]
     lines += [f"- {k}: {d.kind} {d.reason}" for k, d in final.items()] or ["- (none)"]
     lines += ["", "## Progress", "", render_progress(tasks, done, set(), blocked, skipped)]
