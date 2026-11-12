@@ -1,4 +1,4 @@
-# Cài một lần: pip install -e ".[dev]" && pre-commit install
+# Install once: pip install -e ".[dev]" && pre-commit install
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.6.9

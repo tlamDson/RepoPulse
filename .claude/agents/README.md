@@ -1,35 +1,35 @@
 # Custom Subagents — RepoPulse
 
-## Agent hiện có
+## Existing agents
 
-| Agent (`name`) | Model / effort | Mảng | Dùng cho |
+| Agent (`name`) | Model / effort | Area | Used for |
 |---|---|---|---|
-| `pipeline-ops` | opus / medium | GitHub Actions, ingest GH Archive, bước thử cloud, `runs.csv`, deploy Pages | S0.4, 4, probe |
-| `event-schema-engineer` | opus / medium | eventspec (catalog → JSON Schema), simkit (dữ liệu mô phỏng có seed, chèn lỗi) | 2, 3 |
-| `spark-engineer` | opus / medium | PySpark + Delta bronze/silver, PII, quarantine, benchmark Spark/DuckDB | 5, 12 |
-| `analytics-engineer` | opus / medium | baseline Q1–Q6, dbt star schema, mart, incremental, tối ưu query, Snowflake | B, 6, 7, 10, 13 |
-| `data-quality-governance` | opus / medium | phát hiện bất thường, cảnh báo, PII, phân quyền, che cột | 8, 9 |
-| `dashboard-builder` | opus / medium | trang tĩnh Pages, xuất CSV cho Tableau | 11 |
-| `release-manager` | sonnet / high | release develop → main, progress, README kết quả | 14, release thất bại |
-| `code-reviewer` | opus / medium | review có bằng chứng: chạy lại test, commit đầu chỉ có test, mutation, PASS/FAIL | mọi PR |
-| `qa-testing` | sonnet / high | viết/chạy test bổ sung | khi được giao |
-| `researcher` | sonnet / high | đọc code/tài liệu, không viết code | khi được giao |
+| `pipeline-ops` | opus / medium | GitHub Actions, GH Archive ingest, cloud probe, `runs.csv`, Pages deploy | S0.4, 4, probe |
+| `event-schema-engineer` | opus / medium | eventspec (catalog → JSON Schema), simkit (seeded simulated data, fault injection) | 2, 3 |
+| `spark-engineer` | opus / medium | PySpark + Delta bronze/silver, PII, quarantine, Spark/DuckDB benchmark | 5, 12 |
+| `analytics-engineer` | opus / medium | Q1–Q6 baseline, dbt star schema, marts, incremental, query optimization, Snowflake | B, 6, 7, 10, 13 |
+| `data-quality-governance` | opus / medium | anomaly detection, alerts, PII, role-based access, column masking | 8, 9 |
+| `dashboard-builder` | opus / medium | static Pages site, CSV export for Tableau | 11 |
+| `release-manager` | sonnet / high | develop → main release, progress, results README | 14, failed releases |
+| `code-reviewer` | opus / medium | evidence-based review: rerun tests, first commit is tests only, mutation, PASS/FAIL | every PR |
+| `qa-testing` | sonnet / high | write/run additional tests | when assigned |
+| `researcher` | sonnet / high | read code/docs, no code writing | when assigned |
 
-Bảng việc → agent nằm ở `scripts/prs.toml` (cột `agent`); `tests/test_orchestrator.py` kiểm mọi agent
-trong đó đều có file ở đây. Mọi agent tuân `.claude/rules/command-style.md`.
+The task → agent table lives in `scripts/prs.toml` (the `agent` column); `tests/test_orchestrator.py`
+checks that every agent listed there has a file here. Every agent follows `.claude/rules/command-style.md`.
 
 ## Convention
 
-Mỗi subagent là 1 file `.md` trong thư mục này. **Định danh thật là field `name` trong frontmatter, không phải tên file** — nhưng giữ tên file trùng `name` để test kiểm được.
+Each subagent is one `.md` file in this directory. **The real identifier is the `name` field in the frontmatter, not the file name**, but keep the file name equal to `name` so the test can check it.
 
 ```markdown
 ---
-name: agent-slug              # bắt buộc, trùng tên file
-description: Agent làm gì và khi nào nên dùng.
-tools: Read, Grep, Glob        # tuỳ chọn — chuỗi phân tách dấu phẩy, KHÔNG phải YAML list. Bỏ trống = kế thừa toàn bộ tool.
-model: sonnet                  # tuỳ chọn — sonnet, opus, haiku, fable (hoặc full model ID)
-effort: high                   # tuỳ chọn — low, medium, high, xhigh, max
+name: agent-slug              # required, same as the file name
+description: What the agent does and when to use it.
+tools: Read, Grep, Glob        # optional — comma-separated string, NOT a YAML list. Omitted = inherit all tools.
+model: sonnet                  # optional — sonnet, opus, haiku, fable (or a full model ID)
+effort: high                   # optional — low, medium, high, xhigh, max
 ---
 
-System prompt của agent, viết như hướng dẫn cho đồng nghiệp mới nhận việc.
+The agent's system prompt, written as instructions for a new colleague taking over the job.
 ```
