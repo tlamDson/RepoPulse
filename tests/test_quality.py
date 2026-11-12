@@ -800,9 +800,9 @@ def test_issue_body_fills_symptom_scope_and_backfill():
         RUN_URL,
     )
     sections = re.split(r"^## ", body, flags=re.M)
-    symptom = next(s for s in sections if s.startswith("Triệu chứng"))
-    scope = next(s for s in sections if s.startswith("Phạm vi"))
-    fix = next(s for s in sections if s.startswith("Cách xử lý"))
+    symptom = next(s for s in sections if s.startswith("Symptoms"))
+    scope = next(s for s in sections if s.startswith("Scope"))
+    fix = next(s for s in sections if s.startswith("Resolution and backfill"))
     assert RUN_URL in symptom
     assert "GitHub Actions run: " in symptom and "data hour" in symptom
     assert "Affected tables or marts" in scope
