@@ -3,7 +3,9 @@
 Việc D3 của Plan v2 (`docs/plan.md`, mục "Luật chọn đường chính"): chạy **cùng** pipeline
 incremental batch (ingest → bronze/silver → gold → bộ Q1–Q6) trên hai đường, trên **cùng** cửa sổ
 dữ liệu GH Archive thật (không phải simulated), đủ nhiều lần theo lịch, rồi tổng hợp p50/p95 và tỉ
-lệ thành công chỉ từ `runs.csv`. Luật chọn đường do D4 áp dụng; PR này không chọn.
+lệ thành công chỉ từ `runs.csv`. Luật chọn đường do D4 áp dụng; PR này không chọn. D4 áp luật bằng
+`python -m repopulse.pathdecision --runs runs.csv --doc docs/probe-result.md` (kết quả và cách đo ở
+[`probe-result.md`](probe-result.md)).
 
 | Đường | `variant` | Bronze/silver | Gold | Q1–Q6 đọc từ |
 |---|---|---|---|---|
