@@ -38,3 +38,4 @@ known-first-party = ["repopulse", "benchmarks", "eventspec", "simkit"]
 testpaths = ["tests"]
 pythonpath = ["."]  # benchmarks/ is not an installed package; import it from the repo root
 addopts = "-q"
+faulthandler_timeout = 150  # TEMPORARY diagnostic for the Unit Tests stall on PR 54; reverted before merge
