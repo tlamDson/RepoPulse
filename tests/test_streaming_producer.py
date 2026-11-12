@@ -201,6 +201,35 @@ def test_topic_name_is_valid_for_kafka():
     assert name == "gharchive-2026-10-25-p3"
 
 
+def test_after_line_hook_sees_the_summary_after_every_produced_line():
+    class EagerClient(FakeClient):  # acks at once, like a fast broker
+        def produce(self, topic, key, value, on_delivery):
+            self.messages.append((topic, key, value))
+            on_delivery(None, 0)
+
+    seen = []
+    producer.produce_files(
+        EagerClient(), "t", [FIXTURE], after_line=lambda s: seen.append((s.lines, s.delivered))
+    )
+    assert seen == [(i, i) for i in range(1, 21)]
+
+
+def test_after_report_hook_sees_every_delivery_report_with_its_outcome():
+    lines = fixture_lines()
+    fail = {json.loads(lines[0])["id"].encode()}
+    reports = []
+    summary = producer.produce_files(
+        FakeClient(fail_keys=fail),
+        "t",
+        [FIXTURE],
+        after_report=lambda s, ok: reports.append((ok, s.delivered, s.failed)),
+    )
+    assert len(reports) == 20
+    assert reports[0] == (False, 0, 1)
+    assert [ok for ok, _, _ in reports].count(True) == 19
+    assert reports[-1][1:] == (summary.delivered, summary.failed)
+
+
 def test_topic_message_count_sums_watermark_spans():
     assert topics.topic_message_count({0: (0, 10), 1: (0, 5), 2: (2, 2)}) == 15
     assert topics.topic_message_count({}) == 0
