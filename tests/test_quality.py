@@ -789,7 +789,7 @@ def test_issue_body_has_every_heading_of_the_template_in_order():
     title, body = q.build_issue([volume_alert()], template_text(), RUN_URL)
     found = [ln.strip() for ln in body.splitlines() if ln.startswith("## ")]
     assert found == template_headings()
-    assert title.startswith("[dq:volume]")
+    assert title == "[dq:volume] GH Archive data volume anomaly"
     assert "labels:" not in body and not body.startswith("---")
 
 
@@ -804,6 +804,8 @@ def test_issue_body_fills_symptom_scope_and_backfill():
     scope = next(s for s in sections if s.startswith("Phạm vi"))
     fix = next(s for s in sections if s.startswith("Cách xử lý"))
     assert RUN_URL in symptom
+    assert "GitHub Actions run: " in symptom and "data hour" in symptom
+    assert "Affected tables or marts" in scope
     assert "volume_drop" in symptom and "volume_type_missing" in symptom
     assert "main_staging.stg_gharchive_events" in scope
     assert "2026-11-02T05" in scope and "2026-11-02T06" in scope
