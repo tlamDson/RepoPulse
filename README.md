@@ -107,6 +107,15 @@ Simulated data: app events from `simkit` (no real users) with a known number of 
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | dq-fault-injection | 2026-11-01 | 81.907 | 677 | true | 42 | 60 | 2 | 27 | 27 | 0 | 3 | 5/5 | 5/5 | 5/5 | 5/5 | 5/5 | 2/2 | 2026-11-11T18:22:59+00:00 | 0bc1ad4 |
 
+### Other runs
+
+Not compared with `baseline`: either there is no baseline row with the same `data_date`, or the variant is not one of the groups above. `notes` is copied from `runs.csv`.
+
+| variant | data_date | total_seconds | q1_seconds | q2_seconds | q3_seconds | q4_seconds | q5_seconds | q6_seconds | peak_rss_mb | bytes_read | row_count | run_at | git_sha | notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| format-delta | 2026-10-25 | 71.87834 | 7.64757 | 4.878722 | 13.089235 | 12.407299 | 2.199803 | 7.016043 | 9039.9 | 295319902 | 1670400 | 2026-11-12T02:13:36+00:00 | 39d76aa | format=delta runs=5 stat=median write_seconds=8.116 merge_seconds=8.259 merge_rerun_seconds=6.927 time_travel_seconds=1.105 load_seconds=15.958 startup_seconds=6.609 base_rows=1590485 merge_source_rows=161510 table_bytes=352367811 table_files=5 spark=3.5.9 delta=3.3.3 iceberg=1.9.2 cross_check=full |
+| format-iceberg | 2026-10-25 | 56.041629 | 7.251662 | 3.726932 | 10.22701 | 9.219515 | 1.486354 | 5.14486 | 8368.2 | 295319902 | 1670400 | 2026-11-12T02:13:36+00:00 | 39d76aa | format=iceberg runs=5 stat=median write_seconds=5.841 merge_seconds=6.147 merge_rerun_seconds=6.823 time_travel_seconds=0.068 load_seconds=16.217 startup_seconds=6.347 base_rows=1590485 merge_source_rows=161510 table_bytes=214203312 table_files=5 spark=3.5.9 delta=3.3.3 iceberg=1.9.2 cross_check=full |
+
 The full log, with every run and not only the newest, is [`runs.csv`](runs.csv).
 <!-- results:end -->
 
