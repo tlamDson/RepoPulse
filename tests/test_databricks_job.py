@@ -19,8 +19,10 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
+from benchmarks.record_run import read_artifact
 from repopulse import databricks_job as dj
 from repopulse import ingest
+from repopulse.pipeline import write_row
 from repopulse.probe import ApiError, HttpResponse
 from repopulse.runs_log import COLUMNS, validate_row
 
@@ -785,10 +787,12 @@ def row_kwargs(**overrides):
     return kwargs
 
 
-def test_build_row_is_a_valid_runs_csv_row_of_the_variant():
+def test_build_row_is_a_valid_runs_csv_row_of_the_variant(tmp_path):
     row = dj.build_row(**row_kwargs(rerun_summary=RERUN_SUMMARY))
 
-    assert validate_row(row) == row
+    write_row(tmp_path / "row.csv", row)
+    (parsed,) = read_artifact(tmp_path / "row.csv")  # what record_run.py merges into runs.csv
+    assert validate_row(parsed) == row
     assert dj.VARIANT == "databricks-bronze-silver"
     assert row["variant"] == "databricks-bronze-silver"
     assert row["git_sha"] == SHA
@@ -924,7 +928,8 @@ def test_cli_runs_the_job_verifies_the_rerun_and_writes_the_row(tmp_path, capsys
     assert rows[0] == list(COLUMNS)
     assert len(rows) == 2
     row = dict(zip(COLUMNS, rows[1], strict=True))
-    assert validate_row(row) == row
+    (parsed,) = read_artifact(tmp_path / "out" / "databricks-row.csv")
+    assert validate_row(parsed) == row
     assert row["variant"] == "databricks-bronze-silver"
     assert row["git_sha"] == SHA
     assert row["data_date"] == DAY
@@ -1048,6 +1053,17 @@ def test_cli_catalog_schema_and_volume_are_configurable(tmp_path):
         "rp_test",
         "landing_test",
     )
+
+
+def test_cli_add_mask_registers_bare_hostname_and_user_before_other_output(tmp_path, capsys):
+    fake = FakeDatabricks()
+
+    assert run_cli(tmp_path, fake, "--add-mask") == 0
+
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[:2] == [f"::add-mask::{NETLOC}", f"::add-mask::{USER}"]
+    for line in lines[2:]:
+        assert_no_secret(line, "stdout")
 
 
 def test_cli_rerun_that_inserts_rows_fails(tmp_path, capsys):
