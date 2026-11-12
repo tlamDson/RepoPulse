@@ -54,7 +54,7 @@ def delta_rows(spark, path: Path):
 
 def test_kafka_schema_matches_the_spark_kafka_source():
     names = [f.split()[0] for f in consumer.KAFKA_SCHEMA.split(",")]
-    assert [n.strip() for n in names] == [
+    assert [n.strip().strip("`") for n in names] == [
         "key",
         "value",
         "topic",
@@ -152,13 +152,17 @@ def test_batch_replayed_after_a_crash_before_commit_is_not_written_twice(spark, 
     src, delta, ckpt = tmp_path / "src", tmp_path / "delta", tmp_path / "ckpt"
     append_source(spark, src, kafka_rows(fixture_lines()))
     consumer.run_stream(file_stream(spark, src), delta_path=delta, checkpoint_path=ckpt)
+    from delta.tables import DeltaTable
+
+    versions = DeltaTable.forPath(spark, str(delta)).history().count()
     commit = ckpt / "commits" / "0"
     assert commit.is_file()
     commit.unlink()
     (ckpt / "commits" / ".0.crc").unlink(missing_ok=True)
-    replay = consumer.run_stream(file_stream(spark, src), delta_path=delta, checkpoint_path=ckpt)
-    assert replay["input_rows"] == 20  # batch 0 really ran again ...
-    assert consumer.delta_counts(spark, delta) == {"rows": 20, "distinct_offsets": 20}  # ... once
+    consumer.run_stream(file_stream(spark, src), delta_path=delta, checkpoint_path=ckpt)
+    assert commit.is_file()  # batch 0 was run again and committed ...
+    assert DeltaTable.forPath(spark, str(delta)).history().count() == versions  # ... no new write
+    assert consumer.delta_counts(spark, delta) == {"rows": 20, "distinct_offsets": 20}
 
 
 def test_delta_counts_sees_duplicate_offsets(spark, tmp_path):
