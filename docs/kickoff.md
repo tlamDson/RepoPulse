@@ -30,7 +30,7 @@ python scripts/orchestrate.py run --auto-approve-harness             # chạy, r
   như harness đã duyệt và chạy tiếp từ PR B. Bỏ cờ này nếu muốn tự xem `docs/harness-check.md` trước.
 - Thiếu secret cloud: làm hết việc không cần cloud (S0.4, B, 2, 3, 4, 5, 6, 12) rồi dừng ở `probe`.
 - Hết quota: chạy tới khi hết. Limit 5 giờ: phiên tự chờ; nếu phiên thoát vì limit thì script ngủ tới giờ reset rồi
-  `--resume` đúng phiên đó. Limit tuần (reset xa hơn 6 giờ) thì dừng và báo; thêm `--hold-at-90` nếu muốn chừa lại 10% quota.
+  `--resume` đúng phiên đó. Limit tuần (reset xa hơn 6 giờ) thì dừng và báo; thêm `--hold-at <phần trăm>` (số nguyên 1–100) để thôi mở việc mới khi quota 5 giờ hoặc 7 ngày chạm ngưỡng đó; `--hold-at-90` tương đương `--hold-at 90` (chừa lại 10% quota).
 - Release `develop → main` tự động sau B, 7, 11, 14 khi CI xanh.
 
 **Dừng:** tạo file `.claude/state/STOP`. Việc đang chạy làm nốt rồi script dừng.

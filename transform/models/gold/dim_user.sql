@@ -37,9 +37,9 @@ versions as (
 )
 
 select
-    cast(actor_id as varchar) || '-' || cast(version_number as varchar) as user_key,
+    cast(actor_id as string) || '-' || cast(version_number as string) as user_key,
     cast(actor_id as bigint) as actor_id,
-    cast(actor_login as varchar) as actor_login,
+    cast(actor_login as string) as actor_login,
     cast(version_number as bigint) as version_number,
     cast(valid_from as timestamp) as valid_from,
     cast(

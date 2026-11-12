@@ -72,6 +72,9 @@ Mọi dòng của mọi artifact được kiểm trước; một artifact hỏng
 
 Tài liệu này không chứa số đo; số đo chỉ lấy từ `runs.csv`.
 
+Sau mỗi lần chạy theo lịch, `.github/workflows/data-quality.yml` (`workflow_run`) kiểm khối lượng
+và độ tươi của staging và mở/cập nhật Issue `data-incident`: `docs/data-quality.md`.
+
 ## Lệnh
 
 ```bash

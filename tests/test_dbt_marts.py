@@ -52,19 +52,12 @@ from dbt_helpers import output as _output  # noqa: E402
 from dbt_helpers import q as _q  # noqa: E402
 from dbt_helpers import require_ok as _require_ok  # noqa: E402
 
-from benchmarks import naive_duckdb  # noqa: E402
-
 PARQUET_ONLY_IDS = ("9000000050", "9000000051", "9000000052")
 EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 
 
 # ---------------------------------------------------------------- session fixtures
-# lake / built: conftest.py (shared with test_governance.py)
-
-
-@pytest.fixture(scope="session")
-def baseline(lake) -> dict:
-    return naive_duckdb.run_once(lake["raw"], collect=True)["results"]
+# lake / built / baseline: conftest.py (shared with test_governance.py, test_dbt_semantic_layer.py)
 
 
 @pytest.fixture

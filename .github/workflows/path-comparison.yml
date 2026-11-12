@@ -1,0 +1,461 @@
+name: Path comparison (A runner + MotherDuck vs B Databricks)
+
+# D3 (docs/plan.md, docs/path-comparison.md): the same hourly incremental batch end to end on
+# both candidate paths, on the same data window:
+#   A = this runner: ingest -> PySpark + Delta bronze/silver -> silver export -> dbt build on
+#       MotherDuck (database repopulse_path_a, never `repopulse` of pipeline.yml) -> Q1-Q6.
+#   B = ingest on the runner -> Databricks serverless bronze/silver (D1, repopulse.databricks_job)
+#       -> SQL warehouse start -> dbt build --target databricks (D2, schemas repopulse_dbt_*)
+#       -> Q1-Q6 on the SQL warehouse.
+# Job `window` decides (date, hour, hours) once; both path jobs read it from its outputs. The two
+# path jobs are independent: one path failing never removes the row of the other. Each step is
+# timed with `python -m repopulse.pipeline timed`; runner queue/setup come from the GitHub jobs
+# API (actions: read), the serverless job queue/setup from the D1 row, the warehouse start from
+# `pathcompare warehouse-start`. An `if: always()` step writes one runs.csv row per path
+# (variant path-a-runner / path-b-databricks), failed runs included (status=failed,
+# failed_step=...). Rows land in the artifacts path-comparison-a-<run_id> / -b-<run_id>; merge
+# with `python benchmarks/record_run.py out/path-a-row.csv out/path-b-row.csv`.
+#
+# Triggers:
+# - schedule (hourly, minute 41; pipeline.yml uses 23) and workflow_dispatch only run once this
+#   file is on `main`, the default branch, i.e. after the next release. Schedule window: the hour
+#   floor(now UTC) - 2h, 1 hour. Dispatch inputs date/hour/hours are optional.
+# - push is limited to the branch feature/pipeline-path-comparison (paths below) so the
+#   workflow runs inside its own PR, always on the benchmark reference day
+#   (benchmarks/reference.toml), hour 23, 1 hour. After the merge the branch is deleted and the
+#   push trigger no longer fires. No pull_request: the cloud accounts are written only here.
+# Stop the cron once D4 has enough rows: disable the workflow in the Actions tab
+# (`gh workflow disable path-comparison.yml`) or remove the schedule in a PR.
+#
+# Concurrency: one run of this workflow at a time (queued, never cancelled; GitHub keeps only the
+# newest pending run). Job B also shares the group of databricks-bronze-silver.yml (D1), so two
+# writers never MERGE into the same silver Delta table at once.
+# Missing secrets: the steps of that path are skipped at step level (notice), the workflow stays
+# green and that path writes no row. Secrets enter only through the `env:` of the step that needs
+# them; no step prints them; hostnames and the warehouse path are masked.
+
+on:
+  schedule:
+    - cron: "41 * * * *"
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "last data date YYYY-MM-DD (UTC); empty = now minus 2 hours"
+        type: string
+        required: false
+        default: ""
+      hour:
+        description: "last data hour 0..23 (UTC); needed with date"
+        type: string
+        required: false
+        default: ""
+      hours:
+        description: "consecutive hours ending at date/hour (1..6); empty = 1"
+        type: string
+        required: false
+        default: ""
+  push:
+    branches: [feature/pipeline-path-comparison]
+    paths:
+      - ".github/workflows/path-comparison.yml"
+      - "repopulse/pathcompare.py"
+      - "repopulse/pipeline.py"
+      - "repopulse/databricks_job.py"
+      - "repopulse/probe.py"
+      - "repopulse/ingest.py"
+      - "repopulse/spark/**"
+      - "transform/**"
+      - "pyproject.toml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: path-comparison
+  cancel-in-progress: false
+
+jobs:
+  window:
+    name: Data window
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      date: ${{ steps.window.outputs.date }}
+      hour: ${{ steps.window.outputs.hour }}
+      hours: ${{ steps.window.outputs.hours }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Decide the data window (once, for both paths)
+        id: window
+        env:
+          INPUT_DATE: ${{ inputs.date }}
+          INPUT_HOUR: ${{ inputs.hour }}
+          INPUT_HOURS: ${{ inputs.hours }}
+        run: |
+          python -m repopulse.pathcompare window --event "$GITHUB_EVENT_NAME" \
+            --date "$INPUT_DATE" --hour "$INPUT_HOUR" --hours "$INPUT_HOURS" >> "$GITHUB_OUTPUT"
+
+  path-a:
+    name: Path A (runner + MotherDuck)
+    needs: window
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    permissions:
+      contents: read
+      actions: read
+    env:
+      DATA_DATE: ${{ needs.window.outputs.date }}
+      DATA_HOUR: ${{ needs.window.outputs.hour }}
+      DATA_HOURS: ${{ needs.window.outputs.hours }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run timestamp
+        run: echo "RUN_AT=$(date -u +%Y-%m-%dT%H:%M:%S+00:00)" >> "$GITHUB_ENV"
+
+      - name: Detect secrets
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          PII_HASH_SALT: ${{ secrets.PII_HASH_SALT }}
+        run: |
+          ok=true
+          if [ -z "$MOTHERDUCK_TOKEN" ]; then ok=false; fi
+          if [ -z "$PII_HASH_SALT" ]; then ok=false; fi
+          if [ "$ok" = true ]; then echo "HAS_SECRETS=true" >> "$GITHUB_ENV"; fi
+
+      - name: Secrets missing
+        if: env.HAS_SECRETS != 'true'
+        run: echo "::notice::MOTHERDUCK_TOKEN or PII_HASH_SALT is not set; skipped path A (no path-a-runner row)."
+
+      - uses: actions/setup-python@v5
+        if: env.HAS_SECRETS == 'true'
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      # PySpark 3.5 + Delta need Java 17.
+      - uses: actions/setup-java@v4
+        if: env.HAS_SECRETS == 'true'
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # MotherDuck rejects a DuckDB client newer than it supports: same pin as pipeline.yml.
+      - name: Install
+        if: env.HAS_SECRETS == 'true'
+        run: pip install -e ".[spark,dbt]" "duckdb==1.5.6"
+
+      - name: MotherDuck database of path A
+        if: env.HAS_SECRETS == 'true'
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+        run: python -m repopulse.pathcompare md-ensure --database repopulse_path_a
+
+      - name: Runner queue and setup (GitHub jobs API)
+        if: env.HAS_SECRETS == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python -m repopulse.pathcompare runner-waits \
+            --job-name "Path A (runner + MotherDuck)" --out out/runner-waits.json
+
+      - name: Ingest GH Archive
+        id: ingest
+        if: env.HAS_SECRETS == 'true'
+        run: |
+          python -m repopulse.pipeline timed --name ingest --timings out/timings.json -- \
+            python -m repopulse.ingest --date "$DATA_DATE" --hour "$DATA_HOUR" --hours "$DATA_HOURS" \
+            --landing-dir data/landing/gharchive --work-dir "$RUNNER_TEMP/gharchive-raw" \
+            --summary out/ingest-summary.json
+
+      - name: Spark bronze/silver
+        id: spark
+        if: env.HAS_SECRETS == 'true'
+        env:
+          PII_HASH_SALT: ${{ secrets.PII_HASH_SALT }}
+        run: |
+          python -m repopulse.pipeline timed --name spark --timings out/timings.json -- \
+            python -m repopulse.spark.job --source gharchive \
+            --date "$DATA_DATE" --hour "$DATA_HOUR" --hours "$DATA_HOURS" \
+            --landing-dir data/landing/gharchive --lake-dir data/lake \
+            --summary out/spark-summary.json
+
+      - name: Export silver to parquet
+        id: export
+        if: env.HAS_SECRETS == 'true'
+        run: |
+          python -m repopulse.pipeline timed --name export --timings out/timings.json -- \
+            python -m repopulse.spark.export --lake-dir data/lake --out data/silver-export \
+            --summary out/export-summary.json
+
+      - name: dbt build (MotherDuck, repopulse_path_a)
+        id: dbt
+        if: env.HAS_SECRETS == 'true'
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          MOTHERDUCK_DATABASE: repopulse_path_a
+          PII_HASH_SALT: ${{ secrets.PII_HASH_SALT }}
+        run: |
+          python -m repopulse.pipeline timed --name dbt --timings out/timings.json -- \
+            dbt build --project-dir transform --profiles-dir transform --target motherduck \
+            --vars '{silver_gharchive_parquet: "data/silver-export/*.parquet"}' \
+            --exclude fixture_silver_gharchive_events
+
+      - name: Q1-Q6 on MotherDuck
+        id: queries
+        if: env.HAS_SECRETS == 'true'
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+        run: |
+          python -m repopulse.pipeline timed --name queries --timings out/timings.json -- \
+            python -m repopulse.pathcompare queries --engine duckdb \
+            --database md:repopulse_path_a --schema main_gold --out out/queries.json
+
+      - name: runs.csv row (path-a-runner)
+        if: always() && env.HAS_SECRETS == 'true'
+        env:
+          OUTCOME_INGEST: ${{ steps.ingest.outcome }}
+          OUTCOME_SPARK: ${{ steps.spark.outcome }}
+          OUTCOME_EXPORT: ${{ steps.export.outcome }}
+          OUTCOME_DBT: ${{ steps.dbt.outcome }}
+          OUTCOME_QUERIES: ${{ steps.queries.outcome }}
+        run: |
+          python -m repopulse.pathcompare row --path a \
+            --run-at "$RUN_AT" --git-sha "$GITHUB_SHA" \
+            --date "$DATA_DATE" --hour "$DATA_HOUR" --hours "$DATA_HOURS" \
+            --outcome "ingest=$OUTCOME_INGEST" \
+            --outcome "spark=$OUTCOME_SPARK" \
+            --outcome "export=$OUTCOME_EXPORT" \
+            --outcome "dbt=$OUTCOME_DBT" \
+            --outcome "queries=$OUTCOME_QUERIES" \
+            --timings out/timings.json --waits out/runner-waits.json --queries out/queries.json \
+            --summary-json out/spark-summary.json --ingest-summary out/ingest-summary.json \
+            --run-id "$GITHUB_RUN_ID" --trigger "$GITHUB_EVENT_NAME" --out out/path-a-row.csv
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "### Path A: runner + MotherDuck (incremental batch)"
+            echo
+            if [ -f out/path-a-row.csv ]; then
+              python -m repopulse.pathcompare summary --runs out/path-a-row.csv
+              echo
+              echo '```'
+              cat out/path-a-row.csv
+              echo '```'
+            else
+              echo "No path-a-runner row (secrets missing or the job stopped before the row step)."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: path-comparison-a-${{ github.run_id }}
+          path: |
+            out/path-a-row.csv
+            out/timings.json
+            out/runner-waits.json
+            out/queries.json
+            out/ingest-summary.json
+            out/spark-summary.json
+          if-no-files-found: warn
+          retention-days: 90
+
+  path-b:
+    name: Path B (Databricks serverless + SQL warehouse)
+    needs: window
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      actions: read
+    # Same group as databricks-bronze-silver.yml: one writer of the silver Delta table at a time.
+    concurrency:
+      group: databricks-bronze-silver
+      cancel-in-progress: false
+    env:
+      DATA_DATE: ${{ needs.window.outputs.date }}
+      DATA_HOUR: ${{ needs.window.outputs.hour }}
+      DATA_HOURS: ${{ needs.window.outputs.hours }}
+      DBT_SEND_ANONYMOUS_USAGE_STATS: "false"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run timestamp
+        run: echo "RUN_AT=$(date -u +%Y-%m-%dT%H:%M:%S+00:00)" >> "$GITHUB_ENV"
+
+      - name: Detect secrets
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+          PII_HASH_SALT: ${{ secrets.PII_HASH_SALT }}
+        run: |
+          ok=true
+          if [ -z "$DATABRICKS_HOST" ]; then ok=false; fi
+          if [ -z "$DATABRICKS_TOKEN" ]; then ok=false; fi
+          if [ -z "$PII_HASH_SALT" ]; then ok=false; fi
+          if [ "$ok" = true ]; then echo "HAS_SECRETS=true" >> "$GITHUB_ENV"; fi
+
+      - name: Secrets missing
+        if: env.HAS_SECRETS != 'true'
+        run: echo "::notice::DATABRICKS_HOST, DATABRICKS_TOKEN or PII_HASH_SALT is not set; skipped path B (no path-b-databricks row)."
+
+      - uses: actions/setup-python@v5
+        if: env.HAS_SECRETS == 'true'
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install
+        if: env.HAS_SECRETS == 'true'
+        run: pip install -e ".[dbt,databricks]"
+
+      # The job's notebook runs `%pip install --no-deps` on this wheel (dependencies = []).
+      - name: Build wheel
+        if: env.HAS_SECRETS == 'true'
+        run: |
+          pip wheel --no-deps --wheel-dir dist .
+          echo "WHEEL=$(ls dist/repopulse-*.whl)" >> "$GITHUB_ENV"
+
+      - name: Warehouse http path
+        if: env.HAS_SECRETS == 'true'
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+          DATABRICKS_HTTP_PATH: ${{ secrets.DATABRICKS_HTTP_PATH }}
+        run: python -m repopulse.probe http-path --github-env
+
+      - name: Runner queue and setup (GitHub jobs API)
+        if: env.HAS_SECRETS == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python -m repopulse.pathcompare runner-waits \
+            --job-name "Path B (Databricks serverless + SQL warehouse)" --out out/runner-waits.json
+
+      - name: Ingest GH Archive
+        id: ingest
+        if: env.HAS_SECRETS == 'true'
+        run: |
+          python -m repopulse.pipeline timed --name ingest --timings out/timings.json -- \
+            python -m repopulse.ingest --date "$DATA_DATE" --hour "$DATA_HOUR" --hours "$DATA_HOURS" \
+            --landing-dir data/landing/gharchive --work-dir "$RUNNER_TEMP/gharchive-raw" \
+            --summary out/ingest-summary.json
+
+      # One serverless run, no --verify-rerun: the end-to-end time is one pass (D1 proves the
+      # re-run inserts nothing). Idempotent per (date, hour): silver MERGEs on the event id.
+      - name: Databricks bronze/silver (serverless)
+        id: databricks
+        if: env.HAS_SECRETS == 'true'
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+          PII_HASH_SALT: ${{ secrets.PII_HASH_SALT }}
+        run: |
+          python -m repopulse.pipeline timed --name databricks --timings out/timings.json -- \
+            python -m repopulse.databricks_job run --source gharchive \
+            --date "$DATA_DATE" --hour "$DATA_HOUR" --hours "$DATA_HOURS" \
+            --landing-dir data/landing/gharchive --wheel "$WHEEL" --git-sha "$GITHUB_SHA" \
+            --job-timeout 1800 --add-mask \
+            --summary out/databricks-summary.json --out out/databricks-row.csv
+
+      - name: SQL warehouse start
+        id: warehouse
+        if: env.HAS_SECRETS == 'true'
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+          DATABRICKS_HTTP_PATH: ${{ env.DBT_DATABRICKS_HTTP_PATH }}
+        run: |
+          python -m repopulse.pipeline timed --name warehouse --timings out/timings.json -- \
+            python -m repopulse.pathcompare warehouse-start --out out/warehouse-waits.json
+
+      - name: dbt build (Databricks SQL warehouse)
+        id: dbt
+        if: env.HAS_SECRETS == 'true'
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+          DATABRICKS_HTTP_PATH: ${{ env.DBT_DATABRICKS_HTTP_PATH }}
+          DBT_DATABRICKS_SCHEMA: repopulse_dbt
+          PII_HASH_SALT: ${{ secrets.PII_HASH_SALT }}
+        run: |
+          python -m repopulse.pipeline timed --name dbt --timings out/timings.json -- \
+            dbt build --project-dir transform --profiles-dir transform --target databricks
+
+      - name: Q1-Q6 on the SQL warehouse
+        id: queries
+        if: env.HAS_SECRETS == 'true'
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+          DATABRICKS_HTTP_PATH: ${{ env.DBT_DATABRICKS_HTTP_PATH }}
+        run: |
+          python -m repopulse.pipeline timed --name queries --timings out/timings.json -- \
+            python -m repopulse.pathcompare queries --engine databricks \
+            --schema workspace.repopulse_dbt_gold --out out/queries.json
+
+      - name: runs.csv row (path-b-databricks)
+        if: always() && env.HAS_SECRETS == 'true'
+        env:
+          OUTCOME_INGEST: ${{ steps.ingest.outcome }}
+          OUTCOME_DATABRICKS: ${{ steps.databricks.outcome }}
+          OUTCOME_WAREHOUSE: ${{ steps.warehouse.outcome }}
+          OUTCOME_DBT: ${{ steps.dbt.outcome }}
+          OUTCOME_QUERIES: ${{ steps.queries.outcome }}
+        run: |
+          python -m repopulse.pathcompare row --path b \
+            --run-at "$RUN_AT" --git-sha "$GITHUB_SHA" \
+            --date "$DATA_DATE" --hour "$DATA_HOUR" --hours "$DATA_HOURS" \
+            --outcome "ingest=$OUTCOME_INGEST" \
+            --outcome "databricks=$OUTCOME_DATABRICKS" \
+            --outcome "warehouse=$OUTCOME_WAREHOUSE" \
+            --outcome "dbt=$OUTCOME_DBT" \
+            --outcome "queries=$OUTCOME_QUERIES" \
+            --timings out/timings.json \
+            --waits out/runner-waits.json --waits out/warehouse-waits.json \
+            --databricks-row out/databricks-row.csv --queries out/queries.json \
+            --summary-json out/databricks-summary.json --ingest-summary out/ingest-summary.json \
+            --run-id "$GITHUB_RUN_ID" --trigger "$GITHUB_EVENT_NAME" --out out/path-b-row.csv
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "### Path B: Databricks serverless + SQL warehouse (incremental batch)"
+            echo
+            if [ -f out/path-b-row.csv ]; then
+              python -m repopulse.pathcompare summary --runs out/path-b-row.csv
+              echo
+              echo '```'
+              cat out/path-b-row.csv
+              echo '```'
+            else
+              echo "No path-b-databricks row (secrets missing or the job stopped before the row step)."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: path-comparison-b-${{ github.run_id }}
+          path: |
+            out/path-b-row.csv
+            out/timings.json
+            out/runner-waits.json
+            out/warehouse-waits.json
+            out/queries.json
+            out/ingest-summary.json
+            out/databricks-summary.json
+            out/databricks-row.csv
+          if-no-files-found: warn
+          retention-days: 90

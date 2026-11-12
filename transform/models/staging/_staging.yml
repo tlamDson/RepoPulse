@@ -2,15 +2,32 @@ version: 2
 
 # meta.pii on every column: class of transform/governance.yml (docs/governance.md).
 
+# Silver Delta table written by the Databricks bronze/silver job (D1, docs/databricks-job.md):
+# <catalog>.<schema>.silver_gharchive_events in Unity Catalog, default workspace.repopulse
+# (repopulse/spark/tables.py). Read by stg_gharchive_events when the var silver_gharchive_source
+# is unity_catalog (the default on target type databricks, docs/dbt-databricks.md).
+sources:
+  - name: silver
+    description: Silver GH Archive events (real data, not simulated) in Unity Catalog.
+    database: "{{ var('silver_gharchive_catalog', 'workspace') }}"
+    schema: "{{ var('silver_gharchive_schema', 'repopulse') }}"
+    tables:
+      - name: silver_gharchive_events
+        identifier: "{{ var('silver_gharchive_table', 'silver_gharchive_events') }}"
+        description: >
+          One row per event_id, columns of docs/spark-jobs.md; commit author emails/names are
+          already salted SHA-256 hashes (repopulse/spark/pii.py).
+
 models:
   - name: stg_gharchive_events
     description: >
       GH Archive events with the exact columns of silver/gharchive_events (docs/spark-jobs.md)
       plus the load marker loaded_at: one row per event_id. Incremental, accumulated across
       pipeline runs and never rebuilt by --full-refresh (full_refresh: false): a run inserts the
-      event ids not staged yet, the copy already staged wins. Source chosen by the var
-      silver_gharchive_parquet: set -> read_parquet('<glob>'); not set -> the CI seed
-      fixture_silver_gharchive_events (fixture, not a measurement).
+      event ids not staged yet, the copy already staged wins. Source chosen by vars:
+      silver_gharchive_parquet set -> read_parquet('<glob>') (DuckDB only); else
+      silver_gharchive_source unity_catalog -> source silver.silver_gharchive_events (default on
+      Databricks); else the CI seed fixture_silver_gharchive_events (fixture, not a measurement).
     columns:
       - name: event_id
         config: {meta: {pii: none}}

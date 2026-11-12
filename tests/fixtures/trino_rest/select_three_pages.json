@@ -1,0 +1,119 @@
+{
+  "_source": "HAND-WRITTEN, not real server output. Shape taken from the Trino 484 client protocol documentation (https://trino.io/docs/current/develop/client-protocol.html) and the JSON property names of io.trino.client.QueryResults and io.trino.client.StatementStats in trinodb/trino. Replace with a real response from the trino-bench workflow artifact (out/trino-samples/) once one exists.",
+  "pages": [
+    {
+      "id": "20261111_100000_00001_abcde",
+      "infoUri": "http://localhost:8080/ui/query.html?20261111_100000_00001_abcde",
+      "nextUri": "http://localhost:8080/v1/statement/queued/20261111_100000_00001_abcde/y1/1",
+      "stats": {
+        "state": "QUEUED",
+        "queued": true,
+        "scheduled": false,
+        "nodes": 0,
+        "totalSplits": 0,
+        "queuedSplits": 0,
+        "runningSplits": 0,
+        "completedSplits": 0,
+        "planningTimeMillis": 0,
+        "analysisTimeMillis": 0,
+        "cpuTimeMillis": 0,
+        "wallTimeMillis": 0,
+        "queuedTimeMillis": 1,
+        "elapsedTimeMillis": 1,
+        "finishingTimeMillis": 0,
+        "physicalInputTimeMillis": 0,
+        "processedRows": 0,
+        "processedBytes": 0,
+        "physicalInputBytes": 0,
+        "physicalWrittenBytes": 0,
+        "internalNetworkInputBytes": 0,
+        "peakMemoryBytes": 0,
+        "spilledBytes": 0
+      },
+      "warnings": []
+    },
+    {
+      "id": "20261111_100000_00001_abcde",
+      "infoUri": "http://localhost:8080/ui/query.html?20261111_100000_00001_abcde",
+      "partialCancelUri": "http://localhost:8080/v1/stage/20261111_100000_00001_abcde.0",
+      "nextUri": "http://localhost:8080/v1/statement/executing/20261111_100000_00001_abcde/y2/2",
+      "columns": [
+        {"name": "repo_name", "type": "varchar", "typeSignature": {"rawType": "varchar", "arguments": [{"kind": "LONG", "value": 2147483647}]}},
+        {"name": "period_start", "type": "date", "typeSignature": {"rawType": "date", "arguments": []}},
+        {"name": "contributors", "type": "bigint", "typeSignature": {"rawType": "bigint", "arguments": []}},
+        {"name": "share_pct", "type": "double", "typeSignature": {"rawType": "double", "arguments": []}}
+      ],
+      "data": [
+        ["apache/spark", "2026-10-19", 12, 33.33],
+        ["duckdb/duckdb", "2026-10-19", 7, null]
+      ],
+      "stats": {
+        "state": "RUNNING",
+        "queued": false,
+        "scheduled": true,
+        "nodes": 1,
+        "totalSplits": 20,
+        "queuedSplits": 0,
+        "runningSplits": 2,
+        "completedSplits": 18,
+        "planningTimeMillis": 40,
+        "analysisTimeMillis": 25,
+        "cpuTimeMillis": 300,
+        "wallTimeMillis": 410,
+        "queuedTimeMillis": 1,
+        "elapsedTimeMillis": 120,
+        "finishingTimeMillis": 0,
+        "physicalInputTimeMillis": 30,
+        "processedRows": 900,
+        "processedBytes": 51200,
+        "physicalInputBytes": 40960,
+        "physicalWrittenBytes": 0,
+        "internalNetworkInputBytes": 1024,
+        "peakMemoryBytes": 65536,
+        "spilledBytes": 0
+      },
+      "warnings": []
+    },
+    {
+      "id": "20261111_100000_00001_abcde",
+      "infoUri": "http://localhost:8080/ui/query.html?20261111_100000_00001_abcde",
+      "columns": [
+        {"name": "repo_name", "type": "varchar", "typeSignature": {"rawType": "varchar", "arguments": [{"kind": "LONG", "value": 2147483647}]}},
+        {"name": "period_start", "type": "date", "typeSignature": {"rawType": "date", "arguments": []}},
+        {"name": "contributors", "type": "bigint", "typeSignature": {"rawType": "bigint", "arguments": []}},
+        {"name": "share_pct", "type": "double", "typeSignature": {"rawType": "double", "arguments": []}}
+      ],
+      "data": [
+        ["trinodb/trino", "2026-10-19", 3, 100.0]
+      ],
+      "stats": {
+        "state": "FINISHED",
+        "queued": false,
+        "scheduled": true,
+        "progressPercentage": 100.0,
+        "runningPercentage": 0.0,
+        "nodes": 1,
+        "totalSplits": 20,
+        "queuedSplits": 0,
+        "runningSplits": 0,
+        "completedSplits": 20,
+        "planningTimeMillis": 40,
+        "analysisTimeMillis": 25,
+        "cpuTimeMillis": 350,
+        "wallTimeMillis": 480,
+        "queuedTimeMillis": 1,
+        "elapsedTimeMillis": 150,
+        "finishingTimeMillis": 2,
+        "physicalInputTimeMillis": 35,
+        "processedRows": 1000,
+        "processedBytes": 60000,
+        "physicalInputBytes": 48000,
+        "physicalWrittenBytes": 0,
+        "internalNetworkInputBytes": 1200,
+        "peakMemoryBytes": 70000,
+        "spilledBytes": 0
+      },
+      "warnings": []
+    }
+  ]
+}

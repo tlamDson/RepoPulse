@@ -1,0 +1,136 @@
+name: dbt build (Databricks)
+
+# D2 (docs/plan.md, docs/dbt-databricks.md): the dbt project of transform/ built on a Databricks
+# SQL warehouse (`dbt build --target databricks`: seeds, models, data tests, unit tests). Staging
+# reads the silver Delta table of the Databricks bronze/silver job (D1) in Unity Catalog,
+# workspace.repopulse.silver_gharchive_events (real GH Archive data). Gold goes to its own
+# schemas (DBT_DATABRICKS_SCHEMA and <schema>_staging/_gold/...), never to `repopulse`.
+# One runs.csv row (variant dbt-build-databricks) lands in the `dbt-databricks` artifact; merge
+# it with `python benchmarks/record_run.py out/dbt-databricks-rows.csv`.
+#
+# Triggers:
+# - workflow_dispatch only shows in the Actions tab once this file is on `main` (after release).
+# - So `push` is limited to the branch feature/dbt-databricks-target to run it inside this PR. No
+#   `pull_request`: the Databricks workspace is written only by this manually started workflow,
+#   and Free Edition has a daily quota, so nothing runs it on a schedule. After the merge the
+#   branch is deleted and the push trigger no longer fires.
+#
+# Missing DATABRICKS_HOST or DATABRICKS_TOKEN: the Databricks steps are skipped at step level
+# (notice), the workflow stays green and no row is written. The warehouse http path is the
+# DATABRICKS_HTTP_PATH secret, or the first SQL warehouse found by the API (as the probe does);
+# a stopped warehouse starts when dbt connects. Secrets enter only through `env:`; no step prints
+# them, and the http-path step masks the bare hostname and the warehouse path. Running it again
+# adds no duplicate staging rows (staging appends only event ids it does not hold yet).
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feature/dbt-databricks-target]
+    paths:
+      - "transform/**"
+      - ".github/workflows/dbt-databricks.yml"
+      - "benchmarks/dbt_databricks*"
+      - "benchmarks/snowflake_port.py"
+      - "repopulse/probe.py"
+      - "pyproject.toml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dbt-databricks
+  cancel-in-progress: false
+
+jobs:
+  dbt-databricks:
+    name: dbt build (Databricks SQL warehouse)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GIT_SHA: ${{ github.sha }}
+      DBT_SEND_ANONYMOUS_USAGE_STATS: "false"
+      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+      # Gold schemas of this build: repopulse_dbt, repopulse_dbt_staging, repopulse_dbt_gold, ...
+      DBT_DATABRICKS_SCHEMA: repopulse_dbt
+    steps:
+      # Full history: lines_changed diffs base_sha (benchmarks/dbt_databricks.toml) against HEAD.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install
+        run: pip install -e ".[dbt,databricks]"
+
+      - name: Databricks secrets missing
+        if: env.DATABRICKS_HOST == '' || env.DATABRICKS_TOKEN == ''
+        run: echo "::notice::Databricks secrets are not set; skipped the Databricks dbt build (no dbt-build-databricks row)."
+
+      - name: Warehouse http path
+        if: env.DATABRICKS_HOST != '' && env.DATABRICKS_TOKEN != ''
+        env:
+          DATABRICKS_HTTP_PATH: ${{ secrets.DATABRICKS_HTTP_PATH }}
+        run: python -m repopulse.probe http-path --github-env
+
+      - name: dbt debug (Databricks)
+        if: env.DATABRICKS_HOST != '' && env.DATABRICKS_TOKEN != ''
+        env:
+          DATABRICKS_HTTP_PATH: ${{ env.DBT_DATABRICKS_HTTP_PATH }}
+        run: dbt debug --project-dir transform --profiles-dir transform --target databricks
+
+      - name: dbt build (Databricks)
+        if: env.DATABRICKS_HOST != '' && env.DATABRICKS_TOKEN != ''
+        env:
+          DATABRICKS_HTTP_PATH: ${{ env.DBT_DATABRICKS_HTTP_PATH }}
+          PII_HASH_SALT: ${{ secrets.PII_HASH_SALT }}
+        run: dbt build --project-dir transform --profiles-dir transform --target databricks
+
+      # Input of the build for the row: staged events and their date range. --target-path keeps
+      # the run_results.json of the build; the log stays on the runner (not in the artifact).
+      - name: Input stats (dbt show)
+        if: env.DATABRICKS_HOST != '' && env.DATABRICKS_TOKEN != ''
+        env:
+          DATABRICKS_HTTP_PATH: ${{ env.DBT_DATABRICKS_HTTP_PATH }}
+          PII_HASH_SALT: ${{ secrets.PII_HASH_SALT }}
+        run: |
+          mkdir -p out
+          dbt show --project-dir transform --profiles-dir transform --target databricks \
+            --target-path target/show --output json --log-format json \
+            --inline "select count(*) as row_count, cast(min(event_date) as string) as min_event_date, cast(max(event_date) as string) as max_event_date from {{ ref('stg_gharchive_events') }}" \
+            > out/dbt-databricks-show.jsonl
+
+      # always(): a failed build still reports its failing nodes in the summary (no row written).
+      - name: Row dbt-build-databricks
+        if: always() && env.DATABRICKS_HOST != '' && env.DATABRICKS_TOKEN != ''
+        run: >-
+          python benchmarks/dbt_databricks.py
+          --run-results transform/target/run_results.json
+          --show-log out/dbt-databricks-show.jsonl
+          --git-sha "$GIT_SHA"
+          --out out/dbt-databricks-rows.csv
+          --summary out/dbt-databricks-summary.md
+
+      - name: Job summary
+        if: always()
+        run: |
+          if [ -f out/dbt-databricks-summary.md ]; then
+            cat out/dbt-databricks-summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No dbt-databricks summary (secrets missing or the run stopped early)." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dbt-databricks
+          path: |
+            out/dbt-databricks-rows.csv
+            out/dbt-databricks-summary.md
+          if-no-files-found: warn
+          retention-days: 90

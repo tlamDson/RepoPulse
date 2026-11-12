@@ -1,0 +1,136 @@
+name: Pages (dashboard)
+
+# Static dashboard on GitHub Pages (docs/dashboard.md). `python -m repopulse.export_site` reads the
+# six Q1-Q6 marts of the public schema (main_public; never main_gold) plus runs.csv and writes
+# _site/ = site/ + data/*.json + tableau/*.csv. The build fails when a mart or a column is missing.
+#
+# Triggers:
+# - workflow_run of "Pipeline (scheduled)" (completed): rebuild after each pipeline run, i.e. after
+#   each hourly incremental batch. The pages-build job only runs when that run succeeded, was a
+#   schedule / workflow_dispatch run (event != pull_request: the PR smoke run never deploys) and
+#   ran on main. workflow_run only fires once this file is on main, the default branch (after the
+#   next release), and GitHub then runs this file from main: the checkout takes the default
+#   branch, never the code of the triggering run.
+# - workflow_dispatch: rebuild by hand, deploys only when dispatched on main.
+# - pull_request (path-filtered; not a required check, so `paths:` is fine here unlike ci.yml):
+#   dbt build --target ci on the fixture seed, export from ci.duckdb, upload _site/ as a plain
+#   artifact to look at. No deploy, no secret.
+#
+# Secret: MOTHERDUCK_TOKEN (read access to the `repopulse` database) only reaches the two steps of
+# pages-build that need it, through `env:`; a missing token stops the job with a clear error and
+# no step prints it. Permissions: contents: read everywhere; only the deploy job gets pages: write
+# and id-token: write, in the github-pages environment. Deploys queue in their own concurrency
+# group and are never cancelled.
+
+on:
+  workflow_run:
+    workflows: ["Pipeline (scheduled)"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+  pull_request:
+    branches: [develop, main]
+    paths:
+      - ".github/workflows/pages.yml"
+      - "repopulse/export_site.py"
+      - "site/**"
+      - "transform/models/public/**"
+
+permissions:
+  contents: read
+
+jobs:
+  pages-build:
+    name: Pages build (MotherDuck export)
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event != 'pull_request' &&
+       github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check secret
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+        run: |
+          if [ -z "$MOTHERDUCK_TOKEN" ]; then
+            echo "::error::missing repo secret MOTHERDUCK_TOKEN (the owner adds it)"
+            exit 1
+          fi
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      # MotherDuck rejects a DuckDB client newer than it supports: same pin as pipeline.yml.
+      - name: Install
+        run: pip install -e ".[dev]" "duckdb==1.5.6"
+
+      - name: Export public marts and runs.csv
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+        run: |
+          python -m repopulse.export_site --db md:repopulse --schema main_public \
+            --runs runs.csv --git-sha "$GITHUB_SHA" --out _site
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  pages-deploy:
+    name: Pages deploy
+    needs: pages-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      group: pages-deploy
+      cancel-in-progress: false
+    steps:
+      - uses: actions/configure-pages@v5
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
+
+  pages-preview:
+    name: Pages preview (fixture, no deploy)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install
+        run: pip install -e ".[dev,dbt]" "duckdb==1.5.6"
+
+      - name: dbt build (fixture seed, target ci)
+        run: dbt build --project-dir transform --profiles-dir transform --target ci
+
+      - name: Export public marts and runs.csv
+        run: |
+          python -m repopulse.export_site --db ci.duckdb --schema main_public \
+            --runs runs.csv --git-sha "$GITHUB_SHA" --out _site
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pages-preview-${{ github.event.pull_request.number }}
+          path: _site
+          if-no-files-found: error
+          retention-days: 7
