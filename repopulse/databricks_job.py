@@ -70,6 +70,7 @@ NOTEBOOK_NAME = "repopulse_bronze_silver"
 TASK_KEY = "bronze_silver"
 RERUN_SUFFIX = "-rerun"
 UPLOAD_TIMEOUT = 600.0
+MAX_TASK_ERROR = 500  # characters of a failed task's error kept in the message
 
 _RUN_TERMINAL = frozenset({"TERMINATED", "SKIPPED", "INTERNAL_ERROR"})
 _REQUIRED_ENV = ("DATABRICKS_HOST", "DATABRICKS_TOKEN", PII_SALT_ENV)
@@ -351,6 +352,21 @@ def _timings(info: Mapping[str, Any]) -> dict[str, float]:
     return out
 
 
+def _task_error(client: Client, task_run_id: int) -> str:
+    """`` (task error: ...)`` from runs/get-output, truncated; '' when unavailable (best effort)."""
+    try:
+        out = client.json("GET", "/api/2.1/jobs/runs/get-output", query={"run_id": task_run_id})
+    except Exception:  # the failed state is the error reported
+        return ""
+    error = out.get("error")
+    if not isinstance(error, str) or not error.strip():
+        return ""
+    error = " ".join(error.split())
+    if len(error) > MAX_TASK_ERROR:
+        error = error[:MAX_TASK_ERROR] + "..."
+    return f" (task error: {error})"
+
+
 def wait_for_run(
     client: Client,
     run_id: int,
@@ -377,12 +393,13 @@ def wait_for_run(
         sleep(poll_interval)
 
     result_state = state.get("result_state", "")
-    if result_state != "SUCCESS":
-        message = state.get("state_message", "")
-        raise JobError(f"run {run_id} ended {life_cycle}/{result_state}: {message}")
-
     tasks = info.get("tasks") or []
     task_run_id = tasks[0].get("run_id", run_id) if tasks else run_id
+    if result_state != "SUCCESS":
+        message = state.get("state_message", "")
+        cause = _task_error(client, task_run_id)
+        raise JobError(f"run {run_id} ended {life_cycle}/{result_state}: {message}{cause}")
+
     out = client.json("GET", "/api/2.1/jobs/runs/get-output", query={"run_id": task_run_id})
     raw = (out.get("notebook_output") or {}).get("result")
     try:
