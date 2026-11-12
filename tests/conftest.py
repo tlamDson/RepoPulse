@@ -107,7 +107,7 @@ def spark():
         .config("spark.ui.enabled", "false")
         .config("spark.sql.session.timeZone", "UTC")
         .config("spark.databricks.delta.snapshotPartitions", "1")
-        .config("spark.driver.memory", "1g")
+        .config("spark.driver.memory", "2g")
     )
     session = configure_spark_with_delta_pip(
         builder, extra_packages=[ICEBERG_PACKAGE]
