@@ -12,6 +12,7 @@ dev = ["ruff>=0.6", "pytest>=8", "pre-commit>=3.8", "pyyaml>=6", "jsonschema>=4.
 dbt = ["dbt-core>=1.8", "dbt-duckdb>=1.8"]
 snowflake = ["dbt-snowflake>=1.8"]  # only for .github/workflows/snowflake-port.yml
 spark = ["pyspark>=3.5.3,<3.6", "delta-spark>=3.3,<3.4"]
+streaming = ["confluent-kafka>=2.6,<3"]  # only for .github/workflows/streaming.yml
 
 [build-system]
 requires = ["setuptools>=68"]
