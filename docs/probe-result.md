@@ -1,18 +1,100 @@
-# RepoPulse · Kết quả bước thử số 1 (cloud probe)
+# RepoPulse · Kết quả bước thử số 1 (cloud probe) và luật chọn đường chính
 
-Bước thử trong [`plan.md`](plan.md) (dòng "bước thử" của danh sách PR): từ GitHub Actions có điều khiển được Databricks Free Edition không, hay dùng đường dự phòng (PySpark + Delta trên runner, gold trên MotherDuck).
+Bước thử trong [`plan.md`](plan.md) (dòng "bước thử" của danh sách PR): từ GitHub Actions có điều khiển được Databricks Free Edition không, hay dùng đường dự phòng (PySpark + Delta trên runner, gold trên MotherDuck). Plan v2 thêm một luật chọn đường chính, chốt trước khi đo, áp trên số đo của [`path-comparison.md`](path-comparison.md) (D3); file này ghi cả hai.
 
 ## Kết luận
 
-**Đường chọn: dự phòng (`fallback`)** — PySpark + Delta Lake chạy trên runner GitHub Actions, gold trên MotherDuck.
+**Đường đang chạy: A — runner + MotherDuck** (PySpark + Delta Lake trên runner GitHub Actions, gold trên MotherDuck). `.github/workflows/pipeline.yml` không đổi.
 
-- **MotherDuck dùng được từ GitHub Actions:** kết nối bằng token, tạo database `repopulse`, `select 1`, và `dbt debug --target motherduck` đều qua.
-- **Databricks chưa dùng được, và chưa kiểm được tới nơi:** mọi API trả HTTP 401 ngay ở bước xác thực, nên các bước Volume, job serverless, SQL warehouse chưa hề được thử.
-- **Nguyên nhân 401 nằm ở secret, chưa phải ở Free Edition:** giá trị `DATABRICKS_TOKEN` đang lưu không bắt đầu bằng `dapi`, tức không phải personal access token. Lần thử này vì vậy **không chứng minh** Free Edition chặn điều khiển từ ngoài; câu hỏi đó vẫn mở.
+- **Databricks nay đã kiểm được:** probe chạy lại với personal access token đúng ra `primary`, cả 9 check pass (bảng "Lần thử 2" bên dưới). Đường B (Databricks serverless + SQL warehouse) chạy được từ GitHub Actions.
+- **Vẫn giữ A theo luật Plan v2 áp trên `runs.csv`, vì CHƯA ĐỦ DỮ LIỆU**, không phải vì B thua: `runs.csv` chưa có lần chạy theo lịch (`trigger=schedule`) nào của hai đường, nên chưa có ngày UTC trọn vẹn để kiểm luật 1. Khi thiếu dữ liệu, luật giữ đường hiện tại.
+- Các dòng `path-a-runner` / `path-b-databricks` đang có trong `runs.csv` đều là lần chạy do push (thử workflow của D3). Khối sinh tự động bên dưới liệt kê chúng riêng và **không** dùng chúng cho luật.
 
-Vì đường dự phòng đã chạy thật còn đường chính thì chưa, các PR sau (4, 5, 7, 9) làm theo đường dự phòng. Quyết định này đổi lại được: xem mục "Muốn thử lại Databricks".
+## Luật chọn đường chính (Plan v2, chép nguyên văn)
 
-## Lần chạy làm căn cứ
+Từ [`plan.md`](plan.md), mục "Luật chọn đường chính (chốt trước khi đo, PR D4 áp dụng y nguyên)". A là runner + MotherDuck (đường hiện tại), B là Databricks serverless + SQL warehouse.
+
+1. Loại đường nào **không chạy đủ 24 lần/ngày trong quota miễn phí**, hoặc có **tỉ lệ thành công < 95%**.
+2. Trong các đường còn lại, chọn đường có **p50 thời gian end-to-end nhỏ hơn**.
+3. Nếu hai đường chênh nhau **dưới 10%**, giữ đường hiện tại (A).
+
+### Cách áp
+
+`python -m repopulse.pathdecision` (`repopulse/pathdecision.py`) đọc các dòng của hai đường bằng parser của D3 (`repopulse.pathcompare.read_runs`) và đo như sau:
+
+- **Chỉ lần chạy theo lịch:** dòng có `trigger=schedule` trong `notes`. Dòng `push`, `workflow_dispatch` hoặc thiếu `trigger` không vào luật.
+- **Ngày trọn vẹn:** một cửa sổ chung cho hai đường, từ ngày UTC (của `run_at`) của lần chạy theo lịch đầu tiên tới lần cuối cùng, tính trên cả hai đường. Ngày đầu và ngày cuối có thể chỉ là một phần ngày nên không tính; ngày trọn vẹn là mọi ngày nằm hẳn giữa hai ngày đó. Ngày trọn vẹn mà một đường không có dòng nào thì đường đó tính 0 lần.
+- **Luật 1, 24 lần/ngày:** đếm mọi lần chạy (thành công lẫn hỏng) trên từng ngày trọn vẹn; đạt khi ngày ít nhất có từ 24 lần. Lần hỏng vì hết quota vẫn được đếm là một lần chạy, và kéo tỉ lệ thành công xuống.
+- **Luật 1, tỉ lệ thành công:** số lần thành công / tổng số lần chạy theo lịch của đường đó (gồm cả ngày lẻ); đạt khi từ 95% trở lên (đúng 95% là đạt). Đường không có lần chạy theo lịch nào thì không đạt.
+- **Luật 2, p50:** nearest-rank (luôn là một giá trị đo được, không nội suy) của `total_seconds` trên các lần chạy theo lịch **thành công**.
+- **Luật 3, mức chênh:** tính theo p50 của đường hiện tại A: chỉ đổi sang B khi `(p50_A − p50_B) / p50_A ≥ 10%`. B nhanh hơn dưới 10%, bằng nhau, hoặc A nhanh hơn thì giữ A; đúng 10% thì đổi. Phép so sánh dùng số học chính xác trên giá trị thập phân ghi trong `runs.csv`, không sai ở biên vì số thực.
+- **Thiếu dữ liệu hoặc không còn đường nào:** chưa có ngày trọn vẹn thì kết quả `insufficient-data`; cả hai đường bị loại thì `no-eligible-path`. Cả hai trường hợp giữ A và không đổi `pipeline.yml`.
+
+## Bảng số liệu và kết luận (sinh tự động)
+
+Khối dưới do `python -m repopulse.pathdecision --runs runs.csv --doc docs/probe-result.md` sinh từ `runs.csv`; không sửa tay. `tests/test_pathdecision.py` đỏ khi khối lệch với `runs.csv`.
+
+<!-- path-decision:start -->
+### Primary path rule (Plan v2) applied to `runs.csv`
+
+Generated by `python -m repopulse.pathdecision` from `runs.csv`; do not edit by hand. Rule 1 needs at least 24 runs on every full UTC day and a success rate of at least 95%; rule 2 picks the lower end-to-end p50; rule 3 keeps path-a-runner when the gap is under 10% of its p50. Only scheduled runs (`trigger=schedule`) enter the rule; p50 is nearest-rank over successful runs.
+
+Scheduled runs: none in `runs.csv` yet.
+
+| variant | scheduled runs | successes | success rate | full UTC days | min runs per full day | e2e p50 s | rule 1 | reason |
+|---|---|---|---|---|---|---|---|---|
+| path-a-runner | 0 | 0 | — | 0 | — | — | not applied | — |
+| path-b-databricks | 0 | 0 | — | 0 | — | — | not applied | — |
+
+Every path run by trigger. Rows whose trigger is not `schedule` are not used by the rule (push runs only test the workflow).
+
+| variant | trigger | runs | successes | e2e p50 s | e2e p95 s |
+|---|---|---|---|---|---|
+| path-a-runner | push | 2 | 2 | 55.344 | 56.49300000000001 |
+| path-b-databricks | push | 2 | 2 | 162.142 | 217.882 |
+
+**Conclusion:** keep path-a-runner (current path); no rule applied, insufficient data: the scheduled runs do not cover a full UTC day yet (that needs scheduled runs on at least 3 UTC days); `.github/workflows/pipeline.yml` is not changed.
+<!-- path-decision:end -->
+
+## Khi nào áp lại
+
+1. Sau lần release kế tiếp, `.github/workflows/path-comparison.yml` lên `main` và cron mới chạy hằng giờ (cron chỉ chạy trên nhánh mặc định).
+2. Chờ tới khi có lần chạy theo lịch trên ít nhất 3 ngày UTC, để có ít nhất 1 ngày trọn vẹn (ngày đầu và ngày cuối không tính).
+3. Tải artifact của các lần chạy, gộp vào `runs.csv`: `python benchmarks/record_run.py <các file row của artifact>`, rồi `python -m repopulse.readme_results`.
+4. `python -m repopulse.pathdecision --runs runs.csv --doc docs/probe-result.md`, commit `runs.csv`, `README.md` và file này trong một PR. Quên bước này thì test đồng bộ (`tests/test_pathdecision.py`) đỏ.
+5. Nếu kết luận là đổi sang B: mở PR riêng sửa `.github/workflows/pipeline.yml` (và tài liệu đi kèm). Nếu vẫn giữ A: không đổi gì thêm.
+
+Tắt cron của `path-comparison.yml` khi đã đủ số: xem [`path-comparison.md`](path-comparison.md), mục "Tắt cron khi D4 đủ số".
+
+## Các lần chạy probe
+
+Luật chọn đường của probe (`repopulse.probe.decide_path`): `primary` khi đủ bốn check Databricks (auth, Volume, job serverless, SQL warehouse) pass và `dbt debug --target databricks` không fail; nếu không thì `fallback` khi MotherDuck kết nối được và `dbt debug --target motherduck` không fail; còn lại là `blocked`. Báo cáo probe chỉ có pass/fail/skipped, không có số đo (số đo chỉ lấy từ `runs.csv`). Probe chỉ trả lời "điều khiển được từ ngoài không"; chọn đường nào để chạy là việc của luật Plan v2 ở trên.
+
+### Lần thử 2 — `primary` (hiện hành)
+
+| | |
+|---|---|
+| Ngày | 2026-11-11 |
+| Workflow | `Cloud probe` (`.github/workflows/probe.yml`), `workflow_dispatch` trên `main` |
+| Run | <https://github.com/tlamDson/RepoPulse/actions/runs/43104609971> |
+| Commit | `2cc978d` trên `main` |
+| Artifact | `probe-result` (`probe-result.json`, `probe-result.md`) |
+
+Bảng dưới chép từ `probe-result.md` của lần chạy đó.
+
+| Check | Trạng thái | Chi tiết | Vai trò |
+|---|---|---|---|
+| `databricks_secret_shape` | pass | `host is a workspace URL and the token has the personal access token prefix` | chỉ tham khảo |
+| `databricks_auth` | pass | `token accepted; SCIM Me returned the current user` | quyết định đường |
+| `databricks_volume_upload` | pass | `volume workspace.default.repopulse_probe created; file uploaded and read back via the Files API` | quyết định đường |
+| `databricks_serverless_job` | pass | `serverless notebook run (no cluster declared) finished with SUCCESS` | quyết định đường |
+| `notebook_gharchive_download` | pass | `notebook read a gzip header from data.gharchive.org` | chỉ tham khảo |
+| `databricks_sql_warehouse` | pass | `SELECT 1 succeeded on the SQL warehouse (http path from DATABRICKS_HTTP_PATH)` | quyết định đường |
+| `motherduck_connect` | pass | `connected to MotherDuck; database repopulse exists; select 1 ok` | quyết định đường |
+| `dbt_debug_databricks` | pass | `dbt debug --target databricks succeeded` | quyết định đường |
+| `dbt_debug_motherduck` | pass | `dbt debug --target motherduck succeeded` | quyết định đường |
+
+### Lần thử 1 — `fallback` (lịch sử)
 
 | | |
 |---|---|
@@ -22,7 +104,7 @@ Vì đường dự phòng đã chạy thật còn đường chính thì chưa, c
 | Commit | `2d1df17` trên nhánh `docs/probe-result` |
 | Artifact | `probe-result` (`probe-result.json`, `probe-result.md`) |
 
-Bảng dưới chép từ `probe-result.json` của lần chạy đó (đã bỏ mã `ReqId` trong thông báo lỗi; artifact ghi `HTTP 401 401` vì Databricks trả `error_code` cũng là `401`, ở đây viết gọn `HTTP 401`). Báo cáo chỉ có pass/fail/skipped, không có số đo (số đo chỉ lấy từ `runs.csv`).
+Bảng dưới chép từ `probe-result.json` của lần chạy đó (đã bỏ mã `ReqId` trong thông báo lỗi; artifact ghi `HTTP 401 401` vì Databricks trả `error_code` cũng là `401`, ở đây viết gọn `HTTP 401`).
 
 | Check | Trạng thái | Chi tiết | Vai trò |
 |---|---|---|---|
@@ -36,41 +118,26 @@ Bảng dưới chép từ `probe-result.json` của lần chạy đó (đã bỏ
 | `dbt_debug_databricks` | fail | `dbt debug --target databricks failed` (cùng lỗi 401 ở bước `OpenSession`) | quyết định đường |
 | `dbt_debug_motherduck` | pass | `dbt debug --target motherduck succeeded` | quyết định đường |
 
-Luật chọn đường (`repopulse.probe.decide_path`): `primary` khi đủ bốn check Databricks (auth, Volume, job serverless, SQL warehouse) pass và `dbt debug --target databricks` không fail; nếu không thì `fallback` khi MotherDuck kết nối được và `dbt debug --target motherduck` không fail; còn lại là `blocked`.
+Lần thử 1 dừng ở xác thực vì giá trị `DATABRICKS_TOKEN` lúc đó không bắt đầu bằng `dapi`, tức không phải personal access token; nó không chứng minh Free Edition chặn điều khiển từ ngoài. Theo kết quả đó các PR giai đoạn 1 (4, 5, 7, 9, 14) làm theo đường dự phòng: landing trên runner, PySpark + Delta trên runner, gold trên MotherDuck qua target dbt `motherduck`, phân quyền và che cột PII ở tầng dbt (không có Unity Catalog), README ghi rõ không chạy trên Databricks. Lần thử 2 chạy sau release, bằng `workflow_dispatch` trên `main`, khi secret `DATABRICKS_TOKEN` đã được thay: artifact ghi token có tiền tố của personal access token.
 
-## Điều chưa kiểm được
+## Các câu hỏi "chưa kiểm chứng" về Databricks
 
-Các mục "chưa kiểm chứng" của `plan.md` về Databricks vẫn nguyên trạng, vì lần thử dừng ở xác thực:
+Lần thử 1 để mở các câu hỏi của `plan.md`; lần thử 2 trả lời chúng trong đúng phạm vi các check đã pass:
 
-- Free Edition có cho tạo token và điều khiển từ ngoài (REST, CLI, GitHub Actions) không.
-- Đẩy file lên Volume và dung lượng Volume.
-- Chạy job serverless từ ngoài.
-- `data.gharchive.org` có nằm trong danh sách domain được phép của serverless không.
-- SQL warehouse có nhận `dbt` từ ngoài không.
+| Câu hỏi | Trả lời từ lần thử 2 |
+|---|---|
+| Free Edition có cho tạo token và điều khiển từ ngoài (REST, CLI, GitHub Actions) không | Có: personal access token được nhận (`databricks_auth` pass) |
+| Đẩy file lên Volume | Được: tạo Volume `workspace.default.repopulse_probe`, đẩy file và đọc lại qua Files API. **Dung lượng Volume vẫn chưa đo.** |
+| Chạy job serverless từ ngoài | Được: notebook serverless (không khai cluster) kết thúc `SUCCESS` |
+| `data.gharchive.org` có nằm trong danh sách domain được phép của serverless không | Được: notebook đọc được header gzip từ `data.gharchive.org` |
+| SQL warehouse có nhận `dbt` từ ngoài không | Được: `SELECT 1` trên SQL warehouse và `dbt debug --target databricks` đều qua |
 
-Lần thử không tạo tài nguyên nào trên Databricks. Trên MotherDuck có thêm database `repopulse` (rỗng).
+Quota ngày của Free Edition (vượt thì compute tắt tới hết ngày) không do probe kiểm; luật 1 kiểm nó gián tiếp qua số lần chạy mỗi ngày và tỉ lệ thành công.
 
 ## Cạm bẫy tìm thấy
 
-- **MotherDuck từ chối client DuckDB quá mới.** Lần chạy đầu (<https://github.com/tlamDson/RepoPulse/actions/runs/42980241119>) cài DuckDB mới nhất và MotherDuck báo: `Your DuckDB version (v2.0.0) is not yet supported by MotherDuck. The latest supported version is v1.5.6.` Sau khi khoá `duckdb==1.5.6` trong workflow thì qua. Mọi workflow nối MotherDuck (PR 7, 9, 11) phải khoá phiên bản DuckDB theo bản MotherDuck đang hỗ trợ; CI trên DuckDB local không bị ảnh hưởng.
+- **MotherDuck từ chối client DuckDB quá mới.** Lần chạy đầu (<https://github.com/tlamDson/RepoPulse/actions/runs/42980241119>) cài DuckDB mới nhất và MotherDuck báo: `Your DuckDB version (v2.0.0) is not yet supported by MotherDuck. The latest supported version is v1.5.6.` Sau khi khoá `duckdb==1.5.6` trong workflow thì qua. Mọi workflow nối MotherDuck phải khoá phiên bản DuckDB theo bản MotherDuck đang hỗ trợ; CI trên DuckDB local không bị ảnh hưởng.
 - **GitHub chỉ che đúng nguyên văn giá trị secret.** `dbt debug` in hostname không có `https://`, nên workflow đăng ký thêm `::add-mask::` cho hostname trần, user, http path và id warehouse trước khi chạy `dbt debug`. Log của repo public đã kiểm: `host` và `http_path` hiện `***`.
-- **`workflow_dispatch` chỉ thấy workflow đã có trên `main`.** Trong PR này workflow chạy nhờ trigger `push` giới hạn ở nhánh `docs/probe-result`; sau khi nhánh bị xoá, chạy lại bằng `workflow_dispatch` sau lần release kế tiếp.
+- **`workflow_dispatch` chỉ thấy workflow đã có trên `main`.** Lần thử 1 chạy nhờ trigger `push` giới hạn ở nhánh `docs/probe-result`; lần thử 2 chạy bằng `workflow_dispatch` sau release. Cùng lý do, cron của `path-comparison.yml` chỉ bắt đầu sau release.
 
-## Hệ quả cho các PR sau
-
-| PR | Theo đường dự phòng |
-|---|---|
-| 4 `feature/ingest-gharchive` | Vùng landing nằm trên runner (hoặc artifact/cache của Actions), không phải Volume của Databricks |
-| 5 `feature/bronze-silver-spark` | PySpark + Delta chạy trên runner (4 CPU, 16 GB RAM, 14 GB đĩa): mỗi lần vài giờ dữ liệu, lọc trước khi lưu |
-| 7 `feature/incremental-and-schedule` | Gold trên MotherDuck qua target dbt `motherduck` (`transform/profiles.yml`), token `MOTHERDUCK_TOKEN`, khoá phiên bản DuckDB |
-| 9 `feature/governance` | Không có Unity Catalog: phân quyền, nhãn và che cột PII làm ở tầng dbt |
-| 14 `docs/results` | README ghi rõ dự án dùng Spark và Delta Lake nhưng **không chạy trên Databricks** |
-
-## Muốn thử lại Databricks (việc của chủ repo, không bắt buộc)
-
-1. Trong workspace Free Edition: User Settings → Developer → Access tokens → tạo personal access token (chuỗi bắt đầu bằng `dapi`). Nếu Free Edition không có mục này thì đó chính là câu trả lời: không điều khiển được từ ngoài bằng token.
-2. `gh secret set DATABRICKS_TOKEN` (dán token, không kèm dấu nháy). `DATABRICKS_HOST` là URL workspace dạng `https://<tên>.cloud.databricks.com`. `DATABRICKS_HTTP_PATH` không bắt buộc: thiếu thì probe tự tìm warehouse.
-3. Sau lần release kế tiếp (khi `probe.yml` đã có trên `main`): `gh workflow run "Cloud probe"`, rồi xem Job summary hoặc artifact `probe-result`.
-4. Nếu ra `primary`: mở PR cập nhật file này và bảng Stack trong `.claude/rules/tech-defaults.md`, rồi chuyển bronze/silver và gold sang Databricks.
-
-Việc còn chờ chủ repo dù theo đường nào: cập nhật bảng Stack ở `.claude/rules/tech-defaults.md` theo kết quả này (phiên headless không được ghi vào `.claude/`).
+Việc còn chờ chủ repo: cập nhật bảng Stack ở `.claude/rules/tech-defaults.md` theo kết quả này (Databricks điều khiển được từ ngoài; đường đang chạy vẫn là A theo luật Plan v2 cho tới khi đủ lần chạy theo lịch). Phiên headless không được ghi vào `.claude/`.
