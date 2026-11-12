@@ -118,7 +118,7 @@ Bảng dưới chép từ `probe-result.json` của lần chạy đó (đã bỏ
 | `dbt_debug_databricks` | fail | `dbt debug --target databricks failed` (cùng lỗi 401 ở bước `OpenSession`) | quyết định đường |
 | `dbt_debug_motherduck` | pass | `dbt debug --target motherduck succeeded` | quyết định đường |
 
-Lần thử 1 dừng ở xác thực vì giá trị `DATABRICKS_TOKEN` lúc đó không bắt đầu bằng `dapi`, tức không phải personal access token; nó không chứng minh Free Edition chặn điều khiển từ ngoài. Theo kết quả đó các PR giai đoạn 1 (4, 5, 7, 9, 14) làm theo đường dự phòng: landing trên runner, PySpark + Delta trên runner, gold trên MotherDuck qua target dbt `motherduck`, phân quyền và che cột PII ở tầng dbt (không có Unity Catalog), README ghi rõ không chạy trên Databricks. Lần thử 2 làm theo đúng các bước "thử lại Databricks" đã ghi khi đó (tạo personal access token, `gh secret set DATABRICKS_TOKEN`, `gh workflow run "Cloud probe"` sau release).
+Lần thử 1 dừng ở xác thực vì giá trị `DATABRICKS_TOKEN` lúc đó không bắt đầu bằng `dapi`, tức không phải personal access token; nó không chứng minh Free Edition chặn điều khiển từ ngoài. Theo kết quả đó các PR giai đoạn 1 (4, 5, 7, 9, 14) làm theo đường dự phòng: landing trên runner, PySpark + Delta trên runner, gold trên MotherDuck qua target dbt `motherduck`, phân quyền và che cột PII ở tầng dbt (không có Unity Catalog), README ghi rõ không chạy trên Databricks. Lần thử 2 chạy sau release, bằng `workflow_dispatch` trên `main`, khi secret `DATABRICKS_TOKEN` đã được thay: artifact ghi token có tiền tố của personal access token.
 
 ## Các câu hỏi "chưa kiểm chứng" về Databricks
 
