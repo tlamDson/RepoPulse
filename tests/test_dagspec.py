@@ -261,6 +261,37 @@ def test_parse_runs_tolerates_missing_optional_fields_and_noise():
     assert dagspec.parse_runs("[]") == []
 
 
+def test_parse_runs_skips_bracketed_log_lines_before_the_json():
+    # Real stdout of `airflow dags list-runs -o json` on Airflow 3.4 (run 43134761449): a structlog
+    # warning with "[warning  ]" and "[py.warnings]" comes before the JSON array.
+    text = (
+        "2026-11-12T02:20:42.609061Z [warning  ] Could not import graphviz. Rendering graph to "
+        "the graphical format will not be possible. \n"
+        "You might need to install the graphviz package and necessary system packages.\n"
+        "Run `pip install graphviz` to attempt to install it. [py.warnings] category=UserWarning "
+        "filename=/venv/airflow/cli/commands/dag_command.py lineno=57\n"
+        '[{"dag_id": "repopulse_pipeline", "run_id": "backfill__2026-10-26T00:00:00+00:00", '
+        '"state": "queued", "run_after": "2026-10-26T00:00:00+00:00", '
+        '"logical_date": "2026-10-26T00:00:00+00:00", "start_date": "", "end_date": ""}, '
+        '{"dag_id": "repopulse_pipeline", "run_id": "backfill__2026-10-25T00:00:00+00:00", '
+        '"state": "queued", "run_after": "2026-10-25T00:00:00+00:00", '
+        '"logical_date": "2026-10-25T00:00:00+00:00", "start_date": "", "end_date": ""}]\n'
+    )
+    runs = dagspec.parse_runs(text)
+    assert [r.run_id for r in runs] == [
+        "backfill__2026-10-26T00:00:00+00:00",
+        "backfill__2026-10-25T00:00:00+00:00",
+    ]
+    assert [r.state for r in runs] == ["queued", "queued"]
+    assert runs[0].logical_date == datetime(2026, 10, 26, tzinfo=UTC)
+    assert runs[0].start_date is None and runs[0].end_date is None
+    # No run yet: the empty array after the same warning.
+    assert dagspec.parse_runs("x [warning  ] y [py.warnings] z\n[]\n") == []
+    # A trailing bracketed log line does not hide the array either.
+    (run,) = dagspec.parse_runs('[{"run_id": "backfill__x", "state": "running"}]\n[info ] bye\n')
+    assert run.state == "running"
+
+
 def test_parse_runs_accepts_z_suffix_and_space_separator():
     text = json.dumps(
         [run_json("2026-01-05", "success", "2026-11-11 10:00:00+00:00", "2026-11-11T10:01:00Z")]
