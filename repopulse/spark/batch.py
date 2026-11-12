@@ -14,6 +14,11 @@ One call processes a list of landed (date, hour) slices of one source:
 Landing file names starting with ``_`` are skipped by Spark's file listing, so the GH Archive
 ``_quarantine.jsonl.gz`` is read on the driver (it is small). Landing files are read by explicit
 path so ``date=``/``hour=`` directories are not turned into partition columns.
+
+Two storage layouts share this logic: Delta paths under ``lake_dir`` (the runner) or catalog
+tables by name ``[<catalog>.]<schema>.<kind>_<table>`` (Databricks / Unity Catalog, see
+``repopulse.spark.tables``). ``persist=False`` skips ``persist``/``unpersist`` for serverless
+(Spark Connect) compute.
 """
 
 from __future__ import annotations
@@ -30,13 +35,12 @@ from pyspark.sql import DataFrame, SparkSession, Window
 from pyspark.sql import functions as F
 from pyspark.sql import types as T
 
-import eventspec
 from repopulse.ingest import EVENTS_FILE, QUARANTINE_FILE, partition_dir
 from repopulse.spark import rules
 from repopulse.spark.pii import hash_pii
+from repopulse.spark.tables import KINDS, TABLES, table_names
 
 APP_EVENTS_FILE = "events.jsonl.gz"
-TABLES = {"gharchive": "gharchive_events", "app": "app_events"}
 
 _HOUR_US = 3_600_000_000
 _DAY_US = 86_400_000_000
@@ -93,15 +97,58 @@ def _slice_predicate(hours: Sequence[tuple[str, int]]) -> str:
     )
 
 
-def _replace_slices(spark, df: DataFrame, path: Path, predicate: str, partition: str) -> None:
+# Storage: Delta paths (runner) or catalog tables by name (Databricks / Unity Catalog)
+
+
+class _PathStore:
+    """``<lake_dir>/<kind>/<table>`` Delta paths."""
+
+    def __init__(self, spark: SparkSession, lake_dir: Path, table: str) -> None:
+        self.spark = spark
+        self.paths = {kind: str(Path(lake_dir) / kind / table) for kind in KINDS}
+
+    def exists(self, kind: str) -> bool:
+        return DeltaTable.isDeltaTable(self.spark, self.paths[kind])
+
+    def read(self, kind: str) -> DataFrame:
+        return self.spark.read.format("delta").load(self.paths[kind])
+
+    def write(self, writer, kind: str) -> None:
+        writer.save(self.paths[kind])
+
+    def target(self, kind: str) -> DeltaTable:
+        return DeltaTable.forPath(self.spark, self.paths[kind])
+
+
+class _CatalogStore:
+    """``[<catalog>.]<schema>.<kind>_<table>`` managed tables (no path API: Spark Connect)."""
+
+    def __init__(self, spark: SparkSession, names: dict[str, str]) -> None:
+        self.spark = spark
+        self.names = names
+
+    def exists(self, kind: str) -> bool:
+        return self.spark.catalog.tableExists(self.names[kind])
+
+    def read(self, kind: str) -> DataFrame:
+        return self.spark.table(self.names[kind])
+
+    def write(self, writer, kind: str) -> None:
+        writer.saveAsTable(self.names[kind])
+
+    def target(self, kind: str) -> DeltaTable:
+        return DeltaTable.forName(self.spark, self.names[kind])
+
+
+def _replace_slices(store, df: DataFrame, kind: str, predicate: str, partition: str) -> None:
     writer = df.write.format("delta").partitionBy(partition).mode("overwrite")
-    if DeltaTable.isDeltaTable(spark, str(path)):
+    if store.exists(kind):
         writer = writer.option("replaceWhere", predicate)
-    writer.save(str(path))
+    store.write(writer, kind)
 
 
 def _write_bronze(
-    spark, landing: Path, hours, path: Path, predicate: str, events_file: str
+    spark, landing: Path, hours, store, predicate: str, events_file: str
 ) -> DataFrame:
     frames = [f for day, hour in hours for f in _lines_df(spark, landing, day, hour, events_file)]
     if frames:
@@ -115,8 +162,8 @@ def _write_bronze(
     df = df.withColumn("raw_sha256", F.sha2(F.col("raw_json"), 256)).withColumn(
         "ingested_at", F.current_timestamp()
     )
-    _replace_slices(spark, df.select(*BRONZE_COLUMNS), path, predicate, "data_date")
-    return spark.read.format("delta").load(str(path)).where(predicate)
+    _replace_slices(store, df.select(*BRONZE_COLUMNS), "bronze", predicate, "data_date")
+    return store.read("bronze").where(predicate)
 
 
 # Lateness (same rule as rules.classify_arrival, in microseconds)
@@ -282,6 +329,7 @@ def _is_unknown_event(messages: list[str]) -> bool:
 
 def parse_app_line(raw: str, data_date: date, hour: int, salt: str, window_hours: int) -> tuple:
     """One landing line -> ``_APP_PARSED`` tuple (reason None means valid for silver)."""
+    import eventspec  # needs pyyaml + jsonschema; only the app source uses it
 
     def rejected(reason, errors, name=None):
         return (reason, errors, name, *([None] * 11))
@@ -382,30 +430,40 @@ def run_batch(
     source: str,
     hours: Sequence[tuple[str, int]],
     landing_dir: Path,
-    lake_dir: Path,
     salt: str,
+    lake_dir: Path | None = None,
+    schema: str | None = None,
+    catalog: str | None = None,
     late_window_hours: int = rules.DEFAULT_LATE_WINDOW_HOURS,
+    persist: bool = True,
 ) -> dict:
-    """Process ``hours`` of ``source`` into bronze/quarantine/silver; return the summary."""
+    """Process ``hours`` of ``source`` into bronze/quarantine/silver; return the summary.
+
+    Storage: Delta paths under ``lake_dir``, or catalog tables in ``[catalog.]schema`` (exactly
+    one of the two). ``persist=False`` never calls persist/unpersist (Spark Connect).
+    """
     if source not in TABLES:
         raise ValueError(f"unknown source {source!r}")
     if not hours:
         raise ValueError("hours must not be empty")
-    table = TABLES[source]
-    bronze_path = lake_dir / "bronze" / table
-    silver_path = lake_dir / "silver" / table
-    quarantine_path = lake_dir / "quarantine" / table
+    if (lake_dir is None) == (schema is None):
+        raise ValueError("give exactly one of lake_dir (Delta paths) or schema (catalog tables)")
+    if lake_dir is not None:
+        store = _PathStore(spark, Path(lake_dir), TABLES[source])
+    else:
+        store = _CatalogStore(spark, table_names(source, schema=schema, catalog=catalog))
     predicate = _slice_predicate(hours)
 
     events_file = EVENTS_FILE if source == "gharchive" else APP_EVENTS_FILE
-    bronze = _write_bronze(spark, landing_dir, hours, bronze_path, predicate, events_file)
+    bronze = _write_bronze(spark, Path(landing_dir), hours, store, predicate, events_file)
     if source == "gharchive":
         classified = _classify_gharchive(bronze, late_window_hours)
         key = "event_id"
     else:
         classified = _classify_app(bronze, salt, late_window_hours)
         key = "dedup_key"
-    classified = classified.persist(StorageLevel.MEMORY_AND_DISK)
+    if persist:
+        classified = classified.persist(StorageLevel.MEMORY_AND_DISK)
     try:
         counts = {r["reason"]: r["count"] for r in classified.groupBy("reason").count().collect()}
         valid_rows = counts.pop(None, 0)
@@ -414,7 +472,7 @@ def run_batch(
         quarantine = classified.where(F.col("reason").isNotNull()).select(
             *_quarantine_columns(source)
         )
-        _replace_slices(spark, quarantine, quarantine_path, predicate, "data_date")
+        _replace_slices(store, quarantine, "quarantine", predicate, "data_date")
 
         first = Window.partitionBy(key).orderBy(*_ORDER)
         firsts = (
@@ -426,9 +484,12 @@ def run_batch(
             rows = _silver_gharchive(firsts, salt)
         else:
             rows = _silver_app(firsts)
-        inserted, late = _merge_silver(spark, rows, silver_path, key, prune=source == "gharchive")
+        inserted, late = _merge_silver(
+            store, rows, key, prune=source == "gharchive", persist=persist
+        )
     finally:
-        classified.unpersist()
+        if persist:
+            classified.unpersist()
 
     return {
         "source": source,
@@ -442,18 +503,21 @@ def run_batch(
     }
 
 
-def _merge_silver(spark, rows: DataFrame, path: Path, key: str, *, prune: bool) -> tuple[int, int]:
+def _merge_silver(
+    store, rows: DataFrame, key: str, *, prune: bool, persist: bool
+) -> tuple[int, int]:
     """Insert rows whose key is not in silver yet; return (inserted, inserted late)."""
-    exists = DeltaTable.isDeltaTable(spark, str(path))
+    exists = store.exists("silver")
     dates: list[date] = []
     to_insert = rows
     if exists:
-        existing = spark.read.format("delta").load(str(path))
+        existing = store.read("silver")
         if prune:  # a GH event id always has the same created_at, hence the same event_date
             dates = [r[0] for r in rows.select("event_date").distinct().collect()]
             existing = existing.where(F.col("event_date").isin(dates))
         to_insert = rows.join(existing.select(key), key, "left_anti")
-    to_insert = to_insert.persist(StorageLevel.MEMORY_AND_DISK)
+    if persist:
+        to_insert = to_insert.persist(StorageLevel.MEMORY_AND_DISK)
     try:
         stats = to_insert.agg(
             F.count(F.lit(1)).alias("n"),
@@ -461,19 +525,21 @@ def _merge_silver(spark, rows: DataFrame, path: Path, key: str, *, prune: bool) 
         ).first()
         inserted, late = int(stats["n"]), int(stats["late"])
         if not exists:
-            to_insert.write.format("delta").partitionBy("event_date").mode("append").save(str(path))
+            writer = to_insert.write.format("delta").partitionBy("event_date").mode("append")
+            store.write(writer, "silver")
         elif inserted:
             condition = f"t.{key} = s.{key}"
             if prune:
                 listed = ", ".join(f"CAST('{d.isoformat()}' AS DATE)" for d in dates)
                 condition += f" AND t.event_date IN ({listed})"
             (
-                DeltaTable.forPath(spark, str(path))
+                store.target("silver")
                 .alias("t")
                 .merge(to_insert.alias("s"), condition)
                 .whenNotMatchedInsertAll()
                 .execute()
             )
     finally:
-        to_insert.unpersist()
+        if persist:
+            to_insert.unpersist()
     return inserted, late

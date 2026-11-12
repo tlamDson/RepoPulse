@@ -113,6 +113,7 @@ Not compared with `baseline`: either there is no baseline row with the same `dat
 
 | variant | data_date | total_seconds | q1_seconds | q2_seconds | q3_seconds | q4_seconds | q5_seconds | q6_seconds | peak_rss_mb | bytes_read | row_count | run_at | git_sha | notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| databricks-bronze-silver | 2026-10-25 | 107.948 | — | — | — | — | — | — | — | — | 206827 | 2026-11-12T01:32:05+00:00 | b965514 | source=gharchive last_hour=2026-10-25T23 hours=3 bronze_rows=206827 quarantined_total=0 duplicates_dropped=0 upload_s=3.79 setup_s=3.0 execution_s=88.0 cleanup_s=1.0 run_s=92.42 run_id=43134787015 trigger=push rerun_silver_inserted=0 |
 | streaming-throughput-p1 | 2026-10-25 | 72.101 | — | — | — | — | — | — | — | 1371864797 | 1670400 | 2026-11-12T01:18:30+00:00 | d5df6de | partitions=1 brokers=3 rf=3 min_isr=2 produce_seconds=24.132 consume_seconds=47.969 produce_events_per_s=69219.3 consume_events_per_s=34822.5 batch_rows=1670400 match=true trigger=availableNow micro_batches=9 max_offsets_per_trigger=200000 unkeyed=0 kafka=apache/kafka:4.0.0 |
 | streaming-throughput-p3 | 2026-10-25 | 49.884 | — | — | — | — | — | — | — | 1371864797 | 1670400 | 2026-11-12T01:18:30+00:00 | d5df6de | partitions=3 brokers=3 rf=3 min_isr=2 produce_seconds=25.261 consume_seconds=24.623 produce_events_per_s=66125.6 consume_events_per_s=67839.0 batch_rows=1670400 match=true trigger=availableNow micro_batches=9 max_offsets_per_trigger=200000 unkeyed=0 kafka=apache/kafka:4.0.0 |
 | streaming-throughput-p6 | 2026-10-25 | 50.067 | — | — | — | — | — | — | — | 1371864797 | 1670400 | 2026-11-12T01:18:30+00:00 | d5df6de | partitions=6 brokers=3 rf=3 min_isr=2 produce_seconds=26.947 consume_seconds=23.12 produce_events_per_s=61988.3 consume_events_per_s=72249.1 batch_rows=1670400 match=true trigger=availableNow micro_batches=9 max_offsets_per_trigger=200000 unkeyed=0 kafka=apache/kafka:4.0.0 |
@@ -175,6 +176,7 @@ Most pages are in Vietnamese; the two benchmark pages are in English.
 | [`docs/query-optimization.md`](docs/query-optimization.md) | Partitioned and clustered layouts against the baseline |
 | [`docs/benchmark-scale.md`](docs/benchmark-scale.md) | Spark against DuckDB at 1, 7 and 30 days |
 | [`docs/snowflake-port.md`](docs/snowflake-port.md) | Running the dbt project on Snowflake |
+| [`docs/databricks-job.md`](docs/databricks-job.md) | The same bronze/silver incremental batch as a serverless Databricks job (Plan v2, outside this deployment) |
 
 ## Baseline benchmark
 
