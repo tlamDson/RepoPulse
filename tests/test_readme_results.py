@@ -1485,6 +1485,23 @@ def test_required_variants_are_the_v2_names_and_families_in_a_fixed_order():
     assert list(readme_results.REQUIRED_VARIANTS) == REQUIRED
 
 
+def test_required_variants_match_the_names_the_benchmark_scripts_write():
+    from benchmarks import format_bench, streaming_fault, trino_bench
+    from repopulse import pathcompare
+
+    written = {
+        *pathcompare.VARIANTS.values(),
+        *(format_bench.variant(f) for f in format_bench.FORMATS),
+        *(streaming_fault.variant(c) for c in streaming_fault.CASES),
+        *trino_bench.VARIANTS,
+    }
+
+    exact = {
+        name for name in readme_results.REQUIRED_VARIANTS if "<" not in name and "*" not in name
+    }
+    assert exact == written
+
+
 def test_missing_variants_names_every_required_variant_when_there_are_no_rows():
     assert readme_results.missing_variants([]) == REQUIRED
 
