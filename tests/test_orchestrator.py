@@ -1003,3 +1003,57 @@ def test_merge_failure_reason_names_the_blocking_state():
     for state in ("BLOCKED", "UNSTABLE"):
         msg = merge_failure_reason("9", {"mergeable": "MERGEABLE", "mergeStateStatus": state})
         assert state in msg and "CI" in msg
+
+
+def test_required_checks_state_waits_until_required_checks_exist_and_finish():
+    # Regression 2026-11-12 03:30: release ran `gh pr checks --watch` 3 s after creating the
+    # PR, got "no checks reported" (exit 1), reported CI red and stopped the whole run.
+    from repopulse.orchestrator import required_checks_state
+
+    assert required_checks_state([]) == "pending"  # nothing registered yet
+    some = [{"name": "Lint", "bucket": "pass"}, {"name": "GitGuardian", "bucket": "pass"}]
+    assert required_checks_state(some) == "pending"  # Unit Tests / dbt not registered
+    req = [{"name": n, "bucket": "pass"} for n in ("Lint", "Unit Tests", "dbt build (DuckDB)")]
+    assert required_checks_state(req) == "pass"
+    # optional workflows on the release PR (Kafka, Trino...) never decide the release
+    extra = req + [
+        {"name": "Trino benchmark", "bucket": "fail"},
+        {"name": "Airflow", "bucket": "pending"},
+    ]
+    assert required_checks_state(extra) == "pass"
+    running = req[:2] + [{"name": "dbt build (DuckDB)", "bucket": "pending"}]
+    assert required_checks_state(running) == "pending"
+    for bad in ("fail", "cancel"):
+        red = req[:2] + [{"name": "dbt build (DuckDB)", "bucket": bad}]
+        assert required_checks_state(red) == "fail"
+
+
+def test_duplicate_check_runs_all_must_pass():
+    # Regression 2026-11-12 03:58: release PR #64 had two "Unit Tests" runs (push on develop and
+    # pull_request); a name->bucket dict kept the passing one, the merge hit the pending one and
+    # branch protection refused it, which stopped the whole run.
+    from repopulse.orchestrator import merge_ready, required_checks_state
+
+    ok = [{"name": n, "bucket": "pass"} for n in ("Lint", "Unit Tests", "dbt build (DuckDB)")]
+    for order in (
+        ok + [{"name": "Unit Tests", "bucket": "pending"}],
+        [{"name": "Unit Tests", "bucket": "pending"}] + ok,
+    ):
+        assert required_checks_state(order) == "pending"
+        assert merge_ready(order)[0] is False
+    red = ok + [{"name": "Unit Tests", "bucket": "fail"}]
+    assert required_checks_state(red) == "fail"
+    assert merge_ready(red)[0] is False
+    assert required_checks_state(ok + ok) == "pass"
+    assert merge_ready(ok + ok)[0] is True
+
+
+def test_a_failed_run_wins_even_after_an_unfinished_run_of_the_same_check():
+    from repopulse.orchestrator import required_checks_state
+
+    ok = [{"name": n, "bucket": "pass"} for n in ("Lint", "dbt build (DuckDB)")]
+    runs = ok + [
+        {"name": "Unit Tests", "bucket": "pending"},
+        {"name": "Unit Tests", "bucket": "fail"},
+    ]
+    assert required_checks_state(runs) == "fail"

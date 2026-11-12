@@ -1,0 +1,88 @@
+name: Format benchmark (Delta vs Iceberg)
+
+# E2: the reference day in benchmarks/reference.toml (real GH Archive data) written as a Delta table
+# and as an Apache Iceberg table with PySpark in local mode on this runner: write, Q1-Q6
+# (benchmarks/queries_spark/), MERGE, MERGE again (idempotence), time travel to the version before
+# MERGE. 5 runs per format, each in a fresh JVM; one median row per format in the runs.csv format
+# (variant=format-delta, variant=format-iceberg). Details: docs/iceberg-vs-delta.md.
+# Output: artifact `format-bench` (out/format-rows.csv, out/format-summary.md). Merge it with
+# `python benchmarks/record_run.py`.
+# Not a required check, so `paths:` on pull_request is fine here (unlike ci.yml).
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [develop, main]
+    paths:
+      - ".github/workflows/format-bench.yml"
+      - "benchmarks/format_bench.py"
+      - "benchmarks/spark_naive.py"
+      - "benchmarks/queries_spark/**"
+      - "benchmarks/measure.py"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: format-bench-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  format-bench:
+    name: Format benchmark (Delta vs Iceberg)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - run: pip install -e ".[dev,spark]"
+
+      - name: Cache reference day
+        uses: actions/cache@v4
+        with:
+          path: data/raw/gharchive
+          key: gharchive-${{ hashFiles('benchmarks/reference.toml') }}
+
+      - name: Download and verify reference files (stops on any checksum mismatch)
+        run: python benchmarks/fetch_reference.py
+
+      - name: Delta vs Iceberg
+        run: >-
+          python benchmarks/format_bench.py
+          --runs 5
+          --git-sha "$GIT_SHA"
+          --out out/format-rows.csv
+          --summary out/format-summary.md
+
+      - name: Job summary
+        if: always()
+        run: |
+          df -h .
+          if [ -f out/format-summary.md ]; then
+            cat out/format-summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No format benchmark summary (the run stopped before it)." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: format-bench
+          path: |
+            out/format-rows.csv
+            out/format-summary.md
+          if-no-files-found: warn
+          retention-days: 90

@@ -969,9 +969,11 @@ def test_readme_results_handles_path_rows_including_failed_ones(tmp_path):
     for token in re.findall(r"\d+\.\d+", block):
         assert token in source, token
 
+    # The fixture holds path rows only, so `main` refuses it for the variants of the other v2
+    # sections (tests/test_readme_results.py); the path variants themselves are not missing.
+    assert not {"path-a-runner", "path-b-databricks"} & set(readme_results.missing_variants(rows))
     readme = tmp_path / "README.md"
-    readme.write_text(
-        f"# x\n\n{readme_results.START_MARKER}\n{readme_results.END_MARKER}\n", encoding="utf-8"
-    )
-    assert readme_results.main(["--runs", str(RUNS), "--readme", str(readme)]) == 0
-    assert readme_results.main(["--runs", str(RUNS), "--readme", str(readme), "--check"]) == 0
+    original = f"# x\n\n{readme_results.START_MARKER}\n{readme_results.END_MARKER}\n"
+    readme.write_text(original, encoding="utf-8")
+    assert readme_results.main(["--runs", str(RUNS), "--readme", str(readme)]) == 2
+    assert readme.read_text(encoding="utf-8") == original
