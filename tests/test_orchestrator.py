@@ -257,8 +257,8 @@ def test_decide_after_exit_stops_when_reset_too_far():
 
 
 def test_decide_after_exit_uses_result_line():
-    d = decide_after_exit(0, None, "RESULT: blocked cần secret", now=0, max_wait_s=1)
-    assert (d.kind, d.reason) == ("blocked", "cần secret")
+    d = decide_after_exit(0, None, "RESULT: blocked needs secret", now=0, max_wait_s=1)
+    assert (d.kind, d.reason) == ("blocked", "needs secret")
     d = decide_after_exit(0, None, "nothing", now=0, max_wait_s=1)
     assert d.kind == "failed" and "RESULT" in d.reason
 
@@ -355,11 +355,11 @@ def test_harness_auto_approved_false_on_unexpected_denial():
 
 def test_render_progress_lists_every_task_status(tasks):
     md = render_progress(
-        tasks, done={"S0.4"}, running={"B"}, blocked={"probe": "cần secret"}, skipped={"13"}
+        tasks, done={"S0.4"}, running={"B"}, blocked={"probe": "needs secret"}, skipped={"13"}
     )
     assert "| S0.4 | `feature/runs-log` | merged |" in md
     assert "| B | `feature/baseline-naive` | running |" in md
-    assert "cần secret" in md and "| 13 |" in md and "skipped" in md
+    assert "needs secret" in md and "| 13 |" in md and "skipped" in md
     assert "| 2 | `feature/event-spec` | pending |" in md
 
 
@@ -387,6 +387,8 @@ def test_harness_file_approved_needs_a_line_starting_with_marker():
     )
     assert harness_file_approved(template) is False
     assert harness_file_approved(template + "\nLam đã duyệt 2026-11-11\n") is True
+    assert harness_file_approved(template + "\nApproved by Lam 2026-11-11\n") is True
+    assert harness_file_approved("Not Approved by Lam yet") is False
     assert harness_file_approved("") is False
 
 
@@ -526,10 +528,10 @@ def test_failure_context_prefers_final_result_text():
 
     lines = [
         _line({"type": "assistant", "message": {"content": [{"type": "text", "text": "old"}]}}),
-        _line({"type": "result", "result": "CI đỏ ở job Lint\nRESULT: failed lint"}),
+        _line({"type": "result", "result": "CI red in the Lint job\nRESULT: failed lint"}),
     ]
     ctx = failure_context(lines)
-    assert "CI đỏ ở job Lint" in ctx
+    assert "CI red in the Lint job" in ctx
     assert "old" not in ctx
 
 
@@ -539,7 +541,7 @@ def test_failure_context_falls_back_to_last_assistant_texts_and_truncates():
     long = "x" * 5000
     lines = [
         "not json",
-        _line({"type": "assistant", "message": {"content": [{"type": "text", "text": "đầu"}]}}),
+        _line({"type": "assistant", "message": {"content": [{"type": "text", "text": "head"}]}}),
         _line({"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "B"}]}}),
         _line({"type": "assistant", "message": {"content": [{"type": "text", "text": long}]}}),
     ]
@@ -550,14 +552,14 @@ def test_failure_context_falls_back_to_last_assistant_texts_and_truncates():
 
 
 def test_build_prompt_without_failure_has_no_failure_section(tasks):
-    assert "Lần trước thất bại" not in build_prompt(tasks[2])
+    assert "The previous attempt failed" not in build_prompt(tasks[2])
 
 
 def test_build_prompt_with_previous_failure_tells_session_what_went_wrong(tasks):
-    p = build_prompt(tasks[2], previous_failure="treo 30 phút\nchờ gh pr checks")
-    assert "Lần trước thất bại" in p
-    assert "treo 30 phút" in p and "chờ gh pr checks" in p
-    assert p.rstrip().endswith("RESULT: blocked <việc cần chủ repo làm>")  # contract stays last
+    p = build_prompt(tasks[2], previous_failure="hung for 30 minutes\nwaiting on gh pr checks")
+    assert "The previous attempt failed" in p
+    assert "hung for 30 minutes" in p and "waiting on gh pr checks" in p
+    assert p.rstrip().endswith("RESULT: blocked <what the repo owner must do>")  # contract last
 
 
 # ---------- develop CI health (#3) ----------
@@ -627,10 +629,10 @@ def test_decide_after_exit_stalled_session_fails_even_with_stale_rejected_event(
         "rate_limit_info": {"status": "rejected", "resetsAt": 1000},
     }
     d = decide_after_exit(
-        -15, stale, "", now=5000, max_wait_s=6 * 3600, stalled="treo 30 phút không có output"
+        -15, stale, "", now=5000, max_wait_s=6 * 3600, stalled="hung: no output for 30 minutes"
     )
     assert d.kind == "failed"
-    assert d.reason == "treo 30 phút không có output"
+    assert d.reason == "hung: no output for 30 minutes"
 
 
 def test_decide_after_exit_stalled_but_merged_is_still_merged():
@@ -677,7 +679,7 @@ def test_cli_defaults_to_five_parallel_and_thirty_minute_stall():
 
 def test_build_prompt_stops_at_ready_and_never_reviews_or_merges(tasks):
     p = build_prompt(tasks[2])
-    assert "RESULT: ready <số PR>" in p
+    assert "RESULT: ready <PR number>" in p
     assert "gh pr merge" not in p
     assert "code-reviewer" not in p  # review is a separate, fresh session
 
@@ -717,7 +719,7 @@ def test_decide_after_exit_ready_without_pr_number_is_a_counted_failure():
     # session again (falsy review_pr) and the loop never ended.
     d = decide_after_exit(0, None, "RESULT: ready", now=0, max_wait_s=0)
     assert d.kind == "failed"
-    assert "số PR" in d.reason
+    assert "PR number" in d.reason
 
 
 def test_decide_after_exit_ready_beats_a_stale_rate_event():
@@ -747,15 +749,15 @@ def test_build_review_prompt_names_pr_and_verdict_contract(tasks):
     assert "#31" in p and "feature/event-spec" in p
     assert "gh pr comment 31" in p
     assert "REVIEW: PASS" in p and "REVIEW: FAIL" in p
-    assert "không merge" in p.lower()
+    assert "do not merge" in p.lower()
 
 
 def test_parse_review_takes_last_verdict_line():
     from repopulse.orchestrator import parse_review
 
     assert parse_review("REVIEW: FAIL a\n...\nREVIEW: PASS") == ("PASS", "")
-    assert parse_review("REVIEW: FAIL thiếu test cho dedup") == ("FAIL", "thiếu test cho dedup")
-    assert parse_review("không có gì") is None
+    assert parse_review("REVIEW: FAIL missing dedup test") == ("FAIL", "missing dedup test")
+    assert parse_review("nothing here") is None
 
 
 def test_parse_review_trusts_only_review_lines():
@@ -765,15 +767,18 @@ def test_parse_review_trusts_only_review_lines():
 
     assert parse_review("## Kết luận: PASS | FAIL") is None
     assert parse_review("## Kết luận: PASS") is None
-    assert parse_review("## Kết luận: PASS\n\nREVIEW: FAIL thiếu test") == ("FAIL", "thiếu test")
+    assert parse_review("## Kết luận: PASS\n\nREVIEW: FAIL missing test") == (
+        "FAIL",
+        "missing test",
+    )
 
 
 def test_decide_after_review_maps_verdict_quota_and_missing_line():
     from repopulse.orchestrator import decide_after_review
 
     assert decide_after_review(0, None, "REVIEW: PASS", now=0, max_wait_s=0).kind == "pass"
-    d = decide_after_review(0, None, "REVIEW: FAIL mutation sống", now=0, max_wait_s=0)
-    assert (d.kind, d.reason) == ("fail", "mutation sống")
+    d = decide_after_review(0, None, "REVIEW: FAIL live mutant", now=0, max_wait_s=0)
+    assert (d.kind, d.reason) == ("fail", "live mutant")
     limit = {
         "type": "rate_limit_event",
         "rate_limit_info": {"status": "rejected", "resetsAt": 100},
@@ -797,7 +802,7 @@ def test_merge_ready_needs_all_three_required_checks_passing():
     red = [dict(c, bucket="fail") if c["name"] == "Unit Tests" else c for c in ok]
     assert merge_ready(red) == (False, "Unit Tests: fail")
     missing = [c for c in ok if c["name"] != "Lint"]
-    assert merge_ready(missing) == (False, "Lint: thiếu")
+    assert merge_ready(missing) == (False, "Lint: missing")
     # Review PR 25: a check still running (or skipped) is not a pass
     for bucket in ("pending", "skipping", "cancel"):
         running = [dict(c, bucket=bucket) if c["name"] == "Unit Tests" else c for c in ok]
@@ -970,11 +975,32 @@ def test_build_prompt_requires_foreground_agents_and_no_early_end(tasks):
     # session exit killed the background agent and the run counted as failed.
     p = build_prompt(tasks[2])
     assert "run_in_background" in p and "foreground" in p
-    assert "không kết thúc lượt" in p
+    assert "do not end your turn" in p
+
+
+def test_build_prompt_is_english_and_uses_assumptions_section(tasks):
+    p = build_prompt(tasks[2])
+    assert "## Assumptions" in p
+    assert "Giả định" not in p
+    assert "RESULT: failed <short reason>" in p
+
+
+def test_build_review_prompt_keeps_review_sentinels_in_english(tasks):
+    from repopulse.orchestrator import build_review_prompt
+
+    p = build_review_prompt(tasks[2], "31")
+    assert p.rstrip().endswith("REVIEW: FAIL <blocking findings summarised on one line>")
+
+
+def test_gate_reasons_are_english():
+    g = gate_for(_t(["harness"]), Gates(secrets=frozenset(), harness_approved=False))
+    assert g is not None and "Approved by Lam" in g.reason
+    g = gate_for(_t(["cloud"]), Gates(secrets=frozenset(), harness_approved=True))
+    assert g is not None and g.reason.startswith("needs secret")
 
 
 def test_merge_failure_reason_tells_the_retry_what_to_do():
-    # 2026-11-11: four "review PASS but merge failed" retries had only "merge PR #N thất bại"
+    # 2026-11-11: four "review PASS but merge failed" retries had only "merge PR #N failed"
     # as context, so the retried session did not know the branch conflicted with develop.
     from repopulse.orchestrator import merge_failure_reason
 

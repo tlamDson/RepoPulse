@@ -144,7 +144,7 @@ def test_steps_run_in_order():
         _index(all_steps, _runs(f"{COMPOSE_CMD} up")),
         _index(all_steps, _runs("benchmarks/trino_bench.py")),
         _index(all_steps, _runs("GITHUB_STEP_SUMMARY")),
-        _index(all_steps, _uses("actions/upload-artifact@v4")),
+        _index(all_steps, _uses("actions/upload-artifact@v7")),
         _index(all_steps, _runs(f"{COMPOSE_CMD} down")),
     ]
     assert order == sorted(order)
@@ -187,7 +187,7 @@ def test_job_summary_runs_always():
 
 def test_uploads_rows_summary_and_samples_even_on_failure():
     all_steps = steps(_yaml(WORKFLOW))
-    upload = all_steps[_index(all_steps, _uses("actions/upload-artifact@v4"))]
+    upload = all_steps[_index(all_steps, _uses("actions/upload-artifact@v7"))]
     assert upload.get("if") == "always()"
     with_ = upload["with"]
     assert with_["name"] == "trino-bench"

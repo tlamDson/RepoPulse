@@ -139,20 +139,30 @@ def propose_rules(denials: list[dict], min_count: int = 2) -> list[str]:
             continue
         who = ", ".join(dict.fromkeys(tasks))
         rules.append(
-            f'`{key}` bị từ chối {len(tasks)} lần (việc {who}): thêm vào mục "Không làm" '
-            "của `.claude/rules/command-style.md` kèm cách thay thế, hoặc một allow rule cụ thể "
-            "nếu lệnh này thật sự cần."
+            f'`{key}` was denied {len(tasks)} times (tasks {who}): add it to the "Do not" section '
+            "of `.claude/rules/command-style.md` with a replacement, or add a specific allow rule "
+            "if this command is really needed."
         )
     return rules
 
 
+NEEDS_LAM_HEADING = "## Needs Lam"
+# Run reports written before the switch to English used this heading.
+_OLD_NEEDS_LAM_HEADINGS = frozenset({"## Việc cần Lam"})
+
+
+def needs_lam_section(todo: list[str]) -> list[str]:
+    """Lines of the ``## Needs Lam`` section that a run report writes."""
+    return [NEEDS_LAM_HEADING, *(todo or ["- None"]), ""]
+
+
 def needs_lam(run_report_md: str) -> list[str]:
-    """Unticked items of the ``## Việc cần Lam`` section of a ``logs/run-*.md`` report."""
+    """Unticked items of the ``## Needs Lam`` section of a ``logs/run-*.md`` report."""
     items: list[str] = []
     inside = False
     for line in (run_report_md or "").splitlines():
         if line.startswith("## "):
-            inside = line.strip() == "## Việc cần Lam"
+            inside = line.strip() == NEEDS_LAM_HEADING or line.strip() in _OLD_NEEDS_LAM_HEADINGS
             continue
         if inside and line.startswith("- [ ] "):
             items.append(line[len("- [ ] ") :].strip())
@@ -180,47 +190,47 @@ def build_daily_report(
     merged = [r for r in rows if r.get("outcome") == "merged"]
     failed = [r for r in rows if r.get("outcome") in FAILED_OUTCOMES]
     cost = sum(_num(r.get("cost_usd")) for r in rows)
-    subject = f"RepoPulse {day}: {len(merged)} merged, {len(failed)} thất bại, ${cost:.2f}"
+    subject = f"RepoPulse {day}: {len(merged)} merged, {len(failed)} failed, ${cost:.2f}"
 
-    lines = [f"# RepoPulse · báo cáo ngày {day}", ""]
+    lines = [f"# RepoPulse · daily report {day}", ""]
     if window:
-        lines += [f"Khoảng: {window}", ""]
+        lines += [f"Window: {window}", ""]
     if not rows:
-        lines += ["Không có phiên nào chạy trong ngày.", ""]
+        lines += ["No sessions ran today.", ""]
     else:
         lines += [
-            f"{len(rows)} phiên, {len(merged)} PR merged, {len(failed)} thất bại, "
-            f"${cost:.2f} (số đo vận hành từ logs/orchestrator-metrics.csv).",
+            f"{len(rows)} sessions, {len(merged)} PRs merged, {len(failed)} failed, "
+            f"${cost:.2f} (operational figures from logs/orchestrator-metrics.csv).",
             "",
         ]
-    lines += ["## Đã merge", ""]
-    lines += [f"- PR #{r.get('reason')} (việc {r.get('task')})" for r in merged] or ["- Không có"]
-    lines += ["", "## Thất bại và review FAIL", ""]
+    lines += ["## Merged", ""]
+    lines += [f"- PR #{r.get('reason')} (task {r.get('task')})" for r in merged] or ["- None"]
+    lines += ["", "## Failures and review FAILs", ""]
     lines += [
         f"- {r.get('task')} [{r.get('phase')}]: {r.get('outcome')} — {r.get('reason')}"
         for r in failed
-    ] or ["- Không có"]
+    ] or ["- None"]
 
-    lines += ["", "## Chi phí theo việc", ""]
+    lines += ["", "## Cost per task", ""]
     if rows:
         per: dict[str, list[dict]] = {}
         for r in rows:
             per.setdefault(str(r.get("task")), []).append(r)
-        lines += ["| Việc | Phiên | Lượt | Phút | USD |", "|---|---|---|---|---|"]
+        lines += ["| Task | Sessions | Turns | Minutes | USD |", "|---|---|---|---|---|"]
         for task, rs in per.items():
             turns = int(sum(_num(r.get("turns")) for r in rs))
             minutes = round(sum(_num(r.get("duration_s")) for r in rs) / 60)
             usd = sum(_num(r.get("cost_usd")) for r in rs)
             lines.append(f"| {task} | {len(rs)} | {turns} | {minutes} | {usd:.2f} |")
     else:
-        lines.append("- Không có")
+        lines.append("- None")
 
     rules = propose_rules(denials)
-    lines += ["", "## Lệnh bị hỏi hoặc bị từ chối", "", f"Tổng: {len(denials)}"]
-    lines += ["", "## Đề xuất luật (Lam duyệt rồi thêm vào `.claude/rules/`)", ""]
-    lines += [f"- {r}" for r in rules] or ["- Không có"]
-    lines += ["", "## Việc cần Lam", ""]
-    lines += [f"- [ ] {t}" for t in todo] or ["- Không có"]
+    lines += ["", "## Commands asked about or denied", "", f"Total: {len(denials)}"]
+    lines += ["", "## Proposed rules (Lam approves, then adds to `.claude/rules/`)", ""]
+    lines += [f"- {r}" for r in rules] or ["- None"]
+    lines += ["", NEEDS_LAM_HEADING, ""]
+    lines += [f"- [ ] {t}" for t in todo] or ["- None"]
     return subject, "\n".join(lines) + "\n"
 
 

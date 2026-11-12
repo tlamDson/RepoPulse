@@ -43,7 +43,7 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "17"
@@ -51,7 +51,7 @@ jobs:
       - run: pip install -e ".[dev,spark]"
 
       - name: Cache reference day
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: data/raw/gharchive
           key: gharchive-${{ hashFiles('benchmarks/reference.toml') }}
@@ -77,7 +77,7 @@ jobs:
             echo "No format benchmark summary (the run stopped before it)." >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: format-bench

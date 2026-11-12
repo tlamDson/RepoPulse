@@ -253,7 +253,7 @@ def test_uses_the_same_action_majors_as_the_other_workflows():
                 assert u == "actions/setup-python@v5"
                 assert str(step["with"]["python-version"]) == "3.11"
             if u.startswith("actions/upload-artifact@"):
-                assert u == "actions/upload-artifact@v4"
+                assert u == "actions/upload-artifact@v7"
 
 
 # ---------------------------------------------------------------- secrets

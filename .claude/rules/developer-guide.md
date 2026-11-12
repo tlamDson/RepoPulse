@@ -1,29 +1,29 @@
 # Developer Guide — Git Flow, Worktree, Commit, PR
 
-> Quy ước đóng góp code cho RepoPulse. Quy trình test: `.claude/rules/tdd.md`. Kiểu lệnh:
+> Contribution conventions for RepoPulse. Testing process: `.claude/rules/tdd.md`. Command style:
 > `.claude/rules/command-style.md`.
 
 ## Git Flow
 
-`develop ← <type>/<mô-tả>` (PR, **squash**), `main ← develop` (PR release, **merge commit**). Không push thẳng lên `develop` hay `main`.
+`develop ← <type>/<description>` (PR, **squash**), `main ← develop` (release PR, **merge commit**). No direct push to `develop` or `main`.
 
-- **`main` là nhánh mặc định** của GitHub. Workflow chạy theo lịch (`schedule`) chỉ chạy trên `main`, và `workflow_dispatch` chỉ thấy file workflow có trên `main`. Vì vậy pipeline/cron chỉ bắt đầu chạy sau release; mốc release ghi ở `scripts/prs.toml` (`release_after`): sau PR B (baseline), PR 7 (cron), PR 11 (Pages), PR 14.
-- **Nhánh feature rẽ từ `origin/develop` mới nhất**, tự xoá sau merge.
-- **Branch types:** `feature/`, `fix/`, `test/`, `docs/`, `chore/`. Chữ thường, phân tách bằng `-`, mô tả cụ thể phạm vi (`feature/ingest-gharchive`, không `feature/update`).
+- **`main` is the default branch** on GitHub. Scheduled workflows (`schedule`) only run on `main`, and `workflow_dispatch` only sees workflow files that exist on `main`. So the pipeline/cron only starts running after a release; the release milestones are in `scripts/prs.toml` (`release_after`): after PR B (baseline), PR 7 (cron), PR 11 (Pages), PR 14.
+- **Feature branches branch off the latest `origin/develop`** and are deleted after merge.
+- **Branch types:** `feature/`, `fix/`, `test/`, `docs/`, `chore/`. Lowercase, separated by `-`, with a description that names the scope specifically (`feature/ingest-gharchive`, not `feature/update`).
 
 ## Worktree
 
-Mỗi việc viết code có một worktree riêng dưới `.claude/worktrees/`. Lý do: nhiều phiên chạy song song trên cùng thư mục thì `git checkout`/`git reset` của phiên này âm thầm xoá thay đổi chưa commit của phiên kia.
+Each piece of code work has its own worktree under `.claude/worktrees/`. Reason: when several sessions run in parallel in the same directory, one session's `git checkout`/`git reset` silently deletes the other's uncommitted changes.
 
-- **Chạy headless:** `scripts/orchestrate.py` tạo `.claude/worktrees/pr-<id>` từ `origin/develop` và chạy phiên PR trong đó. Phiên và subagent không tạo worktree con.
-- **Phiên tay:** `git worktree add .claude/worktrees/<tên> -b <type>/<mô-tả> origin/develop`. Không dùng `EnterWorktree` (nó rẽ từ nhánh mặc định `main`, sai gốc).
-- **Dọn:** `python scripts/orchestrate.py clean` (hoặc `/wt-clean`) xoá worktree có PR đã merge, cây sạch, không còn phiên chạy trong đó. Không tự `rm -rf` worktree.
-- Worktree mới không có môi trường Python riêng: dùng chung `pip install -e ".[dev,dbt]"` đã cài. Không copy `.env` vào worktree.
-- Cạm bẫy Windows: mở terminal bằng `cd D:\Desktop\RepoPulse` (chữ `D:` viết hoa). Đường dẫn `d:` và `D:` lệch nhau làm Claude Code coi là hai project khác nhau (memory, settings).
+- **Headless:** `scripts/orchestrate.py` creates `.claude/worktrees/pr-<id>` from `origin/develop` and runs the PR session in it. The session and its subagents do not create child worktrees.
+- **Manual session:** `git worktree add .claude/worktrees/<name> -b <type>/<description> origin/develop`. Do not use `EnterWorktree` (it branches from the default branch `main`, which is the wrong base).
+- **Cleanup:** `python scripts/orchestrate.py clean` (or `/wt-clean`) removes worktrees whose PR is merged, tree is clean, and have no session running in them. Never `rm -rf` a worktree yourself.
+- A new worktree has no Python environment of its own: it shares the already installed `pip install -e ".[dev,dbt]"`. Do not copy `.env` into a worktree.
+- Windows pitfall: open the terminal with `cd D:\Desktop\RepoPulse` (uppercase `D:`). The paths `d:` and `D:` differ, which makes Claude Code treat them as two different projects (memory, settings).
 
 ## Commit Messages
 
-Imperative mood, hoàn thành câu _"If applied, this commit will… [message]"_. Một dòng, không prefix `feat:`/`fix:` (prefix chỉ dành cho PR title). Verb chuẩn: `add`, `fix`, `update`, `remove`, `refactor`, `test`, `docs`, `chore`.
+Imperative mood, completing the sentence _"If applied, this commit will… [message]"_. One line, no `feat:`/`fix:` prefix (prefixes are only for PR titles). Standard verbs: `add`, `fix`, `update`, `remove`, `refactor`, `test`, `docs`, `chore`.
 
 ```
 add failing tests for runs.csv schema validation
@@ -31,69 +31,69 @@ add runs.csv append with schema check
 fix late-event window off-by-one in silver dedup
 ```
 
-Không commit: `.env`/credentials/tokens, `.venv/`, `transform/target/`, `*.duckdb`, dữ liệu thô (`data/raw/`, `*.json.gz`, `*.parquet`), `logs/`, `.claude/state/`, file không liên quan task.
+Do not commit: `.env`/credentials/tokens, `.venv/`, `transform/target/`, `*.duckdb`, raw data (`data/raw/`, `*.json.gz`, `*.parquet`), `logs/`, `.claude/state/`, files unrelated to the task.
 
 ## Pull Requests
 
-### Một PR một việc
+### One PR, one task
 
-Mỗi PR làm đúng **một** việc, để review, revert và đo được từng việc riêng.
+Each PR does exactly **one** task, so that each can be reviewed, reverted and measured on its own.
 
-- **Một việc là gì:**
-  - Một task trong `scripts/prs.toml` luôn là **một** việc, đúng phạm vi tiêu đề và mục của nó trong `docs/plan.md`, kể cả khi tiêu đề có "và" (ví dụ PR 7). Phạm vi task do chủ repo định; reviewer không tách task.
-  - Việc ngoài `prs.toml` (cải tiến harness, sửa lỗi, tài liệu): title và câu đầu `## Summary` nói hết PR mà không cần "và", "+", hay danh sách nhiều mục độc lập.
-- **Thuộc cùng việc** (được ở chung PR):
-  - test của việc đó;
-  - cập nhật `CLAUDE.md`, `.claude/rules/*`, `docs/` mà chính việc đó làm thay đổi;
-  - sửa các finding review của chính PR đó;
-  - bug ngoài phạm vi theo mục "Nợ kỹ thuật" của `workflow.md`: test `# [BUG]` khẳng định hành vi hiện tại + mục ghi vào `tech-defaults.md` (không sửa bug).
-- **Không thuộc** (không gộp): sửa bug ngoài phạm vi, refactor không cần cho việc này, gợi ý review về code khác, sửa CI/tooling mà việc này không bắt buộc.
-  - Phiên tay: mở PR riêng.
-  - Phiên headless (một phiên = một PR, không mở PR thứ hai được): ghi vào Nợ kỹ thuật (bug) hoặc một dòng trong `## Giả định` (việc nên làm sau).
-  - Nếu việc chính *bắt buộc* phải sửa thứ khác mới xanh được, được làm trong PR này nhưng ghi rõ lý do trong `## Giả định`.
-- Nhiều cải tiến được duyệt cùng lúc: mỗi cái một PR, kể cả khi sửa cùng file. Rẽ nhánh sau khi PR trước merge, hoặc `gh pr update-branch <số>` khi nhánh tụt sau `develop`.
-- Không áp dụng cho PR release `develop → main` và PR của Dependabot.
-- `code-reviewer` coi PR làm hơn một việc là finding `[chặn]`.
+- **What counts as one task:**
+  - A task in `scripts/prs.toml` is always **one** task, exactly the scope of its title and its section in `docs/plan.md`, even when the title contains "and" (for example PR 7). The task scope is set by the repo owner; the reviewer does not split tasks.
+  - Work outside `prs.toml` (harness improvements, bug fixes, docs): the title and the first sentence of `## Summary` describe the whole PR without needing "and", "+", or a list of several independent items.
+- **Belongs to the same task** (allowed in the same PR):
+  - the tests for that task;
+  - updates to `CLAUDE.md`, `.claude/rules/*`, `docs/` that the task itself makes necessary;
+  - fixes for review findings on that very PR;
+  - an out-of-scope bug handled per the "Technical debt" section of `workflow.md`: a `# [BUG]` test asserting the current behavior + an entry in `tech-defaults.md` (do not fix the bug).
+- **Does not belong** (do not merge in): fixing an out-of-scope bug, a refactor this task does not need, review suggestions about other code, CI/tooling changes this task does not require.
+  - Manual session: open a separate PR.
+  - Headless session (one session = one PR, a second PR cannot be opened): record under Technical debt (bug) or one line in `## Assumptions` (something worth doing later).
+  - If the main task *must* change something else to go green, it may be done in this PR, but state the reason in `## Assumptions`.
+- Several improvements approved at once: one PR each, even when they edit the same file. Branch after the previous PR merges, or use `gh pr update-branch <number>` when the branch falls behind `develop`.
+- Does not apply to `develop → main` release PRs and Dependabot PRs.
+- `code-reviewer` treats a PR that does more than one task as a `[blocking]` finding.
 
-Feature target `develop`; chỉ PR release target `main`. Title `<type>: <short description>` (< 72 ký tự): `feat:`, `fix:`, `test:`, `docs:`, `chore:`, `refactor:`, `release:`. Mô tả theo `.github/pull_request_template.md`, thêm mục `## Giả định` khi chạy headless:
+Features target `develop`; only release PRs target `main`. Title `<type>: <short description>` (< 72 characters): `feat:`, `fix:`, `test:`, `docs:`, `chore:`, `refactor:`, `release:`. The description follows `.github/pull_request_template.md`, with a `## Assumptions` section added when running headless:
 
 ```markdown
 ## Summary
-- <thay đổi chính>
-- <lý do / impact>
+- <main change>
+- <reason / impact>
 
 ## RED
-<output test đỏ thật, chép từ lần chạy trên commit chỉ có test>
+<real red test output, pasted from the run on the tests-only commit>
 
-## Giả định
-- <quyết định nhỏ đã tự chọn>
+## Assumptions
+- <small decision made on one's own>
 
 ## Test plan
 - [ ] pytest pass locally
 - [ ] dbt build --target ci pass
-- [ ] ruff check + ruff format --check sạch
-- [ ] Không commit secret / .env
+- [ ] ruff check + ruff format --check clean
+- [ ] No secret / .env committed
 ```
 
-### Điều kiện merge
+### Merge conditions
 
-| Target | Cách merge | Điều kiện |
+| Target | How to merge | Condition |
 |---|---|---|
-| `develop` | `gh pr merge <số> --squash --delete-branch` | CI xanh cả 3 job + `code-reviewer` PASS (ghi comment trên PR) |
-| `main` | `gh pr merge <số> --merge` (PR `develop → main`) | CI của PR release xanh; chỉ ở mốc `release_after` |
-| PR sửa `.claude/settings.json`, `.claude/auto-mode.json`, hook | Chủ repo tự merge | Chủ repo duyệt |
+| `develop` | `gh pr merge <number> --squash --delete-branch` | CI green on all 3 jobs + `code-reviewer` PASS (comment recorded on the PR) |
+| `main` | `gh pr merge <number> --merge` (PR `develop → main`) | The release PR's CI is green; only at a `release_after` milestone |
+| PR changing `.claude/settings.json`, `.claude/auto-mode.json`, hooks | Repo owner merges | Repo owner approves |
 
-Không bao giờ thêm `--admin`.
+Never add `--admin`.
 
-**Trước khi push thêm commit vào PR đã mở**, chạy `gh pr view <số> --json state` — PR đã `MERGED`/`CLOSED` thì push không trigger CI; tạo nhánh mới từ `origin/develop` cho phần việc còn lại.
+**Before pushing more commits to an open PR**, run `gh pr view <number> --json state` — if the PR is `MERGED`/`CLOSED`, a push does not trigger CI; create a new branch from `origin/develop` for the remaining work.
 
-Nhánh bị tụt sau `develop`: `gh pr update-branch <số>`, không rebase, không force push.
+A branch that has fallen behind `develop`: `gh pr update-branch <number>`, no rebase, no force push.
 
-### Sửa `.github/workflows/ci.yml` — đừng làm mất required check
+### Editing `.github/workflows/ci.yml` — do not lose a required check
 
-Tên ba job (`Lint`, `Unit Tests`, `dbt build (DuckDB)`) **chính là** định danh required status check của `develop` và `main`. Vì vậy:
+The names of the three jobs (`Lint`, `Unit Tests`, `dbt build (DuckDB)`) **are** the required status check identifiers of `develop` and `main`. Therefore:
 
-- **Không đổi tên** ba job này. Cần thêm việc thì thêm job mới tên khác.
-- **Không thêm `paths:` vào `on: pull_request`** — workflow không chạy, check treo ở _Expected_, PR không merge được.
-- **Không đặt `if:` ở cấp job** cho ba job này. Muốn bỏ qua việc nặng thì gate ở cấp **step**.
-- Không tự ý thêm job khác vào required checks.
+- **Do not rename** these three jobs. If more work is needed, add a new job with a different name.
+- **Do not add `paths:` to `on: pull_request`** — the workflow would not run, the check would hang at _Expected_, and the PR could not be merged.
+- **Do not put `if:` at job level** on these three jobs. To skip heavy work, gate it at **step** level.
+- Do not add other jobs to the required checks on your own.

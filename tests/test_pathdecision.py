@@ -1,6 +1,6 @@
 """Tests of repopulse.pathdecision (D4): the Plan v2 primary path rule applied to runs.csv.
 
-Rule (docs/plan.md, "Luật chọn đường chính"): drop a path that does not run 24 times a day or
+Rule (docs/plan.md, primary-path selection): drop a path that does not run 24 times a day or
 whose success rate is below 95%; of the rest pick the lower end-to-end p50; under 10% apart keep
 the current path (A = path-a-runner).
 
