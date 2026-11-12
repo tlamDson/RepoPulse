@@ -84,18 +84,12 @@ Real GH Archive data (not simulated): the same reference day as `baseline` and t
 
 | engine | source | variant | data_date | total_seconds | q1_seconds | q2_seconds | q3_seconds | q4_seconds | q5_seconds | q6_seconds | row_count | timing | cross_check | run_at | git_sha |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| duckdb | missing: no row in runs.csv yet | — | — | — | — | — | — | — | — | — | — | — | — | — | — |
-| spark | missing: no row in runs.csv yet | — | — | — | — | — | — | — | — | — | — | — | — | — | — |
-| databricks-serverless | missing: no row in runs.csv yet | — | — | — | — | — | — | — | — | — | — | — | — | — | — |
-| databricks-sql | missing: no row in runs.csv yet | — | — | — | — | — | — | — | — | — | — | — | — | — | — |
-| motherduck | missing: no row in runs.csv yet | — | — | — | — | — | — | — | — | — | — | — | — | — | — |
+| duckdb | measured: Q1-Q6 on the reference day | matrix-duckdb | 2026-10-25 | 1.379693 | 0.070564 | 0.088508 | 0.977428 | 0.162533 | 0.030462 | 0.057046 | 1670400 | in-process | content | 2026-11-12T07:32:38+00:00 | c82658b |
+| spark | measured: Q1-Q6 on the reference day | matrix-spark | 2026-10-25 | 19.264915 | 2.311471 | 1.365517 | 5.332565 | 6.270693 | 0.910143 | 3.14992 | 1670400 | in-process | content | 2026-11-12T07:32:54+00:00 | c82658b |
+| databricks-serverless | measured: Q1-Q6 on the reference day | matrix-databricks-serverless | 2026-10-25 | 11.951003 | 1.938565 | 1.346388 | 2.213751 | 2.439241 | 1.367668 | 2.561126 | 1670400 | notebook | content | 2026-11-12T07:37:35+00:00 | c82658b |
+| databricks-sql | measured: Q1-Q6 on the reference day | matrix-databricks-sql | 2026-10-25 | 10.036121 | 1.639145 | 1.202641 | 1.883172 | 2.073748 | 1.131386 | 1.878064 | 1670400 | client | content | 2026-11-12T07:35:56+00:00 | c82658b |
+| motherduck | measured: Q1-Q6 on the reference day | matrix-motherduck | 2026-10-25 | 1.945281 | 0.084298 | 0.106439 | 1.26195 | 0.308665 | 0.04579 | 0.078294 | 1670400 | client | content | 2026-11-12T07:35:32+00:00 | c82658b |
 | snowflake | reused dbt-build-snowflake: dbt build of the marts on the seed fixture, not comparable | dbt-build-snowflake | 2026-01-05 | 22.600090742111206 | 1.398242473602295 | 1.2782909870147705 | 2.0330214500427246 | 1.7248523235321045 | 1.2184998989105225 | 1.9702086448669434 | 36 | — | — | 2026-11-11T16:20:35+00:00 | ee38cf0 |
-
-- Warning: engine duckdb is missing: no matrix-duckdb row in runs.csv.
-- Warning: engine spark is missing: no matrix-spark row in runs.csv.
-- Warning: engine databricks-serverless is missing: no matrix-databricks-serverless row in runs.csv.
-- Warning: engine databricks-sql is missing: no matrix-databricks-sql row in runs.csv.
-- Warning: engine motherduck is missing: no matrix-motherduck row in runs.csv.
 
 ### Spark vs DuckDB at 1, 7 and 30 days
 
