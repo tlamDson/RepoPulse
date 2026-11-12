@@ -107,6 +107,16 @@ Simulated data: app events from `simkit` (no real users) with a known number of 
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | dq-fault-injection | 2026-11-01 | 81.907 | 677 | true | 42 | 60 | 2 | 27 | 27 | 0 | 3 | 5/5 | 5/5 | 5/5 | 5/5 | 5/5 | 2/2 | 2026-11-11T18:22:59+00:00 | 0bc1ad4 |
 
+### Other runs
+
+Not compared with `baseline`: either there is no baseline row with the same `data_date`, or the variant is not one of the groups above. `notes` is copied from `runs.csv`.
+
+| variant | data_date | total_seconds | q1_seconds | q2_seconds | q3_seconds | q4_seconds | q5_seconds | q6_seconds | peak_rss_mb | bytes_read | row_count | run_at | git_sha | notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| streaming-throughput-p1 | 2026-10-25 | 72.101 | — | — | — | — | — | — | — | 1371864797 | 1670400 | 2026-11-12T01:18:30+00:00 | d5df6de | partitions=1 brokers=3 rf=3 min_isr=2 produce_seconds=24.132 consume_seconds=47.969 produce_events_per_s=69219.3 consume_events_per_s=34822.5 batch_rows=1670400 match=true trigger=availableNow micro_batches=9 max_offsets_per_trigger=200000 unkeyed=0 kafka=apache/kafka:4.0.0 |
+| streaming-throughput-p3 | 2026-10-25 | 49.884 | — | — | — | — | — | — | — | 1371864797 | 1670400 | 2026-11-12T01:18:30+00:00 | d5df6de | partitions=3 brokers=3 rf=3 min_isr=2 produce_seconds=25.261 consume_seconds=24.623 produce_events_per_s=66125.6 consume_events_per_s=67839.0 batch_rows=1670400 match=true trigger=availableNow micro_batches=9 max_offsets_per_trigger=200000 unkeyed=0 kafka=apache/kafka:4.0.0 |
+| streaming-throughput-p6 | 2026-10-25 | 50.067 | — | — | — | — | — | — | — | 1371864797 | 1670400 | 2026-11-12T01:18:30+00:00 | d5df6de | partitions=6 brokers=3 rf=3 min_isr=2 produce_seconds=26.947 consume_seconds=23.12 produce_events_per_s=61988.3 consume_events_per_s=72249.1 batch_rows=1670400 match=true trigger=availableNow micro_batches=9 max_offsets_per_trigger=200000 unkeyed=0 kafka=apache/kafka:4.0.0 |
+
 The full log, with every run and not only the newest, is [`runs.csv`](runs.csv).
 <!-- results:end -->
 
