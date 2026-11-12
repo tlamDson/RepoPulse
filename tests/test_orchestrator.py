@@ -985,3 +985,21 @@ def test_merge_failure_reason_tells_the_retry_what_to_do():
     blocked = merge_failure_reason("9", {"mergeable": "MERGEABLE", "mergeStateStatus": "BLOCKED"})
     assert "check" in blocked
     assert "#3" in merge_failure_reason("3", {})
+
+
+def test_merge_failure_reason_detects_conflict_from_either_field():
+    from repopulse.orchestrator import merge_failure_reason
+
+    for view in (
+        {"mergeable": "UNKNOWN", "mergeStateStatus": "DIRTY"},
+        {"mergeable": "CONFLICTING", "mergeStateStatus": "UNKNOWN"},
+    ):
+        assert "origin/develop" in merge_failure_reason("50", view)
+
+
+def test_merge_failure_reason_names_the_blocking_state():
+    from repopulse.orchestrator import merge_failure_reason
+
+    for state in ("BLOCKED", "UNSTABLE"):
+        msg = merge_failure_reason("9", {"mergeable": "MERGEABLE", "mergeStateStatus": state})
+        assert state in msg and "CI" in msg
