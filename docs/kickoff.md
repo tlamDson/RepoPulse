@@ -1,69 +1,69 @@
-# RepoPulse · Cách chạy
+# RepoPulse · How to run
 
-Mở terminal từ thư mục repo, gõ `D:` viết hoa:
+Open a terminal from the repo directory, typing `D:` in capitals:
 
 ```
 cd D:\Desktop\RepoPulse
 pip install -e ".[dev,dbt]"
 ```
 
-## Chạy headless qua đêm (cách chính)
+## Run headless overnight (the main way)
 
 ```
-python scripts/orchestrate.py run --dry-run                          # xem sẽ chạy việc nào, bị chặn ở đâu
-python scripts/orchestrate.py run --auto-approve-harness             # chạy, rồi đi chỗ khác
+python scripts/orchestrate.py run --dry-run                          # see which tasks would run and where they are blocked
+python scripts/orchestrate.py run --auto-approve-harness             # run, then walk away
 ```
 
-- Script đọc `scripts/prs.toml`, chạy tối đa 5 phiên `claude -p` song song (`--parallel N` để đổi),
-  mỗi việc một worktree `.claude/worktrees/pr-<id>`. Số phiên thật bị giới hạn bởi độ rộng DAG.
-  Không phiên nào chờ người: lệnh cần hỏi bị từ chối và ghi log.
-- Mỗi PR có hai loại phiên: phiên PR (Fable) viết code tới khi CI xanh rồi báo `ready`; sau đó một
-  phiên review mới (`--agent code-reviewer`, Opus) review độc lập. PASS thì script tự kiểm 3 check
-  bắt buộc và merge; FAIL thì phiên PR chạy lại kèm kết luận review, tối đa 2 vòng review.
-- CI trên `develop` đỏ (sau một lần merge): không mở việc mới, không release. Chỉ lượt CI xanh mới
-  gỡ cờ (`gh` lỗi hay lượt bị huỷ thì giữ nguyên). Nếu lúc đó không còn phiên nào chạy, script dừng
-  và ghi `develop-ci` vào "Việc cần Lam"; sửa xong thì chạy lại.
-- Phiên im lặng quá 30 phút (`--stall-minutes`, trừ lúc chờ quota reset) bị coi là treo và dừng.
-  Việc thất bại được thử lại 1 lần (tổng 2 lần chạy); lần thử lại nhận kèm lý do và phần cuối log
-  lần trước.
-- `--auto-approve-harness`: nếu S0.4 merge xanh và log không có lệnh bị từ chối ngoài dự kiến, coi
-  như harness đã duyệt và chạy tiếp từ PR B. Bỏ cờ này nếu muốn tự xem `docs/harness-check.md` trước.
-- Thiếu secret cloud: làm hết việc không cần cloud (S0.4, B, 2, 3, 4, 5, 6, 12) rồi dừng ở `probe`.
-- Hết quota: chạy tới khi hết. Limit 5 giờ: phiên tự chờ; nếu phiên thoát vì limit thì script ngủ tới giờ reset rồi
-  `--resume` đúng phiên đó. Limit tuần (reset xa hơn 6 giờ) thì dừng và báo; thêm `--hold-at <phần trăm>` (số nguyên 1–100) để thôi mở việc mới khi quota 5 giờ hoặc 7 ngày chạm ngưỡng đó; `--hold-at-90` tương đương `--hold-at 90` (chừa lại 10% quota).
-- Release `develop → main` tự động sau B, 7, 11, 14 khi CI xanh.
+- The script reads `scripts/prs.toml` and runs up to 5 `claude -p` sessions in parallel (`--parallel N` to change),
+  one worktree `.claude/worktrees/pr-<id>` per task. The real number of sessions is limited by the width of the DAG.
+  No session waits for a person: a command that needs a prompt is denied and logged.
+- Each PR has two kinds of session: the PR session (Fable) writes code until CI is green and then reports `ready`; after that a new
+  review session (`--agent code-reviewer`, Opus) reviews independently. On PASS the script checks the 3 required
+  checks and merges; on FAIL the PR session runs again with the review verdict, at most 2 review rounds.
+- CI on `develop` red (after a merge): no new tasks are opened, no release. Only a green CI run
+  clears the flag (a `gh` error or a cancelled run leaves it unchanged). If no session is running at that point, the script stops
+  and writes `develop-ci` into "Tasks for Lam"; fix it and run again.
+- A session silent for more than 30 minutes (`--stall-minutes`, except while waiting for a quota reset) is treated as hung and stopped.
+  A failed task is retried once (2 runs in total); the retry receives the reason and the tail of the log
+  from the previous run.
+- `--auto-approve-harness`: if S0.4 merged green and the log has no unexpectedly denied command, treat
+  the harness as approved and continue from PR B. Drop this flag if you want to read `docs/harness-check.md` yourself first.
+- Missing cloud secrets: do all tasks that need no cloud (S0.4, B, 2, 3, 4, 5, 6, 12) and then stop at `probe`.
+- Out of quota: run until it is exhausted. 5-hour limit: the session waits by itself; if the session exits because of the limit, the script sleeps until the reset time and then
+  `--resume`s that same session. Weekly limit (reset more than 6 hours away): stop and report; add `--hold-at <percent>` (integer 1–100) to stop opening new tasks when the 5-hour or 7-day quota reaches that threshold; `--hold-at-90` is equivalent to `--hold-at 90` (leaves 10% of quota).
+- Release `develop → main` happens automatically after B, 7, 11, 14 when CI is green.
 
-**Dừng:** tạo file `.claude/state/STOP`. Việc đang chạy làm nốt rồi script dừng.
+**Stop:** create the file `.claude/state/STOP`. Tasks in progress finish and then the script stops.
 
-**Sáng ra xem:** `logs/run-<ngày>.md` (việc cần Lam, kết quả từng việc, tiến độ, danh sách lệnh bị
-hỏi/bị từ chối). Log chi tiết từng việc: `logs/pr-<id>.jsonl`.
+**In the morning, look at:** `logs/run-<date>.md` (tasks for Lam, result of each task, progress, list of commands
+asked/denied). Detailed log per task: `logs/pr-<id>.jsonl`.
 
-**Báo cáo ngày qua email:** mỗi phiên kết thúc ghi một dòng (lượt, phút, USD, lệnh bị từ chối,
-subagent) vào `logs/orchestrator-metrics.csv`. Lúc 22h (`--daily-hour`), nếu orchestrator đang chạy,
-nó viết `logs/daily-<ngày>.md` cho **24 giờ tính tới lúc gửi** (phiên xong sau 22h vào mail hôm sau;
-`daily --date` thì lấy đúng ngày lịch), gồm: PR đã merge, thất bại/review FAIL kèm lý do, chi phí theo việc, đề
-xuất luật từ lệnh bị từ chối lặp lại, việc cần Lam. Rồi gửi mail, mỗi ngày một lần; chỉ đánh dấu
-"đã gửi" khi mail đi thật, nên đặt biến SMTP muộn trong tối thì `daily` vẫn gửi được.
+**Daily report by email:** each finished session writes one line (turns, minutes, USD, denied commands,
+subagents) to `logs/orchestrator-metrics.csv`. At 22:00 (`--daily-hour`), if the orchestrator is running,
+it writes `logs/daily-<date>.md` for the **24 hours up to the send time** (a session that finishes after 22:00 goes into the next day's mail;
+`daily --date` takes exactly that calendar day), containing: merged PRs, failures/review FAILs with reasons, cost per task, proposed
+rules from repeated denied commands, tasks for Lam. Then it sends the mail, once per day; it only marks
+"sent" when the mail really went out, so setting the SMTP variables late in the evening still lets `daily` send.
 
-- Bật mail: tạo Gmail App password, rồi đặt biến môi trường của Windows (mở terminal mới sau đó):
+- Enable mail: create a Gmail App password, then set Windows environment variables (open a new terminal afterwards):
   `setx REPOPULSE_SMTP_USER "<gmail>"`, `setx REPOPULSE_SMTP_APP_PASSWORD "<app password>"`,
-  tuỳ chọn `setx REPOPULSE_REPORT_TO "<người nhận>"`. Thiếu thì chỉ ghi file.
-- Khi orchestrator không chạy lúc 22h, đặt Task Scheduler gọi lệnh `daily` (không gửi trùng):
+  optionally `setx REPOPULSE_REPORT_TO "<recipient>"`. If missing, it only writes the file.
+- When the orchestrator is not running at 22:00, set up Task Scheduler to call the `daily` command (it does not send duplicates):
   `schtasks /Create /SC DAILY /ST 22:05 /TN RepoPulseDaily /TR "python D:\Desktop\RepoPulse\scripts\orchestrate.py daily"`
-- Đề xuất luật chỉ là đề xuất: Lam duyệt rồi tự thêm vào `.claude/rules/` (đường dẫn được bảo vệ).
+- Rule proposals are only proposals: Lam reviews them and adds them to `.claude/rules/` himself (a protected path).
 
 ```
 python scripts/orchestrate.py daily [--date 2026-11-11] [--no-send] [--force]
-python scripts/orchestrate.py report         # tiến độ theo PR đã merge
-python scripts/orchestrate.py quota          # quota gần nhất
+python scripts/orchestrate.py report         # progress by merged PR
+python scripts/orchestrate.py quota          # latest quota
 python scripts/orchestrate.py clean --dry-run
 ```
 
-## Mở phiên tay (khi cần sửa harness hoặc xem lại)
+## Open a manual session (when you need to edit the harness or review)
 
 ```
 claude --permission-mode auto --settings .claude/auto-mode.json --model fable --effort high
 ```
 
-> Tiếp tục RepoPulse: chạy `python scripts/orchestrate.py report`, đọc `logs/` mới nhất và
-> `docs/plan.md`, đối chiếu `gh pr list` và `git worktree list`, rồi báo việc còn lại.
+> Continue RepoPulse: run `python scripts/orchestrate.py report`, read the latest `logs/` and
+> `docs/plan.md`, compare against `gh pr list` and `git worktree list`, then report the remaining work.

@@ -1,20 +1,20 @@
-# dbt models: staging → star schema → mart Q1–Q6
+# dbt models: staging → star schema → marts Q1–Q6
 
-Project dbt nằm ở `transform/`. Gold là star schema (`fct_events`, `dim_user` SCD2, `dim_repo`) và
-sáu mart trả lời Q1–Q6 (`docs/plan.md`). Định nghĩa chuẩn của từng metric là
-`benchmarks/queries/qN.sql`; mart cho **cùng tên cột, cùng ngữ nghĩa và cùng kết quả** với query
-tương ứng trên cùng dữ liệu (đã khử trùng theo `event_id`), có test so khớp
-(`tests/test_dbt_marts.py`). `stg_gharchive_events` và `fct_events` là incremental (mục
-"Incremental" dưới); dim và mart là `table`, dựng lại mỗi lần từ lịch sử đã tích luỹ.
+The dbt project is in `transform/`. Gold is a star schema (`fct_events`, `dim_user` SCD2, `dim_repo`) and
+six marts answering Q1–Q6 (`docs/plan.md`). The canonical definition of each metric is
+`benchmarks/queries/qN.sql`; the mart gives the **same column names, same semantics and same results** as the
+corresponding query on the same data (deduplicated by `event_id`), with a matching test
+(`tests/test_dbt_marts.py`). `stg_gharchive_events` and `fct_events` are incremental (section
+"Incremental" below); dims and marts are `table`s, rebuilt each time from the accumulated history.
 
-## Sơ đồ
+## Diagram
 
 ```
-seed fixture_silver_gharchive_events ─┐   (mặc định, CI)
-read_parquet(var silver_gharchive_parquet) ─┤   (khi đặt var, chỉ DuckDB)
-source silver.silver_gharchive_events ─┤   (Unity Catalog, mặc định trên Databricks)
+seed fixture_silver_gharchive_events ─┐   (default, CI)
+read_parquet(var silver_gharchive_parquet) ─┤   (when the var is set, DuckDB only)
+source silver.silver_gharchive_events ─┤   (Unity Catalog, default on Databricks)
                                        ▼
-                    staging.stg_gharchive_events (incremental, tích luỹ)
+                    staging.stg_gharchive_events (incremental, accumulating)
                          │                    │
 seed repos_data_ecosystem ──► gold.dim_repo   │
                          │         │          ▼
@@ -32,175 +32,175 @@ seed repos_data_ecosystem ──► gold.dim_repo   │
    contributors retention ution_funnel
    (Q1)         (Q2)     (Q3)      (Q4)           (Q5)           (Q6)
 
-gold.{dim_repo, dim_user, fct_events, 6 mart}
-                         │  pub_* (table, alias = tên gold)
+gold.{dim_repo, dim_user, fct_events, 6 marts}
+                         │  pub_* (table, alias = gold name)
                          ▼
-     public.{dim_repo, 6 mart}            đi thẳng (toàn cột pii: none)
-     public.{dim_user, fct_events}        user_key / actor_id / actor_login che bằng mask_pii
-     public.metricflow_time_spine         lịch theo ngày của semantic layer
+     public.{dim_repo, 6 marts}           straight through (all columns pii: none)
+     public.{dim_user, fct_events}        user_key / actor_id / actor_login masked with mask_pii
+     public.metricflow_time_spine         daily calendar of the semantic layer
 ```
 
-Schema trên DuckDB: `main` (seed), `main_staging`, `main_intermediate`, `main_gold`, `main_public`
-(dbt ghép `<schema target>_<schema tuỳ chỉnh>`). `main_public` là thứ duy nhất vai `public`
-(dashboard, Tableau Public) được đọc; nhãn PII, vai và cách che: `docs/governance.md`.
+Schemas on DuckDB: `main` (seeds), `main_staging`, `main_intermediate`, `main_gold`, `main_public`
+(dbt combines `<target schema>_<custom schema>`). `main_public` is the only thing the `public` role
+(dashboard, Tableau Public) may read; PII labels, roles and masking: `docs/governance.md`.
 
-SQL của model và test chạy được trên DuckDB, Snowflake và Databricks: không dùng cú pháp chỉ
-DuckDB có (`filter (where …)`, `arg_min`, `quantile_cont`, `epoch`, `::`, `bool_or`, …) hay
-Databricks không hiểu (`varchar` không độ dài, `regexp_full_match`, `unnest`, `sha256`, `trim`
-hai đối số) ngoài macro `transform/macros/cross_db.sql`; `tests/test_dbt_portability.py` và
-`tests/test_dbt_databricks.py` kiểm điều này. Bảng ánh xạ và workflow: `docs/snowflake-port.md`,
-`docs/dbt-databricks.md`. Var `silver_gharchive_parquet` chỉ dùng được trên DuckDB (Snowflake và
-Databricks báo lỗi compile).
+Model and test SQL runs on DuckDB, Snowflake and Databricks: it does not use syntax only
+DuckDB has (`filter (where …)`, `arg_min`, `quantile_cont`, `epoch`, `::`, `bool_or`, …) or that
+Databricks does not understand (`varchar` without a length, `regexp_full_match`, `unnest`, `sha256`, two-argument
+`trim`) outside the macros in `transform/macros/cross_db.sql`; `tests/test_dbt_portability.py` and
+`tests/test_dbt_databricks.py` check this. The mapping table and workflows: `docs/snowflake-port.md`,
+`docs/dbt-databricks.md`. The var `silver_gharchive_parquet` can only be used on DuckDB (Snowflake and
+Databricks give a compile error).
 
-## Chọn nguồn bằng var
+## Choosing the source with a var
 
-| Var | Nguồn của `stg_gharchive_events` | Dùng khi |
+| Var | Source of `stg_gharchive_events` | Used when |
 |---|---|---|
-| (không đặt) | seed `fixture_silver_gharchive_events` | job CI `dbt build (DuckDB)`: không có lake, không có mạng dữ liệu |
-| `silver_gharchive_parquet: "<glob>"` | `read_parquet('<glob>')` (macro `silver_parquet_relation`, chỉ DuckDB) | pipeline theo lịch (`data/silver-export/*.parquet`, `docs/pipeline.md`), test so khớp (`tests/test_dbt_marts.py`), chạy tay trên file parquet có cột silver |
-| `silver_gharchive_source: unity_catalog` (mặc định trên target Databricks) | source `silver.silver_gharchive_events` = `workspace.repopulse.silver_gharchive_events` (đổi bằng var `silver_gharchive_catalog`/`_schema`/`_table`) | `dbt build --target databricks` trên bảng silver Delta của job Databricks (`docs/dbt-databricks.md`) |
-| `silver_gharchive_source: seed` (mặc định ở target khác) | seed `fixture_silver_gharchive_events` | build seed CI trên Databricks |
+| (unset) | seed `fixture_silver_gharchive_events` | the CI job `dbt build (DuckDB)`: no lake, no data network |
+| `silver_gharchive_parquet: "<glob>"` | `read_parquet('<glob>')` (macro `silver_parquet_relation`, DuckDB only) | the scheduled pipeline (`data/silver-export/*.parquet`, `docs/pipeline.md`), the matching test (`tests/test_dbt_marts.py`), manual runs on parquet files with silver columns |
+| `silver_gharchive_source: unity_catalog` (default on the Databricks target) | source `silver.silver_gharchive_events` = `workspace.repopulse.silver_gharchive_events` (change with the vars `silver_gharchive_catalog`/`_schema`/`_table`) | `dbt build --target databricks` on the silver Delta table of the Databricks job (`docs/dbt-databricks.md`) |
+| `silver_gharchive_source: seed` (default on other targets) | seed `fixture_silver_gharchive_events` | building the CI seed on Databricks |
 
 ```bash
 python -m dbt.cli.main build --project-dir transform --profiles-dir transform --target ci
 python -m dbt.cli.main build --project-dir transform --profiles-dir transform --target ci --vars "{silver_gharchive_parquet: 'path/to/silver/*.parquet'}"
 ```
 
-Seed `fixture_silver_gharchive_events` là **fixture cho CI, không phải số đo**: 36 event viết tay
-(`tests/fixtures/gharchive_small` đã khử trùng theo `id` + `tests/fixtures/gharchive_scd2`) theo
-đúng cột của `silver/gharchive_events` (`docs/spark-jobs.md`). Sinh lại từ JSON bằng
-`silver_select_sql` trong `tests/dbt_helpers.py`; test
-`test_ci_seed_equals_silver_built_from_fixture_json` khẳng định seed bằng đúng dữ liệu đó (từng
-`event_id`, từng cột). Parquet mà pytest tạo có thêm `tests/fixtures/gharchive_parquet_only` (3
-event không có trong seed, gồm ca đổi login cùng giây), nên test phân biệt được đường đọc parquet
-với đường đọc seed; baseline chạy trên cùng các dòng raw với parquet.
+The seed `fixture_silver_gharchive_events` is a **CI fixture, not a measurement**: 36 hand-written events
+(`tests/fixtures/gharchive_small` deduplicated by `id` + `tests/fixtures/gharchive_scd2`) in exactly the
+columns of `silver/gharchive_events` (`docs/spark-jobs.md`). Regenerate it from JSON with
+`silver_select_sql` in `tests/dbt_helpers.py`; the test
+`test_ci_seed_equals_silver_built_from_fixture_json` asserts the seed equals exactly that data (every
+`event_id`, every column). The parquet pytest creates additionally includes `tests/fixtures/gharchive_parquet_only` (3
+events not in the seed, including a same-second login-change case), so tests can tell the parquet read path
+from the seed read path; the baseline runs on the same raw rows as the parquet.
 
-Pipeline theo lịch không cho dbt đọc thư mục Delta: `python -m repopulse.spark.export` đọc bảng
-silver qua Delta rồi ghi parquet thường (`docs/pipeline.md`). Spark ghi `created_at` là thời điểm
-UTC, parquet có thể tới DuckDB dưới dạng `TIMESTAMPTZ`; staging qua macro `utc_timestamp`
-(`macros/cross_db.sql`; nhánh DuckDB là `make_timestamp(epoch_us(…))`) nên giờ tường luôn là UTC
-bất kể múi giờ phiên. Hai target DuckDB (`ci`, `motherduck`) cũng đặt
-`TimeZone: UTC` trong `profiles.yml`.
+The scheduled pipeline does not let dbt read the Delta directory: `python -m repopulse.spark.export` reads the
+silver table through Delta and writes plain parquet (`docs/pipeline.md`). Spark writes `created_at` as a UTC
+instant, and parquet may reach DuckDB as `TIMESTAMPTZ`; staging goes through the macro `utc_timestamp`
+(`macros/cross_db.sql`; the DuckDB branch is `make_timestamp(epoch_us(…))`) so wall-clock time is always UTC
+regardless of the session time zone. The two DuckDB targets (`ci`, `motherduck`) also set
+`TimeZone: UTC` in `profiles.yml`.
 
 ## Incremental
 
-Pipeline theo lịch chạy trên runner với lake mới mỗi lần, nên parquet silver đưa cho dbt chỉ có
-các giờ của lần chạy đó. Lịch sử nằm ở gold (MotherDuck), cụ thể ở staging:
+The scheduled pipeline runs on a runner with a fresh lake each time, so the silver parquet handed to dbt only has
+the hours of that run. History lives in gold (MotherDuck), specifically in staging:
 
-| Model | Materialization | Mỗi lần chạy |
+| Model | Materialization | Each run |
 |---|---|---|
-| `stg_gharchive_events` | `incremental`, `append`, `full_refresh: false` | Chèn các `event_id` chưa có; bản đã có thắng (giống MERGE của silver). Cột `loaded_at` = `run_started_at` (UTC) của lần dbt chèn dòng |
-| `fct_events` | `incremental`, `delete+insert` theo `event_id` (`merge` trên Databricks, cùng kết quả) | Tính lại **mọi** fact của các actor "bị chạm": actor có dòng staging với `loaded_at` lớn hơn `max(loaded_at)` của chính `fct_events` |
-| `dim_user`, `dim_repo`, 6 mart | `table` | Dựng lại từ toàn bộ staging |
+| `stg_gharchive_events` | `incremental`, `append`, `full_refresh: false` | Inserts `event_id`s not yet present; an existing copy wins (like silver's MERGE). Column `loaded_at` = the `run_started_at` (UTC) of the dbt run that inserted the row |
+| `fct_events` | `incremental`, `delete+insert` by `event_id` (`merge` on Databricks, same result) | Recomputes **all** facts of "touched" actors: actors that have a staging row with `loaded_at` greater than the `max(loaded_at)` of `fct_events` itself |
+| `dim_user`, `dim_repo`, 6 marts | `table` | Rebuilt from all of staging |
 
-Vì sao tính lại cả actor: một event đến muộn (kể cả trên repo ngoài seed, không thành fact) có thể
-chèn một phiên bản login sớm hơn vào `dim_user`, làm `version_number` (nên `user_key`) của mọi
-event sau của actor đó dịch đi. Tính lại một actor hai lần vô hại; bỏ sót mới sai, nên mốc lấy từ
-chính `fct_events`.
+Why recompute the whole actor: a late-arriving event (even on a repo outside the seed, which does not become a fact) can
+insert an earlier login version into `dim_user`, shifting the `version_number` (and so the `user_key`) of every
+later event of that actor. Recomputing an actor twice is harmless; missing one is wrong, so the watermark is taken from
+`fct_events` itself.
 
-Bất biến có test (`tests/test_dbt_incremental.py`): dựng từng lô trên một file DuckDB cho đúng
-từng dòng, từng cột như một lần build đầy đủ trên hợp các lô (trừ `loaded_at`); chạy lại lô cũ,
-lô trùng hoặc lô rỗng không đổi bảng nào; không trùng `event_id`; event đến muộn dịch phiên bản của
-fact cũ; `--full-refresh` giữ staging đã tích luỹ.
+Invariants with tests (`tests/test_dbt_incremental.py`): building batch by batch on one DuckDB file gives exactly
+the same rows, column by column, as one full build over the union of the batches (except `loaded_at`); re-running an old batch,
+a duplicate batch or an empty batch changes no table; no duplicate `event_id`; a late event shifts the version of
+old facts; `--full-refresh` keeps the accumulated staging.
 
-**Khi nào cần `--full-refresh`** (input `full_refresh` của `workflow_dispatch` trong
+**When `--full-refresh` is needed** (the `full_refresh` input of `workflow_dispatch` in
 `pipeline.yml`):
 
-- Sửa seed `repos_data_ecosystem` (thêm/bớt repo): incremental chỉ tính lại actor bị chạm, nên
-  event cũ của repo mới thêm chưa thành fact.
-- Sửa logic SQL của `fct_events` hoặc đổi cột (model đặt `on_schema_change: fail`, đổi cột mà
-  không full refresh thì `dbt build` báo lỗi).
+- Editing the seed `repos_data_ecosystem` (adding/removing repos): incremental only recomputes touched actors, so
+  old events of a newly added repo do not become facts.
+- Changing the SQL logic of `fct_events` or changing columns (the model sets `on_schema_change: fail`; changing columns
+  without a full refresh makes `dbt build` fail).
 
-`--full-refresh` dựng lại `fct_events` từ staging nhưng **không** đụng `stg_gharchive_events`
-(`full_refresh: false`): staging là nơi duy nhất giữ lịch sử, lake không còn. Muốn dựng lại cả
-staging thì phải xoá bảng bằng tay rồi nạp lại silver của mọi giờ (chưa có quy trình).
+`--full-refresh` rebuilds `fct_events` from staging but does **not** touch `stg_gharchive_events`
+(`full_refresh: false`): staging is the only place that keeps history, the lake is gone. To rebuild staging too,
+the table must be dropped by hand and the silver of every hour reloaded (no procedure yet).
 
-## Grain và khoá
+## Grain and keys
 
-| Model | Grain | Khoá | Ghi chú |
+| Model | Grain | Key | Notes |
 |---|---|---|---|
-| `stg_gharchive_events` | 1 event silver | `event_id` | Đủ 17 cột silver, kể cả mảng hash commit (silver được phép giữ hash), cộng `loaded_at` |
-| `dim_repo` | 1 repo trong seed | `repo_key` = `lower(repo_name)` | `repo_name` giữ cách viết của seed; event khớp không phân biệt hoa thường như baseline |
-| `dim_user` | 1 phiên bản login của 1 `actor_id` | `user_key` = `'<actor_id>-<version_number>'` | SCD2, xem dưới |
-| `fct_events` | 1 event trên repo seed | `event_id` | FK `user_key` → `dim_user`, `repo_key` → `dim_repo`; `event_week` = tuần ISO (thứ Hai); `item_number` = `coalesce(pr_number, issue_number)`. **Không** mang cột hash email/tên commit sang gold |
-| mart Q1–Q6 | như `qN.sql` | như `qN.sql` | |
+| `stg_gharchive_events` | 1 silver event | `event_id` | All 17 silver columns, including the commit hash arrays (silver may keep hashes), plus `loaded_at` |
+| `dim_repo` | 1 repo in the seed | `repo_key` = `lower(repo_name)` | `repo_name` keeps the seed's spelling; events match case-insensitively like the baseline |
+| `dim_user` | 1 login version of 1 `actor_id` | `user_key` = `'<actor_id>-<version_number>'` | SCD2, see below |
+| `fct_events` | 1 event on a seed repo | `event_id` | FK `user_key` → `dim_user`, `repo_key` → `dim_repo`; `event_week` = ISO week (Monday); `item_number` = `coalesce(pr_number, issue_number)`. Does **not** carry the commit email/name hash columns into gold |
+| marts Q1–Q6 | as in `qN.sql` | as in `qN.sql` | |
 
-Event trên repo ngoài seed không vào `fct_events` (không Q nào dùng), nhưng vẫn góp vào lịch sử
-login của `dim_user`.
+Events on repos outside the seed do not enter `fct_events` (no Q uses them), but still contribute to the login
+history of `dim_user`.
 
-## Luật SCD2 của `dim_user`
+## SCD2 rules of `dim_user`
 
-Dựng từ lịch sử event (gaps-and-islands), tất định, **không** dùng dbt snapshot (snapshot phụ thuộc
-thời điểm chạy, không idempotent khi chạy bù):
+Built from event history (gaps-and-islands), deterministic, and **not** using dbt snapshot (snapshots depend on
+run time and are not idempotent on backfill):
 
-1. Xếp event của mỗi `actor_id` theo (`created_at`, `event_id`). `event_id` là varchar nên hoà
-   `created_at` được phân theo thứ tự chuỗi (`'10' < '9'`), không theo số; vẫn tất định.
-2. Một phiên bản mới bắt đầu khi `actor_login` khác event liền trước (so sánh null-safe). `a → b → a`
-   cho 3 phiên bản.
-3. `valid_from` = event đầu của phiên bản; `valid_to` = `valid_from` của phiên bản kế tiếp (nửa mở
-   `[valid_from, valid_to)`), `NULL` cho phiên bản hiện tại; `is_current = valid_to IS NULL`.
-4. `is_bot`: login kết thúc bằng `[bot]` hoặc `-bot` (không phân biệt hoa thường), như `q1.sql`.
-5. **Đổi login trong cùng một giây** (event login `a` rồi event login `b` của cùng actor, cùng
-   `created_at` = `t`): phiên bản `a` có `valid_from = valid_to = t` (phiên bản độ dài 0). Phiên
-   bản độ dài 0 có hiệu lực đúng tại thời điểm `[t, t]`, không phải khoảng rỗng `[t, t)`; mọi
-   phiên bản khác vẫn nửa mở. Không dời mốc thời gian, không gộp phiên bản, nên `dim_user` vẫn chỉ
-   phụ thuộc event. Singular test `assert_fct_events_user_version_matches_event` áp đúng luật này;
-   `assert_dim_user_scd2_intervals` vốn đã chấp nhận `valid_to = valid_from`.
+1. Order each `actor_id`'s events by (`created_at`, `event_id`). `event_id` is varchar, so ties on
+   `created_at` are broken by string order (`'10' < '9'`), not numerically; still deterministic.
+2. A new version starts when `actor_login` differs from the previous event (null-safe comparison). `a → b → a`
+   gives 3 versions.
+3. `valid_from` = the first event of the version; `valid_to` = the `valid_from` of the next version (half-open
+   `[valid_from, valid_to)`), `NULL` for the current version; `is_current = valid_to IS NULL`.
+4. `is_bot`: a login ending in `[bot]` or `-bot` (case-insensitive), as in `q1.sql`.
+5. **A login change within the same second** (an event with login `a` then an event with login `b` for the same actor, same
+   `created_at` = `t`): version `a` has `valid_from = valid_to = t` (a zero-length version). A zero-length
+   version is in effect exactly at the instant `[t, t]`, not the empty interval `[t, t)`; every other
+   version stays half-open. Timestamps are not shifted and versions are not merged, so `dim_user` still depends
+   only on events. The singular test `assert_fct_events_user_version_matches_event` applies exactly this rule;
+   `assert_dim_user_scd2_intervals` already accepted `valid_to = valid_from`.
 
-`fct_events.user_key` là phiên bản của cùng `actor_id`, cùng login với event, có `valid_from` lớn
-nhất `<=` `created_at` (hoà thì lấy `version_number` lớn nhất). Ở ca đổi login cùng giây, event `a`
-chỉ khớp phiên bản `a` độ dài 0, event `b` khớp phiên bản `b`. Giới hạn đã biết: nếu cùng một giây
-có `a → b → a`, event `a` đầu tiên trỏ phiên bản `a` sau (cũng bắt đầu tại `t`, cùng login) thay vì
-phiên bản đầu; vẫn tất định, vẫn qua singular test và không đổi mart (mart đếm theo login). Vì
-baseline đếm theo `actor.login`, mart dùng login của phiên bản có hiệu lực lúc event, nên kết quả
-khớp baseline cả khi actor đổi tên.
+`fct_events.user_key` is the version of the same `actor_id`, with the same login as the event, with the largest
+`valid_from` `<=` `created_at` (on a tie, the largest `version_number`). In the same-second login-change case, event `a`
+only matches the zero-length version `a`, and event `b` matches version `b`. Known limitation: if within the same second
+there is `a → b → a`, the first event `a` points at the later version `a` (which also starts at `t`, same login) instead of
+the first version; this is still deterministic, still passes the singular test and does not change the marts (marts count by login). Since the
+baseline counts by `actor.login`, the marts use the login of the version in effect at the event, so results
+match the baseline even when an actor is renamed.
 
-## Mart
+## Marts
 
-| Mart | Query | Câu hỏi |
+| Mart | Query | Question |
 |---|---|---|
-| `mart_daily_active_contributors` | `q1.sql` | Contributor hoạt động theo ngày/tuần, theo repo và category, mới so với quay lại |
-| `mart_cohort_retention` | `q2.sql` | Retention cohort tại đúng W+4, W+12 |
-| `mart_contribution_funnel` | `q3.sql` | Funnel fork → PR → merge, giờ tới merge p50/p90 |
-| `mart_responsiveness` | `q4.sql` | Thời gian phản hồi đầu tiên p50/p90, tỉ lệ đóng |
-| `mart_repo_concentration` | `q5.sql` | Bus factor (tỉ trọng top-N) và tỉ lệ bot |
-| `mart_repo_health_score` | `q6.sql` | Điểm sức khoẻ tổng hợp và xếp hạng |
+| `mart_daily_active_contributors` | `q1.sql` | Active contributors per day/week, by repo and category, new vs returning |
+| `mart_cohort_retention` | `q2.sql` | Cohort retention at exactly W+4, W+12 |
+| `mart_contribution_funnel` | `q3.sql` | Fork → PR → merge funnel, hours to merge p50/p90 |
+| `mart_responsiveness` | `q4.sql` | First response time p50/p90, close rate |
+| `mart_repo_concentration` | `q5.sql` | Bus factor (top-N share) and bot share |
+| `mart_repo_health_score` | `q6.sql` | Composite health score and ranking |
 
-Công thức điểm sức khoẻ (thành phần, trọng số, làm tròn, thứ tự xếp hạng) ghi ở đầu
-`benchmarks/queries/q6.sql`; `mart_repo_health_score` dùng nguyên công thức đó.
+The health score formula (components, weights, rounding, ranking order) is written at the top of
+`benchmarks/queries/q6.sql`; `mart_repo_health_score` uses that formula verbatim.
 
-Semantic layer (MetricFlow): mỗi mart public có một semantic model và mỗi cột số một metric cùng
-tên, khai ở `transform/models/public/_semantic.yml`; grain, metric không cộng dồn được, time spine
-và cách sinh SQL metric: `docs/semantic-layer.md`.
+Semantic layer (MetricFlow): each public mart has one semantic model and each numeric column a metric of the same
+name, declared in `transform/models/public/_semantic.yml`; grain, non-additive metrics, the time spine
+and how metric SQL is generated: `docs/semantic-layer.md`.
 
-Khác biệt với baseline:
+Differences from the baseline:
 
-1. **Khử trùng.** Baseline không khử trùng (dòng raw trùng `id` đếm hai lần, ảnh hưởng Q5/Q6), còn
-   silver giữ một dòng mỗi `event_id`. Test so khớp chạy baseline trên đầu vào đã khử trùng.
-2. **`actor_login` NULL.** Baseline tính `ends_with(lower(NULL), …)` ra NULL nên `NOT is_bot` loại
-   event đó khỏi mọi tập "human" (forkers, cohort, `per_actor` của Q5/Q6, `opener_is_bot`), nhưng Q5
-   vẫn đếm nó trong `contributions`. Mart coi event đó là human vì `dim_user.is_bot` coalesce về
-   `false`, nên nó lọt vào cohort Q2, `prs_opened` của Q3, `human_contributors`/top-N của Q5 và
-   activity/diversity của Q6. Silver chỉ bắt buộc `actor.id`, nhưng GH Archive thực tế luôn có
-   `actor.login`. Ca này **chưa có test** và fixture không có event login NULL.
+1. **Dedup.** The baseline does not deduplicate (raw rows with a duplicate `id` are counted twice, affecting Q5/Q6), while
+   silver keeps one row per `event_id`. The matching test runs the baseline on deduplicated input.
+2. **NULL `actor_login`.** The baseline computes `ends_with(lower(NULL), …)` as NULL so `NOT is_bot` excludes that
+   event from every "human" set (forkers, cohort, `per_actor` of Q5/Q6, `opener_is_bot`), but Q5
+   still counts it in `contributions`. The mart treats that event as human because `dim_user.is_bot` coalesces to
+   `false`, so it slips into the Q2 cohort, `prs_opened` of Q3, `human_contributors`/top-N of Q5 and
+   the activity/diversity of Q6. Silver only requires `actor.id`, but real GH Archive always has
+   `actor.login`. This case **has no test yet** and the fixture has no NULL-login event.
 
-## Test
+## Tests
 
-| Loại | Ở đâu | Kiểm gì |
+| Kind | Where | What it checks |
 |---|---|---|
-| Contract | `contract: {enforced: true}` cho `fct_events`, `dim_user`, `dim_repo` và 6 mart | Tên cột, kiểu, `not_null` |
+| Contract | `contract: {enforced: true}` for `fct_events`, `dim_user`, `dim_repo` and the 6 marts | Column names, types, `not_null` |
 | Generic | `models/**/_*.yml` | `not_null`, `unique`, `relationships` (fct → dim, funnel → dim_repo, public fct → public dim_user), `accepted_values` |
-| Generic tự viết | `transform/tests/generic/` | `hashed_pii`: cột hash của staging và cột đã che ở public chỉ chứa SHA-256 hex 64 ký tự (silver quên băm thì build đỏ, model sau SKIP); `no_raw_email`: cột nhãn khác `none` ở gold/public không chứa email (`docs/governance.md`) |
-| Singular | `transform/tests/` | Khoảng hiệu lực SCD2 không hở, không chồng, đúng một phiên bản hiện tại; fct trỏ đúng phiên bản; fct đủ mọi event trên repo seed, mỗi event một lần |
-| Unit (`unit_tests:`) | `_gold.yml`, `_marts.yml` | SCD2 (đổi login → 2 phiên bản; `a → b → a` → 3; đổi login cùng giây → phiên bản độ dài 0), `fct_events` chọn phiên bản theo cận `valid_from` (`a → b → a`) và ở ca cùng giây, cả 6 mart Q1–Q6; cùng `given`/`expect` chạy trên DuckDB (CI) và Databricks (`docs/dbt-databricks.md`) |
-| pytest | `tests/test_dbt_marts.py` | So khớp 6 mart với `qN.sql` từng dòng từng cột; vi phạm contract làm `dbt build` thoát mã khác 0; gold không có cột/giá trị email; build lại cùng đầu vào cho cùng số dòng |
-| pytest | `tests/test_dbt_incremental.py` | Incremental theo lô bằng full build trên hợp các lô; idempotent; event muộn; `--full-refresh`; múi giờ UTC |
-| pytest | `tests/test_dbt_databricks.py` | Mỗi macro có nhánh `databricks__`, chạy trên DuckDB cạnh nhánh `duckdb__` khi được; không cú pháp Databricks không hiểu; staging đọc source Unity Catalog trên Databricks, seed/parquet ở nơi khác |
-| pytest | `tests/test_governance.py` | Nhãn `meta.pii` đủ và đúng policy (`check`), không email thô ở gold/public (`scan`), silver chưa băm làm build đỏ, che cột ở public đúng công thức `hash_pii`, public = gold về số dòng và join |
-| pytest | `tests/test_dbt_semantic_layer.py` | Semantic manifest (`dbt parse`): 6 semantic model trỏ mart public, metric cho mọi cột số, time spine; metric nhóm theo grain mart khớp `qN.sql` (`docs/semantic-layer.md`) |
+| Custom generic | `transform/tests/generic/` | `hashed_pii`: the staging hash columns and masked public columns contain only 64-character SHA-256 hex (if silver forgot to hash, the build goes red and downstream models are SKIPPED); `no_raw_email`: columns labeled other than `none` in gold/public contain no email (`docs/governance.md`) |
+| Singular | `transform/tests/` | SCD2 validity intervals have no gaps, no overlaps, exactly one current version; fct points at the right version; fct has every event on seed repos, each exactly once |
+| Unit (`unit_tests:`) | `_gold.yml`, `_marts.yml` | SCD2 (login change → 2 versions; `a → b → a` → 3; same-second login change → zero-length version), `fct_events` picking the version by the `valid_from` bound (`a → b → a`) and in the same-second case, all 6 marts Q1–Q6; the same `given`/`expect` runs on DuckDB (CI) and Databricks (`docs/dbt-databricks.md`) |
+| pytest | `tests/test_dbt_marts.py` | Matches the 6 marts against `qN.sql` row by row, column by column; a contract violation makes `dbt build` exit non-zero; gold has no email columns/values; rebuilding with the same input gives the same row counts |
+| pytest | `tests/test_dbt_incremental.py` | Batch-wise incremental equals a full build over the union of batches; idempotent; late events; `--full-refresh`; UTC time zone |
+| pytest | `tests/test_dbt_databricks.py` | Every macro has a `databricks__` branch, run on DuckDB next to the `duckdb__` branch where possible; no syntax Databricks does not understand; staging reads the Unity Catalog source on Databricks, seed/parquet elsewhere |
+| pytest | `tests/test_governance.py` | `meta.pii` labels complete and matching the policy (`check`), no raw email in gold/public (`scan`), un-hashed silver turns the build red, masking in public follows the `hash_pii` formula, public = gold in row count and joins |
+| pytest | `tests/test_dbt_semantic_layer.py` | Semantic manifest (`dbt parse`): 6 semantic models pointing at public marts, a metric for every numeric column, time spine; metrics grouped by mart grain match `qN.sql` (`docs/semantic-layer.md`) |
 
-Build dùng chung cho các file pytest là fixture session `built` (và `baseline` = kết quả `qN.sql`)
-trong `tests/conftest.py`; helper
-(`run_dbt`, `write_profiles`, `silver_select_sql`, …) ở `tests/dbt_helpers.py`.
+The build shared by the pytest files is the session fixture `built` (and `baseline` = the `qN.sql` results)
+in `tests/conftest.py`; helpers
+(`run_dbt`, `write_profiles`, `silver_select_sql`, …) are in `tests/dbt_helpers.py`.
 
-Không có số đo nào trong tài liệu này; số đo chỉ lấy từ `runs.csv`.
+There are no measurements in this document; measurements come only from `runs.csv`.
