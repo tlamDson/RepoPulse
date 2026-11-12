@@ -9,6 +9,7 @@
 | Ngôn ngữ | Python 3.11 | `pyproject.toml`; lint/format bằng `ruff` (line-length 100) |
 | Test | `pytest` | `tests/`, xem `.claude/rules/tdd.md` |
 | Điều phối | GitHub Actions | Cron chỉ chạy trên `main`, có thể trễ, tự tắt sau 60 ngày repo không hoạt động |
+| Điều phối (phương án đo cạnh cron) | Airflow 3.4.0 (`airflow standalone` trên runner, venv riêng) | `dags/`, spec thuần `repopulse/dagspec.py`; chỉ chạy trên Linux (`.github/workflows/airflow.yml`), không có trong extras của `pyproject.toml`; `docs/airflow.md` |
 | Bronze/Silver | PySpark + Delta Lake | Databricks Free Edition (serverless, chỉ batch `availableNow`). Dự phòng: chạy trên runner Actions (4 CPU, 16 GB RAM, 14 GB đĩa) |
 | Gold | dbt | `transform/`; CI chạy trên DuckDB (`--target ci`); gold thật trên Databricks SQL warehouse hoặc MotherDuck |
 | Dashboard | Trang tĩnh trên GitHub Pages + Tableau Public (publish tay) | Databricks dashboard không chia sẻ công khai được |
@@ -27,7 +28,8 @@ tests/            pytest; fixtures/ chứa dữ liệu mẫu nhỏ
 transform/        project dbt (dbt_project.yml, profiles.yml, models/, seeds/)
 site/             dashboard tĩnh (HTML/CSS/JS thuần) cho GitHub Pages; export_site.py ghi data/ + tableau/ vào _site/ (PR 11)
 scripts/          orchestrate.py (CLI headless), prs.toml (DAG việc → agent → cổng)
-.github/workflows CI (ci.yml), benchmark (PR B), pipeline theo lịch (PR 7), deploy Pages (PR 11)
+dags/             DAG Airflow (repopulse_pipeline.py, dựng từ repopulse/dagspec.py); không đặt tên thư mục là airflow/ (P2d)
+.github/workflows CI (ci.yml), benchmark (PR B), pipeline theo lịch (PR 7), deploy Pages (PR 11), airflow backfill (P2d)
 .claude/          rules, agents, hooks/log_permission.py, auto-mode.json; state/ và worktrees/ không commit
 docs/             plan, progress, checklist, harness-check
 logs/             log stream-json mỗi PR, báo cáo mỗi lần chạy (không commit)
