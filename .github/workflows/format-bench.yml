@@ -51,7 +51,7 @@ jobs:
       - run: pip install -e ".[dev,spark]"
 
       - name: Cache reference day
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: data/raw/gharchive
           key: gharchive-${{ hashFiles('benchmarks/reference.toml') }}
