@@ -1,40 +1,41 @@
-# TDD (Red → Green → Refactor) — bắt buộc cho mọi feature/fix
+# TDD (Red → Green → Refactor) — mandatory for every feature/fix
 
-> Nguồn duy nhất cho quy trình test của RepoPulse. Stack và cạm bẫy nằm ở
-> `.claude/rules/tech-defaults.md` — file này chỉ nói **quy trình**.
+> The single source for RepoPulse's testing process. The stack and pitfalls are in
+> `.claude/rules/tech-defaults.md` — this file only describes the **process**.
 
-1. **RED** — viết test fail trước, chưa viết implementation. **Commit đầu tiên của PR chỉ chứa test.** Chạy test, xác nhận đỏ thật (assertion fail hoặc `ImportError`/`ModuleNotFoundError` đúng nghĩa của module chưa có, **không phải lỗi cấu hình** như thiếu fixture, sai đường dẫn, thiếu dependency). Chép output đỏ vào mục `## RED` của mô tả PR.
-2. **GREEN** — code tối thiểu để pass, không thêm logic chưa có test bao phủ.
-3. **REFACTOR** — cải thiện code, chạy lại toàn bộ test, không được break.
+1. **RED** — write a failing test first, without writing the implementation. **The first commit of the PR contains only tests.** Run the tests and confirm they are really red (an assertion failure, or an `ImportError`/`ModuleNotFoundError` that genuinely comes from the module not existing yet, **not a configuration error** such as a missing fixture, a wrong path or a missing dependency). Paste the red output into the `## RED` section of the PR description.
+2. **GREEN** — the minimum code to pass, with no logic that is not covered by a test.
+3. **REFACTOR** — improve the code and rerun all tests; nothing may break.
 
 ```bash
-python -m pytest                                   # toàn bộ test Python
-python -m pytest tests/test_<module>.py -x         # một file
-python -m pytest -k <tên_test>                     # một case
-python -m dbt.cli.main build --project-dir transform --profiles-dir transform --target ci   # dbt trên DuckDB
+python -m pytest                                   # all Python tests
+python -m pytest tests/test_<module>.py -x         # one file
+python -m pytest -k <test_name>                    # one case
+python -m dbt.cli.main build --project-dir transform --profiles-dir transform --target ci   # dbt on DuckDB
 ```
 
-Luôn dùng dạng `python -m` (trên máy local `pytest`/`ruff`/`dbt` không có trong PATH; `python -m` còn bảo
-đảm import đúng package của worktree hiện tại). `pyproject.toml` đã đặt `addopts = "-q"`: đừng thêm
-`-q` nữa (thành `-qq` sẽ mất dòng tổng kết `N passed` cần chép làm bằng chứng).
+Always use the `python -m` form (on the local machine `pytest`/`ruff`/`dbt` are not on the PATH;
+`python -m` also guarantees importing the package of the current worktree). `pyproject.toml` already
+sets `addopts = "-q"`: do not add `-q` again (it becomes `-qq` and loses the `N passed` summary line
+that must be pasted as evidence).
 
-**Package first-party mới** (`eventspec`, `simkit`, `benchmarks`...): khi commit chỉ có test import một
-package chưa tồn tại, ruff (isort) xếp nó vào nhóm bên thứ ba và báo `I001`. Thêm tên package vào
-`[tool.ruff.lint.isort] known-first-party` trong `pyproject.toml` **ngay trong commit test** và ghi
-vào mục `## Giả định` — đây là cấu hình lint, không vi phạm "commit đầu chỉ có test".
+**New first-party package** (`eventspec`, `simkit`, `benchmarks`...): when the tests-only commit imports
+a package that does not exist yet, ruff (isort) classifies it as third-party and reports `I001`. Add the
+package name to `[tool.ruff.lint.isort] known-first-party` in `pyproject.toml` **in the test commit
+itself** and record it in the `## Giả định` (Assumptions) section — this is lint configuration and does not violate "the first commit contains only tests".
 
-## Vị trí test
+## Where tests live
 
-- **Python** (`repopulse/`, `eventspec/`, `simkit/`...): `tests/test_<module>.py`, fixture dùng chung ở `tests/conftest.py`, dữ liệu mẫu nhỏ ở `tests/fixtures/`.
-- **PySpark**: test chạy với `SparkSession` local (`master("local[1]")`), fixture `spark` scope `session` trong `conftest.py`. Dữ liệu vài chục dòng, không đọc file GH Archive thật.
-- **dbt**: generic test và singular test trong `transform/models/**/schema.yml` và `transform/tests/`; unit test của dbt (`unit_tests:`) cho logic biến đổi; `contract: {enforced: true}` cho model gold. Test dbt "đỏ" nghĩa là `python -m dbt.cli.main build … --target ci` thất bại đúng chỗ.
+- **Python** (`repopulse/`, `eventspec/`, `simkit/`...): `tests/test_<module>.py`, shared fixtures in `tests/conftest.py`, small sample data in `tests/fixtures/`.
+- **PySpark**: tests run with a local `SparkSession` (`master("local[1]")`), a session-scoped `spark` fixture in `conftest.py`. A few dozen rows of data; never read real GH Archive files.
+- **dbt**: generic and singular tests in `transform/models/**/schema.yml` and `transform/tests/`; dbt unit tests (`unit_tests:`) for transformation logic; `contract: {enforced: true}` for gold models. A dbt test is "red" when `python -m dbt.cli.main build … --target ci` fails in the right place.
 
-## Quy ước
+## Conventions
 
-- **Không bao giờ gọi dịch vụ thật trong unit test** (Databricks, MotherDuck, `data.gharchive.org`, GitHub API). Dùng fixture nhỏ trong `tests/fixtures/` hoặc `monkeypatch`/`unittest.mock`.
-- Dữ liệu ngẫu nhiên phải có seed cố định; test kiểm "cùng seed ra cùng dữ liệu".
-- Test idempotent: chạy lại cùng đầu vào (cùng ngày, giờ) không sinh bản ghi trùng.
-- Test PII: khẳng định không còn email/giá trị thô ở tầng sau bước băm.
-- Bug tìm thấy khi viết test mà không thuộc phạm vi task → viết test khẳng định hành vi **hiện tại** kèm comment `# [BUG]`, không tự sửa. Ghi vào `.claude/rules/tech-defaults.md` mục "Nợ kỹ thuật" theo format 3 phần ở `workflow.md`.
+- **Never call real services in a unit test** (Databricks, MotherDuck, `data.gharchive.org`, GitHub API). Use small fixtures in `tests/fixtures/` or `monkeypatch`/`unittest.mock`.
+- Random data must use a fixed seed; a test checks "same seed gives same data".
+- Idempotency tests: rerunning with the same input (same date, hour) produces no duplicate records.
+- PII tests: assert that no raw email/value remains in layers after the hashing step.
+- A bug found while writing tests that is outside the task's scope → write a test asserting the **current** behavior with a `# [BUG]` comment, and do not fix it. Record it in `.claude/rules/tech-defaults.md` under "Technical debt" in the 3-part format from `workflow.md`.
 
-Test độc lập (không phụ thuộc thứ tự chạy), assertion cụ thể theo hành vi, không `assert x` mơ hồ. Không `pytest.mark.skip` mà không có lý do. Không commit code mới thiếu test.
+Tests are independent (no dependence on run order), assertions are specific to behavior, no vague `assert x`. No `pytest.mark.skip` without a reason. Do not commit new code without tests.

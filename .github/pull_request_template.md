@@ -1,20 +1,20 @@
 ## Summary
 
-- <thay đổi chính>
-- <lý do>
+- <main change>
+- <reason>
 
 ## RED
 
-<!-- Dán output thật của lần chạy test ĐỎ, trước khi có code. Commit đầu của PR chỉ chứa test. -->
+<!-- Paste the real output of the RED test run, before any implementation. The first commit of the PR contains only tests. -->
 
 ```
 ```
 
 ## Test plan
 
-- [ ] Test viết trước, đã thấy đỏ thật (assertion fail hoặc import error đúng nghĩa)
-- [ ] `ruff check .` và `ruff format --check .` sạch
-- [ ] `pytest` xanh
-- [ ] `dbt build` trên DuckDB xanh (nếu PR chạm `transform/`)
-- [ ] Không commit `.env`, token hay dữ liệu thô
-- [ ] Số đo mới (nếu có) nằm trong `runs.csv`, không gõ tay vào README
+- [ ] Tests written first and seen failing for real (assertion failure or a genuine import error)
+- [ ] `ruff check .` and `ruff format --check .` are clean
+- [ ] `pytest` is green
+- [ ] `dbt build` on DuckDB is green (if the PR touches `transform/`)
+- [ ] No `.env`, token or raw data committed
+- [ ] New measurements (if any) are in `runs.csv`, not typed by hand into the README
