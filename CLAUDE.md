@@ -50,6 +50,8 @@ python benchmarks/scale_prepare.py               # tải + lọc + rút gọn 30
 python benchmarks/scale_bench.py --git-sha <sha> --out out/scale-rows.csv   # Spark vs DuckDB 1/7/30 ngày; gộp bằng record_run.py
 python benchmarks/query_opt.py --runs 10 --git-sha <sha> --out out/query-opt-rows.csv --summary out/query-opt-summary.md   # Q1-Q6 trên parquet phẳng/partition/clustering (ngày chuẩn); byte quét chỉ đo được trên Linux (docs/query-optimization.md)
 python benchmarks/format_bench.py --runs 5 --git-sha <sha> --out out/format-rows.csv --summary out/format-summary.md   # Delta vs Iceberg trên ngày chuẩn: ghi, Q1-Q6, MERGE (chạy lại idempotent), time travel; variant format-delta/format-iceberg (cần Java 17, extra spark; docs/iceberg-vs-delta.md)
+docker compose -f benchmarks/kafka/docker-compose.yml up -d --wait   # Kafka 3 broker KRaft (cần Docker; down -v để dọn)
+python benchmarks/streaming_bench.py --git-sha <sha> --partitions 1,3,6 --out out/streaming-rows.csv --summary out/streaming-summary.md   # Kafka -> Spark Structured Streaming (availableNow) -> Delta, đối chiếu đếm; cần extra spark,streaming + Java 17 (docs/streaming.md)
 python benchmarks/snowflake_port.py --engine duckdb --run-results transform/target/run_results.json --git-sha <sha> --out out/snowflake-port-rows.csv   # dòng runs.csv cho một dbt build (port Snowflake, docs/snowflake-port.md); target snowflake chỉ chạy trong workflow snowflake-port.yml
 
 python -m eventspec.generate                     # sinh lại eventspec/schemas/ từ catalog (docs/eventspec.md)
