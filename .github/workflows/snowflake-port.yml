@@ -104,7 +104,7 @@ jobs:
             echo "No port summary (the run stopped before the first row)." >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: snowflake-port
