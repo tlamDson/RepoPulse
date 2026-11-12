@@ -277,8 +277,6 @@ Most pages are in Vietnamese; the benchmark pages are in English.
 | [`docs/semantic-layer.md`](docs/semantic-layer.md) | MetricFlow metrics on the public marts |
 | [`docs/sql-agent.md`](docs/sql-agent.md) | The read-only SQL agent over the public schema, and its evaluation |
 
-Contributing? Please read the [Code of Conduct](.github/CODE_OF_CONDUCT.md).
-
 ## Baseline benchmark
 
 Every optimisation is measured against one naive baseline, on the same day of data and the same six questions (Q1–Q6).
