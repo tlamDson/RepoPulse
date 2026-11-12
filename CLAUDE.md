@@ -49,6 +49,7 @@ python benchmarks/record_run.py <benchmark-row.csv> [<pipeline-row.csv> ...]   #
 python benchmarks/scale_prepare.py               # tải + lọc + rút gọn 30 ngày GH Archive cho benchmark scale (docs/benchmark-scale.md)
 python benchmarks/scale_bench.py --git-sha <sha> --out out/scale-rows.csv   # Spark vs DuckDB 1/7/30 ngày; gộp bằng record_run.py
 python benchmarks/query_opt.py --runs 10 --git-sha <sha> --out out/query-opt-rows.csv --summary out/query-opt-summary.md   # Q1-Q6 trên parquet phẳng/partition/clustering (ngày chuẩn); byte quét chỉ đo được trên Linux (docs/query-optimization.md)
+python benchmarks/trino_bench.py --print-ddl     # DDL Trino/Hive của 4 layout (không cần Docker); đo thật chỉ chạy trong workflow trino-bench.yml (Docker Compose trên runner, docs/trino-hive.md)
 docker compose -f benchmarks/kafka/docker-compose.yml up -d --wait   # Kafka 3 broker KRaft (cần Docker; down -v để dọn)
 python benchmarks/streaming_bench.py --git-sha <sha> --partitions 1,3,6 --out out/streaming-rows.csv --summary out/streaming-summary.md   # Kafka -> Spark Structured Streaming (availableNow) -> Delta, đối chiếu đếm; cần extra spark,streaming + Java 17 (docs/streaming.md)
 python benchmarks/streaming_fault.py --git-sha <sha> --out out/streaming-fault-rows.csv --summary out/streaming-fault-summary.md   # kill broker / kill consumer giữa chừng: đối soát mất/trùng theo nội dung + thời gian phục hồi; phép đo vô hiệu thì không ghi dòng; cần cluster Kafka + Docker + Java 17 (docs/streaming-fault.md)
