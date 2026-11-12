@@ -2,17 +2,20 @@
   mask_pii(expr): salted SHA-256 (lowercase hex, 64 chars) of the normalised value, the same
   formula as repopulse.spark.pii.hash_pii used for silver:
       sha256(salt || lower(strip(value)))
-  NULL stays NULL. Non-text values are cast to varchar first (actor_id 1004 -> '1004').
+  NULL stays NULL. Non-text values are cast to string first (actor_id 1004 -> '1004').
   strip = leading/trailing space, tab, newline, vertical tab, form feed, carriage return.
   Masking the same value with the same salt gives the same hash, so masked keys still join.
+  sha256_hex and trim_chars are cross-database macros (macros/cross_db.sql).
 -#}
 {% macro mask_pii(expr) -%}
     case
         when {{ expr }} is null then null
-        else sha256(
-            {{ pii_hash_salt() }}
-            || lower(trim(cast({{ expr }} as varchar), ' ' || chr(9) || chr(10) || chr(11) || chr(12) || chr(13)))
-        )
+        else {{ sha256_hex(
+            pii_hash_salt() ~ " || lower(" ~ trim_chars(
+                "cast(" ~ expr ~ " as string)",
+                "' ' || chr(9) || chr(10) || chr(11) || chr(12) || chr(13)"
+            ) ~ ")"
+        ) }}
     end
 {%- endmacro %}
 

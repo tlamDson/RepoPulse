@@ -14,7 +14,7 @@ models:
     columns:
       - name: repo_key
         config: {meta: {pii: none}}
-        data_type: varchar
+        data_type: string
         constraints:
           - type: not_null
         data_tests:
@@ -22,14 +22,14 @@ models:
       - name: repo_name
         description: Seed spelling (owner/name), the name reported by the marts.
         config: {meta: {pii: none}}
-        data_type: varchar
+        data_type: string
         constraints:
           - type: not_null
         data_tests:
           - unique
       - name: category
         config: {meta: {pii: none}}
-        data_type: varchar
+        data_type: string
         constraints:
           - type: not_null
         data_tests:
@@ -59,7 +59,7 @@ models:
       - name: user_key
         description: "'<actor_id>-<version_number>'"
         config: {meta: {pii: public_identifier}}
-        data_type: varchar
+        data_type: string
         constraints:
           - type: not_null
         data_tests:
@@ -74,7 +74,7 @@ models:
           - no_raw_email
       - name: actor_login
         config: {meta: {pii: public_identifier}}
-        data_type: varchar
+        data_type: string
         data_tests:
           - no_raw_email
       - name: version_number
@@ -115,19 +115,19 @@ models:
     columns:
       - name: event_id
         config: {meta: {pii: none}}
-        data_type: varchar
+        data_type: string
         constraints:
           - type: not_null
         data_tests:
           - unique
       - name: event_type
         config: {meta: {pii: none}}
-        data_type: varchar
+        data_type: string
         constraints:
           - type: not_null
       - name: action
         config: {meta: {pii: none}}
-        data_type: varchar
+        data_type: string
       - name: created_at
         config: {meta: {pii: none}}
         data_type: timestamp
@@ -146,7 +146,7 @@ models:
           - type: not_null
       - name: user_key
         config: {meta: {pii: public_identifier}}
-        data_type: varchar
+        data_type: string
         constraints:
           - type: not_null
         data_tests:
@@ -164,7 +164,7 @@ models:
           - no_raw_email
       - name: repo_key
         config: {meta: {pii: none}}
-        data_type: varchar
+        data_type: string
         constraints:
           - type: not_null
         data_tests:

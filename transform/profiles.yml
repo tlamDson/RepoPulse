@@ -13,14 +13,18 @@ repopulse:
       settings:
         TimeZone: UTC
 
-    # Cần `pip install dbt-databricks`. DATABRICKS_HOST có thể có `https://`, bỏ đi ở đây.
+    # Cần `pip install -e ".[dbt,databricks]"`. DATABRICKS_HOST có thể có `https://`, bỏ đi ở đây.
+    # Probe chỉ `dbt debug` với schema mặc định `repopulse_probe`. Gold thật
+    # (.github/workflows/dbt-databricks.yml, docs/dbt-databricks.md) đặt DBT_DATABRICKS_SCHEMA
+    # (rỗng cũng về mặc định): dbt ghép `<schema>`, `<schema>_staging`, `<schema>_gold`…, không
+    # đụng schema `repopulse` chứa bảng bronze/silver của job Databricks (D1).
     databricks:
       type: databricks
       host: "{{ env_var('DATABRICKS_HOST', '') | replace('https://', '') | replace('http://', '') | trim('/') }}"
       http_path: "{{ env_var('DATABRICKS_HTTP_PATH', '') }}"
       token: "{{ env_var('DATABRICKS_TOKEN', '') }}"
       catalog: workspace
-      schema: repopulse_probe
+      schema: "{{ env_var('DBT_DATABRICKS_SCHEMA', '') or 'repopulse_probe' }}"
       threads: 2
 
     # duckdb tự đọc token từ biến môi trường MOTHERDUCK_TOKEN; không nhúng token vào path.

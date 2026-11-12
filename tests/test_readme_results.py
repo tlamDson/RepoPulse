@@ -18,6 +18,7 @@ BASELINE = "Query layouts vs naive baseline"
 SCALE = "Spark vs DuckDB at 1, 7 and 30 days"
 DBT = "dbt build: DuckDB vs Snowflake"
 DQ = "Data quality fault injection (simulated data)"
+DBT_DBX = "dbt build on a Databricks SQL warehouse (real GH Archive data)"
 OTHER = "Other runs"
 
 
@@ -165,6 +166,18 @@ DBT_SNOW = row(
     q1_seconds="1.398242473602295",
     row_count="36",
 )
+DBT_DATABRICKS = row(
+    "dbt-build-databricks",
+    "2026-10-25",
+    "2026-11-12T08:00:00+00:00",
+    "fffffff3333333333333333333333333333333333",
+    "95.123456",
+    "engine=databricks; source=workspace.repopulse.silver_gharchive_events; "
+    "input=gharchive-silver-delta; max_event_date=2026-10-26; lines_changed=321; "
+    "q_seconds=mart build time; total=dbt build elapsed_time; base=629d72ec309b",
+    q1_seconds="4.5",
+    row_count="1234567",
+)
 DQ_ROW = row(
     "dq-fault-injection",
     "2026-11-01",
@@ -206,6 +219,7 @@ ALL_LATEST = [
     SPARK_30,
     DBT_DUCK,
     DBT_SNOW,
+    DBT_DATABRICKS,
     DQ_ROW,
     PIPELINE,
     UNKNOWN,
@@ -340,6 +354,27 @@ def test_dbt_section_reports_lines_changed_from_notes_and_says_seed_fixture():
     assert [r["variant"] for r in rows] == ["dbt-build-duckdb", "dbt-build-snowflake"]
     assert [r["lines_changed"] for r in rows] == ["190", "190"]
     assert "seed fixture" in body
+
+
+def test_databricks_dbt_build_has_its_own_section_saying_real_data_not_seed_fixture():
+    out = readme_results.render([DBT_DUCK, DBT_SNOW, DBT_DATABRICKS, BASE_NEW])
+    secs = sections(out)
+
+    assert [r["variant"] for r in table(secs[DBT])] == ["dbt-build-duckdb", "dbt-build-snowflake"]
+    body = secs[DBT_DBX]
+    rows = table(body)
+    assert [r["variant"] for r in rows] == ["dbt-build-databricks"]
+    assert rows[0]["lines_changed"] == "321"
+    assert rows[0]["max_event_date"] == "2026-10-26"
+    assert rows[0]["row_count"] == "1234567"
+    assert "not simulated" in body and "seed fixture" not in body
+    assert "docs/dbt-databricks.md" in body
+    assert "dbt-build-databricks" not in table(secs[BASELINE])[0].values()
+
+
+def test_databricks_dbt_section_is_left_out_when_there_is_no_row():
+    assert DBT_DBX not in sections(readme_results.render([DBT_DUCK, DBT_SNOW]))
+    assert DBT_DBX not in sections(readme_results.render([]))
 
 
 def test_scale_rows_are_ordered_by_days_then_engine_and_not_compared_with_baseline():

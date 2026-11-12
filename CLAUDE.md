@@ -56,6 +56,8 @@ docker compose -f benchmarks/kafka/docker-compose.yml up -d --wait   # Kafka 3 b
 python benchmarks/streaming_bench.py --git-sha <sha> --partitions 1,3,6 --out out/streaming-rows.csv --summary out/streaming-summary.md   # Kafka -> Spark Structured Streaming (availableNow) -> Delta, đối chiếu đếm; cần extra spark,streaming + Java 17 (docs/streaming.md)
 python benchmarks/streaming_fault.py --git-sha <sha> --out out/streaming-fault-rows.csv --summary out/streaming-fault-summary.md   # kill broker / kill consumer giữa chừng: đối soát mất/trùng theo nội dung + thời gian phục hồi; phép đo vô hiệu thì không ghi dòng; cần cluster Kafka + Docker + Java 17 (docs/streaming-fault.md)
 python benchmarks/snowflake_port.py --engine duckdb --run-results transform/target/run_results.json --git-sha <sha> --out out/snowflake-port-rows.csv   # dòng runs.csv cho một dbt build (port Snowflake, docs/snowflake-port.md); target snowflake chỉ chạy trong workflow snowflake-port.yml
+python benchmarks/dbt_databricks.py --run-results transform/target/run_results.json --show-log out/dbt-databricks-show.jsonl --git-sha <sha> --out out/dbt-databricks-rows.csv   # dòng runs.csv variant=dbt-build-databricks; target databricks (silver Delta Unity Catalog của D1) chỉ chạy trong workflow dbt-databricks.yml (docs/dbt-databricks.md)
+python -m repopulse.probe http-path --github-env   # http path SQL warehouse (secret DATABRICKS_HTTP_PATH hoặc tự tìm qua API) -> DBT_DATABRICKS_HTTP_PATH trong $GITHUB_ENV; chỉ dùng trên Actions
 
 python -m eventspec.generate                     # sinh lại eventspec/schemas/ từ catalog (docs/eventspec.md)
 python -m simkit.generate --seed 42 --users 100 --days 7 --null 5 --bot 2   # event simulated + manifest lỗi vào data/simulated/ (docs/simkit.md)

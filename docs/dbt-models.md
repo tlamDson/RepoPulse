@@ -11,7 +11,8 @@ tương ứng trên cùng dữ liệu (đã khử trùng theo `event_id`), có t
 
 ```
 seed fixture_silver_gharchive_events ─┐   (mặc định, CI)
-read_parquet(var silver_gharchive_parquet) ─┤   (khi đặt var)
+read_parquet(var silver_gharchive_parquet) ─┤   (khi đặt var, chỉ DuckDB)
+source silver.silver_gharchive_events ─┤   (Unity Catalog, mặc định trên Databricks)
                                        ▼
                     staging.stg_gharchive_events (incremental, tích luỹ)
                          │                    │
@@ -43,11 +44,13 @@ Schema trên DuckDB: `main` (seed), `main_staging`, `main_intermediate`, `main_g
 (dbt ghép `<schema target>_<schema tuỳ chỉnh>`). `main_public` là thứ duy nhất vai `public`
 (dashboard, Tableau Public) được đọc; nhãn PII, vai và cách che: `docs/governance.md`.
 
-SQL của model và singular test chạy được trên cả DuckDB và Snowflake: không dùng cú pháp chỉ
-DuckDB có (`filter (where …)`, `arg_min`, `quantile_cont`, `epoch`, `::`, `bool_or`, …) ngoài
-macro `transform/macros/cross_db.sql`; `tests/test_dbt_portability.py` kiểm điều này. Bảng ánh xạ
-và workflow port: `docs/snowflake-port.md`. Var `silver_gharchive_parquet` chỉ dùng được trên
-DuckDB (Snowflake báo lỗi compile).
+SQL của model và test chạy được trên DuckDB, Snowflake và Databricks: không dùng cú pháp chỉ
+DuckDB có (`filter (where …)`, `arg_min`, `quantile_cont`, `epoch`, `::`, `bool_or`, …) hay
+Databricks không hiểu (`varchar` không độ dài, `regexp_full_match`, `unnest`, `sha256`, `trim`
+hai đối số) ngoài macro `transform/macros/cross_db.sql`; `tests/test_dbt_portability.py` và
+`tests/test_dbt_databricks.py` kiểm điều này. Bảng ánh xạ và workflow: `docs/snowflake-port.md`,
+`docs/dbt-databricks.md`. Var `silver_gharchive_parquet` chỉ dùng được trên DuckDB (Snowflake và
+Databricks báo lỗi compile).
 
 ## Chọn nguồn bằng var
 
@@ -55,6 +58,8 @@ DuckDB (Snowflake báo lỗi compile).
 |---|---|---|
 | (không đặt) | seed `fixture_silver_gharchive_events` | job CI `dbt build (DuckDB)`: không có lake, không có mạng dữ liệu |
 | `silver_gharchive_parquet: "<glob>"` | `read_parquet('<glob>')` (macro `silver_parquet_relation`, chỉ DuckDB) | pipeline theo lịch (`data/silver-export/*.parquet`, `docs/pipeline.md`), test so khớp (`tests/test_dbt_marts.py`), chạy tay trên file parquet có cột silver |
+| `silver_gharchive_source: unity_catalog` (mặc định trên target Databricks) | source `silver.silver_gharchive_events` = `workspace.repopulse.silver_gharchive_events` (đổi bằng var `silver_gharchive_catalog`/`_schema`/`_table`) | `dbt build --target databricks` trên bảng silver Delta của job Databricks (`docs/dbt-databricks.md`) |
+| `silver_gharchive_source: seed` (mặc định ở target khác) | seed `fixture_silver_gharchive_events` | build seed CI trên Databricks |
 
 ```bash
 python -m dbt.cli.main build --project-dir transform --profiles-dir transform --target ci
@@ -85,7 +90,7 @@ các giờ của lần chạy đó. Lịch sử nằm ở gold (MotherDuck), c�
 | Model | Materialization | Mỗi lần chạy |
 |---|---|---|
 | `stg_gharchive_events` | `incremental`, `append`, `full_refresh: false` | Chèn các `event_id` chưa có; bản đã có thắng (giống MERGE của silver). Cột `loaded_at` = `run_started_at` (UTC) của lần dbt chèn dòng |
-| `fct_events` | `incremental`, `delete+insert` theo `event_id` | Tính lại **mọi** fact của các actor "bị chạm": actor có dòng staging với `loaded_at` lớn hơn `max(loaded_at)` của chính `fct_events` |
+| `fct_events` | `incremental`, `delete+insert` theo `event_id` (`merge` trên Databricks, cùng kết quả) | Tính lại **mọi** fact của các actor "bị chạm": actor có dòng staging với `loaded_at` lớn hơn `max(loaded_at)` của chính `fct_events` |
 | `dim_user`, `dim_repo`, 6 mart | `table` | Dựng lại từ toàn bộ staging |
 
 Vì sao tính lại cả actor: một event đến muộn (kể cả trên repo ngoài seed, không thành fact) có thể
@@ -187,9 +192,10 @@ Khác biệt với baseline:
 | Generic | `models/**/_*.yml` | `not_null`, `unique`, `relationships` (fct → dim, funnel → dim_repo, public fct → public dim_user), `accepted_values` |
 | Generic tự viết | `transform/tests/generic/` | `hashed_pii`: cột hash của staging và cột đã che ở public chỉ chứa SHA-256 hex 64 ký tự (silver quên băm thì build đỏ, model sau SKIP); `no_raw_email`: cột nhãn khác `none` ở gold/public không chứa email (`docs/governance.md`) |
 | Singular | `transform/tests/` | Khoảng hiệu lực SCD2 không hở, không chồng, đúng một phiên bản hiện tại; fct trỏ đúng phiên bản; fct đủ mọi event trên repo seed, mỗi event một lần |
-| Unit (`unit_tests:`) | `_gold.yml`, `_marts.yml` | SCD2 (đổi login → 2 phiên bản; `a → b → a` → 3; đổi login cùng giây → phiên bản độ dài 0), `fct_events` chọn phiên bản theo cận `valid_from` (`a → b → a`) và ở ca cùng giây, cohort Q2, funnel Q3 |
+| Unit (`unit_tests:`) | `_gold.yml`, `_marts.yml` | SCD2 (đổi login → 2 phiên bản; `a → b → a` → 3; đổi login cùng giây → phiên bản độ dài 0), `fct_events` chọn phiên bản theo cận `valid_from` (`a → b → a`) và ở ca cùng giây, cả 6 mart Q1–Q6; cùng `given`/`expect` chạy trên DuckDB (CI) và Databricks (`docs/dbt-databricks.md`) |
 | pytest | `tests/test_dbt_marts.py` | So khớp 6 mart với `qN.sql` từng dòng từng cột; vi phạm contract làm `dbt build` thoát mã khác 0; gold không có cột/giá trị email; build lại cùng đầu vào cho cùng số dòng |
 | pytest | `tests/test_dbt_incremental.py` | Incremental theo lô bằng full build trên hợp các lô; idempotent; event muộn; `--full-refresh`; múi giờ UTC |
+| pytest | `tests/test_dbt_databricks.py` | Mỗi macro có nhánh `databricks__`, chạy trên DuckDB cạnh nhánh `duckdb__` khi được; không cú pháp Databricks không hiểu; staging đọc source Unity Catalog trên Databricks, seed/parquet ở nơi khác |
 | pytest | `tests/test_governance.py` | Nhãn `meta.pii` đủ và đúng policy (`check`), không email thô ở gold/public (`scan`), silver chưa băm làm build đỏ, che cột ở public đúng công thức `hash_pii`, public = gold về số dòng và join |
 | pytest | `tests/test_dbt_semantic_layer.py` | Semantic manifest (`dbt parse`): 6 semantic model trỏ mart public, metric cho mọi cột số, time spine; metric nhóm theo grain mart khớp `qN.sql` (`docs/semantic-layer.md`) |
 
