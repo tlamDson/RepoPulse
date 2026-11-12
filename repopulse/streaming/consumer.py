@@ -15,6 +15,11 @@ Three parts, so the transformation and the sink are testable without Kafka:
    sink commits each batch with the query id and batch id as its transaction id, so a batch
    replayed after a crash is skipped instead of appended twice.
 
+``python -m repopulse.streaming.consumer --bootstrap ... --topic ... --delta ... --checkpoint ...``
+runs one such query in its own process (the consumer-kill case of
+``benchmarks/streaming_fault.py`` kills and restarts it). ``delta_message_counts`` feeds the
+content reconciliation of ``repopulse.streaming.fault``.
+
 pyspark is imported inside the functions, so this module imports without it.
 """
 
@@ -174,3 +179,64 @@ def delta_counts(spark, delta_path: str | Path) -> dict[str, int]:
         .first()
     )
     return {"rows": int(row["rows"]), "distinct_offsets": int(row["distinct_offsets"])}
+
+
+def delta_message_counts(spark, delta_path: str | Path):
+    """Yield ``(sha256 digest bytes, distinct (partition, offset) pairs)`` per ``raw_sha256``.
+
+    One pair per distinct content, streamed to the driver (``toLocalIterator``) so the whole
+    table is never collected at once. Input of ``repopulse.streaming.fault.reconcile_content``.
+    """
+    from pyspark.sql import functions as F
+
+    grouped = (
+        spark.read.format("delta")
+        .load(str(delta_path))
+        .groupBy("raw_sha256")
+        .agg(F.countDistinct("kafka_partition", "kafka_offset").alias("messages"))
+    )
+    for row in grouped.toLocalIterator():
+        yield bytes.fromhex(row["raw_sha256"]), int(row["messages"])
+
+
+# ---------------------------------------------------------------- CLI (one run, own process)
+
+
+def build_parser():
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        prog="python -m repopulse.streaming.consumer",
+        description="One availableNow run: Kafka topic -> bronze Delta (used by the fault test).",
+    )
+    parser.add_argument("--bootstrap", required=True)
+    parser.add_argument("--topic", required=True)
+    parser.add_argument("--delta", type=Path, required=True)
+    parser.add_argument("--checkpoint", type=Path, required=True)
+    parser.add_argument("--max-offsets-per-trigger", type=int, default=None)
+    parser.add_argument("--driver-memory", default="3g")
+    parser.add_argument("--metrics-out", type=Path, default=None, help="JSON of run_stream()")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    import json
+
+    args = build_parser().parse_args(argv)
+    spark = create_spark_session("repopulse-streaming-consumer", driver_memory=args.driver_memory)
+    try:
+        source = read_kafka(
+            spark, args.bootstrap, args.topic, max_offsets_per_trigger=args.max_offsets_per_trigger
+        )
+        metrics = run_stream(source, delta_path=args.delta, checkpoint_path=args.checkpoint)
+    finally:
+        spark.stop()
+    if args.metrics_out is not None:
+        args.metrics_out.parent.mkdir(parents=True, exist_ok=True)
+        args.metrics_out.write_text(json.dumps(metrics), encoding="utf-8")
+    print(f"consumer: {json.dumps(metrics)}", flush=True)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -384,9 +384,8 @@ def test_broker_kill_mid_production_measures_failover_and_resync(tmp_path):
         assert name in notes
     assert result.total_seconds == pytest.approx(notes["produce_seconds"] + 1.5)
     kinds = [e[0] for e in env.log]
-    assert (
-        kinds.index("create") < kinds.index("kill") < kinds.index("start") < kinds.index("delete")
-    )
+    last_delete = len(kinds) - 1 - kinds[::-1].index("delete")  # the first delete is a leftover
+    assert kinds.index("create") < kinds.index("kill") < kinds.index("start") < last_delete
     assert env.alive == {1, 2, 3}
     assert not (tmp_path / "work" / "broker-kill").exists()
 
