@@ -9,6 +9,7 @@ accuracy of a model is recorded by the ``eval`` CLI into runs.csv (docs/sql-agen
 from __future__ import annotations
 
 import importlib
+import re
 
 import pytest
 
@@ -75,7 +76,7 @@ def test_question_set_covers_every_public_table(questions):
 
 
 def test_question_set_has_joins_and_ordered_questions(questions):
-    assert any(" join " in q.sql.lower() for q in questions)
+    assert any(re.search(r"\bjoin\b", q.sql, re.IGNORECASE) for q in questions)
     assert any(q.ordered for q in questions)
 
 

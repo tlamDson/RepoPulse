@@ -266,6 +266,8 @@ ALLOWED = [
     "SELECT category FROM dim_repo UNION ALL SELECT event_type FROM main_public.fct_events",
     "SELECT * FROM dim_repo WHERE repo_key IN (SELECT repo_key FROM fct_events)",
     "SELECT (SELECT count(*) FROM fct_events) AS n FROM dim_repo",
+    "SELECT * FROM (WITH c AS (SELECT * FROM dim_repo) SELECT * FROM c) x",
+    "WITH a AS (SELECT * FROM dim_repo), b AS (SELECT * FROM a) SELECT * FROM b",
 ]
 
 
@@ -296,6 +298,12 @@ FORBIDDEN_READS = [
     "SELECT * FROM dim_repo r JOIN main_gold.dim_user u ON true",
     "SELECT * FROM dim_repo, (SELECT * FROM main_staging.stg_events) s",
     "SELECT * FROM dim_repo WHERE EXISTS (SELECT 1 FROM main.fixture_secret)",
+    "SELECT * FROM dim_repo, LATERAL (SELECT * FROM main_gold.dim_user) u",
+    "SELECT * FROM duckdb_tables",  # system view, not a public relation
+    "SELECT * FROM pg_tables",
+    # A CTE is only in scope inside the query that defines it: the outer name is a real table.
+    "SELECT * FROM (WITH fixture_secret AS (SELECT 1) SELECT * FROM fixture_secret) x, "
+    "fixture_secret",
 ]
 
 
