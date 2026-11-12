@@ -6,8 +6,9 @@ the Spark tests skip with a reason when pyspark, delta-spark, Java 17 or (Window
 missing.
 
 ``lake`` / ``built``: one silver parquet + one ``dbt build`` of ``transform/`` per test run, shared
-by test_dbt_marts.py and test_governance.py (helpers in ``dbt_helpers.py``, imported lazily so a
-missing dbt extra only skips the dbt tests).
+by test_dbt_marts.py, test_governance.py and test_dbt_semantic_layer.py (helpers in
+``dbt_helpers.py``, imported lazily so a missing dbt extra only skips the dbt tests). ``baseline``:
+benchmarks/queries/q1..q6.sql on the same raw lines, what the marts and metrics are compared with.
 
 ``_no_motherduck`` (autouse): wraps ``duckdb.connect`` so any ``md:`` / ``motherduck:`` target
 raises ``AssertionError`` instead of reaching the real MotherDuck account; local targets pass.
@@ -150,3 +151,11 @@ def built(lake) -> dict:
     import dbt_helpers
 
     return dbt_helpers.build_lake(lake)
+
+
+@pytest.fixture(scope="session")
+def baseline(lake) -> dict:
+    """Results of benchmarks/queries/q1..q6.sql on the raw lines of ``lake`` (naive baseline)."""
+    from benchmarks import naive_duckdb
+
+    return naive_duckdb.run_once(lake["raw"], collect=True)["results"]

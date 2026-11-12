@@ -36,6 +36,7 @@ gold.{dim_repo, dim_user, fct_events, 6 mart}
                          ▼
      public.{dim_repo, 6 mart}            đi thẳng (toàn cột pii: none)
      public.{dim_user, fct_events}        user_key / actor_id / actor_login che bằng mask_pii
+     public.metricflow_time_spine         lịch theo ngày của semantic layer
 ```
 
 Schema trên DuckDB: `main` (seed), `main_staging`, `main_intermediate`, `main_gold`, `main_public`
@@ -163,6 +164,10 @@ khớp baseline cả khi actor đổi tên.
 Công thức điểm sức khoẻ (thành phần, trọng số, làm tròn, thứ tự xếp hạng) ghi ở đầu
 `benchmarks/queries/q6.sql`; `mart_repo_health_score` dùng nguyên công thức đó.
 
+Semantic layer (MetricFlow): mỗi mart public có một semantic model và mỗi cột số một metric cùng
+tên, khai ở `transform/models/public/_semantic.yml`; grain, metric không cộng dồn được, time spine
+và cách sinh SQL metric: `docs/semantic-layer.md`.
+
 Khác biệt với baseline:
 
 1. **Khử trùng.** Baseline không khử trùng (dòng raw trùng `id` đếm hai lần, ảnh hưởng Q5/Q6), còn
@@ -186,8 +191,10 @@ Khác biệt với baseline:
 | pytest | `tests/test_dbt_marts.py` | So khớp 6 mart với `qN.sql` từng dòng từng cột; vi phạm contract làm `dbt build` thoát mã khác 0; gold không có cột/giá trị email; build lại cùng đầu vào cho cùng số dòng |
 | pytest | `tests/test_dbt_incremental.py` | Incremental theo lô bằng full build trên hợp các lô; idempotent; event muộn; `--full-refresh`; múi giờ UTC |
 | pytest | `tests/test_governance.py` | Nhãn `meta.pii` đủ và đúng policy (`check`), không email thô ở gold/public (`scan`), silver chưa băm làm build đỏ, che cột ở public đúng công thức `hash_pii`, public = gold về số dòng và join |
+| pytest | `tests/test_dbt_semantic_layer.py` | Semantic manifest (`dbt parse`): 6 semantic model trỏ mart public, metric cho mọi cột số, time spine; metric nhóm theo grain mart khớp `qN.sql` (`docs/semantic-layer.md`) |
 
-Build dùng chung cho hai file pytest là fixture session `built` trong `tests/conftest.py`; helper
+Build dùng chung cho các file pytest là fixture session `built` (và `baseline` = kết quả `qN.sql`)
+trong `tests/conftest.py`; helper
 (`run_dbt`, `write_profiles`, `silver_select_sql`, …) ở `tests/dbt_helpers.py`.
 
 Không có số đo nào trong tài liệu này; số đo chỉ lấy từ `runs.csv`.
