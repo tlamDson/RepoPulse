@@ -72,7 +72,7 @@ def _spark_unavailable_reason() -> str | None:
 
 
 @pytest.fixture(scope="session")
-def spark():
+def spark(tmp_path_factory):
     reason = _spark_unavailable_reason()
     if reason is not None:
         if os.environ.get("CI"):
@@ -98,6 +98,8 @@ def spark():
         .config("spark.sql.session.timeZone", "UTC")
         .config("spark.databricks.delta.snapshotPartitions", "1")
         .config("spark.driver.memory", "1g")
+        # Managed tables by name (test_spark_catalog_tables.py) live in tmp, not ./spark-warehouse.
+        .config("spark.sql.warehouse.dir", str(tmp_path_factory.mktemp("spark-warehouse")))
     )
     session = configure_spark_with_delta_pip(builder).getOrCreate()
     yield session
