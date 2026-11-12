@@ -386,12 +386,23 @@ def merge_failure_reason(pr: str, view: dict) -> str:
     return f"merge PR #{pr} thất bại ({state or 'không rõ trạng thái'})"
 
 
+def _check_bucket(checks: list[dict], name: str) -> str | None:
+    """One bucket for a check name that may have several runs (push + pull_request): any
+    fail/cancel wins, then anything not finished, and "pass" only when every run passed."""
+    runs = [c.get("bucket") for c in checks if c.get("name") == name]
+    if not runs:
+        return None
+    for bad in ("fail", "cancel"):
+        if bad in runs:
+            return bad
+    return next((b or "pending" for b in runs if b != "pass"), "pass")
+
+
 def required_checks_state(checks: list[dict]) -> str:
     """'pending' | 'pass' | 'fail' for the required checks only (``gh pr checks --json
     name,bucket``). A required check not registered yet counts as pending, so a freshly
     created PR is never judged red; optional workflows never decide."""
-    buckets = {c.get("name"): c.get("bucket") for c in checks}
-    states = [buckets.get(name) for name in REQUIRED_CHECKS]
+    states = [_check_bucket(checks, name) for name in REQUIRED_CHECKS]
     if any(b in ("fail", "cancel") for b in states):
         return "fail"
     if all(b == "pass" for b in states):
@@ -401,9 +412,8 @@ def required_checks_state(checks: list[dict]) -> str:
 
 def merge_ready(checks: list[dict]) -> tuple[bool, str]:
     """All required checks pass, from ``gh pr checks <n> --json name,bucket``."""
-    buckets = {c.get("name"): c.get("bucket") for c in checks}
     for name in REQUIRED_CHECKS:
-        bucket = buckets.get(name)
+        bucket = _check_bucket(checks, name)
         if bucket != "pass":
             return False, f"{name}: {bucket or 'thiếu'}"
     return True, ""
