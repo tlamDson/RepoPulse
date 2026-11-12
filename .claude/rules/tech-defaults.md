@@ -68,4 +68,7 @@ Biến môi trường local (không phải GitHub secret) cho email báo cáo ng
 
 (mỗi khoản đủ ba phần: Triệu chứng, Nguyên nhân kèm `file:line`, Điều kiện kích hoạt — xem `workflow.md`)
 
-- Chưa có.
+- **Job `Unit Tests` treo ngẫu nhiên ở test Spark (tìm thấy khi làm PR 54, chưa sửa).**
+  - **Triệu chứng:** `pytest` trên CI đứng im trong khối test Spark cuối, job bị huỷ khi chạm `timeout-minutes: 30`. Ngày 2026-11-12 gặp trên `develop` (run 43139872988) và nhiều nhánh PR, kể cả PR không đụng code Spark; chạy lại có lúc qua. Sau khi huỷ, runner luôn dọn cùng một nhóm tiến trình mồ côi: `pytest`, `java`, hai `python`.
+  - **Nguyên nhân:** `df.collect()` không trả về ở `benchmarks/spark_naive.py:90`, gọi từ `tests/test_spark_naive.py:55`; phía Python chờ JVM trong `py4j` (traceback `faulthandler` của PR 54, run 43140980440; các run khác chỉ có cùng kiểu treo, chưa có traceback). JVM là của fixture `spark` dùng chung cả phiên test (`tests/conftest.py:74`, `local[1]`, `spark.driver.memory=1g`). Nguyên nhân gốc trong JVM chưa xác định (chưa có thread dump của JVM).
+  - **Điều kiện kích hoạt:** ngẫu nhiên, mỗi lần CI chạy bộ test Spark trên runner (`ubuntu-26.04`); không tái hiện được trên máy Windows vì test Spark tự skip. Chưa có test `# [BUG]` vì lỗi không xác định. Muốn khoanh tiếp: thêm `faulthandler_timeout` vào `[tool.pytest.ini_options]` và lấy `jstack` của JVM khi treo.
