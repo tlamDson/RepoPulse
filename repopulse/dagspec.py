@@ -296,6 +296,30 @@ def _dt(field: str, value: object) -> datetime | None:
     return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
 
 
+def _json_array_in_noise(text: str) -> list | None:
+    """The JSON array the CLI printed among log lines, or None when there is none.
+
+    Airflow logs to stdout too, and its log lines carry brackets (``[warning  ]``,
+    ``[py.warnings]``): every ``[`` is tried, and the last array of objects wins (an empty array
+    counts when nothing better was found).
+    """
+    decoder = json.JSONDecoder()
+    found: list | None = None
+    pos = text.find("[")
+    while pos >= 0:
+        try:
+            value, end = decoder.raw_decode(text, pos)
+        except ValueError:
+            pos = text.find("[", pos + 1)
+            continue
+        if isinstance(value, list):
+            objects = bool(value) and all(isinstance(v, Mapping) for v in value)
+            if objects or found is None:
+                found = value
+        pos = text.find("[", end)
+    return found
+
+
 def parse_runs(text: str) -> list[DagRun]:
     """Runs of ``airflow dags list-runs -o json``; log noise around the JSON array is ignored."""
     stripped = text.strip()
@@ -304,15 +328,11 @@ def parse_runs(text: str) -> list[DagRun]:
     try:
         data = json.loads(stripped)
     except ValueError:
-        start, end = stripped.find("["), stripped.rfind("]")
-        if start < 0:
+        data = _json_array_in_noise(stripped)
+        if data is None:
             if "no data" in stripped.lower():
                 return []
             raise DagSpecError(f"list-runs output is not JSON: {stripped[:200]!r}") from None
-        try:
-            data = json.loads(stripped[start : end + 1] if end > start else stripped[start:])
-        except ValueError as exc:
-            raise DagSpecError(f"invalid JSON in list-runs output: {exc}") from None
     if not isinstance(data, list):
         raise DagSpecError(f"list-runs output must be a JSON list (got {type(data).__name__})")
     runs = []

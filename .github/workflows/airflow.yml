@@ -63,6 +63,8 @@ jobs:
       REPOPULSE_AIRFLOW_HOURS_PER_DAY: ${{ inputs.hours_per_day || '1' }}
       PII_HASH_SALT: not-a-secret-pr-salt
       AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+      # Throwaway instance on localhost: no login, so no generated password in the uploaded log.
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: "True"
     steps:
       - uses: actions/checkout@v4
 
@@ -122,9 +124,22 @@ jobs:
       - name: Airflow database
         run: '"$AIRFLOW" db migrate'
 
+      # `airflow standalone` starts its components with the bare command `airflow`, so the venv
+      # must be on PATH; appended, so `python` stays the project's interpreter for the tasks.
+      # Fails early when the components do not come up (not after a long backfill wait).
       - name: Start Airflow in the background
         run: |
-          nohup "$AIRFLOW" standalone > "$AIRFLOW_HOME/standalone.log" 2>&1 &
+          PATH="$PATH:$AIRFLOW_VENV/bin" nohup "$AIRFLOW" standalone > "$AIRFLOW_HOME/standalone.log" 2>&1 &
+          for i in $(seq 1 60); do
+            if grep -q "Airflow is ready" "$AIRFLOW_HOME/standalone.log"; then
+              echo "Airflow is ready (try $i)"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::Airflow standalone was not ready after 5 minutes"
+          tail -n 80 "$AIRFLOW_HOME/standalone.log"
+          exit 1
 
       - name: Wait for the DAG to be registered
         run: |

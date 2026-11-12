@@ -150,6 +150,20 @@ def test_standalone_runs_in_background_with_a_log_file():
     assert '"$AIRFLOW" standalone >' in run
     assert "standalone.log" in run
     assert run.rstrip().endswith("&") or "&\n" in run
+    # `airflow standalone` starts its components with the bare command `airflow` (run
+    # 43134761449: FileNotFoundError 'airflow', nothing ran): the venv must be on PATH, after the
+    # project's interpreter.
+    assert 'PATH="$PATH:$AIRFLOW_VENV/bin" nohup "$AIRFLOW" standalone' in run
+    # The step fails early when the components do not come up, instead of a long backfill wait.
+    assert 'grep -q "Airflow is ready"' in run
+    assert "exit 1" in run
+
+
+def test_no_generated_password_in_the_uploaded_log():
+    # With every user an admin, the simple auth manager generates and prints no password; the
+    # standalone log is uploaded as an artifact.
+    env = only_job(load())["env"]
+    assert env["AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS"] == "True"
 
 
 def test_backfill_command():
