@@ -213,7 +213,7 @@ Consumer logs are in `data/streaming-fault/logs/`.
 
 The workflow uploads the artifact **`streaming-fault`** (`out/streaming-fault-rows.csv`,
 `out/streaming-fault-summary.md`; no raw data). Merge the rows into `runs.csv` (schema-checked),
-then regenerate the README results (the rows land in "Other runs"):
+then regenerate the README results (the rows have their own section, "Streaming fault tolerance"):
 
 ```bash
 gh run download <run-id> -n streaming-fault -D out/streaming-fault

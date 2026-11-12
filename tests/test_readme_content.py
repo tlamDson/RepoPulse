@@ -65,12 +65,34 @@ def test_readme_no_longer_says_it_is_bootstrapping():
     assert "No pipeline results yet" not in readme
 
 
-def test_readme_states_the_fallback_path_and_that_databricks_is_not_used():
+def hand_written(readme):
+    """README text outside the generated Results block."""
+    if not has_markers(readme):
+        return readme
+    return readme[: readme.index(START)] + readme[readme.index(END) :]
+
+
+def test_readme_says_the_schedule_runs_on_the_runner_with_motherduck_and_databricks_is_measured():
     readme = read_text("README.md")
+    text = hand_written(readme)
 
     assert "MotherDuck" in readme
     assert "GitHub Actions" in readme
-    assert "does not use Databricks" in readme
+    assert re.search(r"scheduled pipeline[^.]*runner[^.]*MotherDuck", text)
+    assert re.search(r"Databricks[^.]*measured next to", text)
+    assert "docs/probe-result.md" in text
+
+
+def test_readme_no_longer_says_databricks_is_unused_or_the_second_phase_is_unbuilt():
+    text = hand_written(read_text("README.md"))
+
+    assert "does not use Databricks" not in text
+    assert "Anything on Databricks" not in text
+    assert "Fallback path instead of Databricks" not in text
+    assert "could not authenticate to Databricks" not in text
+    assert "not a personal access token" not in text
+    assert "planned, not built" not in text
+    assert "Local phase (planned)" not in text
 
 
 def test_readme_labels_simulated_data_and_names_the_batch_style():
@@ -80,21 +102,42 @@ def test_readme_labels_simulated_data_and_names_the_batch_style():
     assert "incremental batch" in readme
 
 
-def hand_written(readme):
-    """README text outside the generated Results block."""
-    if not has_markers(readme):
-        return readme
-    return readme[: readme.index(START)] + readme[readme.index(END) :]
+def test_readme_links_the_method_page_of_every_v2_measurement():
+    text = hand_written(read_text("README.md"))
+
+    for page in (
+        "path-comparison",
+        "iceberg-vs-delta",
+        "streaming",
+        "streaming-fault",
+        "trino-hive",
+        "airflow",
+        "dbt-databricks",
+        "databricks-job",
+        "semantic-layer",
+        "sql-agent",
+        "engine-matrix",
+    ):
+        assert (ROOT / "docs" / f"{page}.md").is_file(), page
+        assert f"docs/{page}.md" in text, f"README.md does not link docs/{page}.md"
 
 
 def test_readme_never_calls_the_pipeline_real_time_or_streaming():
     # The scheduled pipeline is an incremental batch. The generated Results block is exempt: it
     # copies variant names and notes from runs.csv, and `streaming-throughput-p<N>` is a real
-    # Kafka + Spark Structured Streaming measurement (docs/streaming.md).
-    lowered = hand_written(read_text("README.md")).lower()
+    # Kafka + Spark Structured Streaming measurement (docs/streaming.md). The hand-written text
+    # may name the two docs pages of that benchmark, nothing else.
+    text = re.sub(r"docs/streaming[a-z-]*\.md", "", hand_written(read_text("README.md")))
+    lowered = text.lower()
 
     assert "real-time" not in lowered
     assert "streaming" not in lowered
+
+
+def test_runs_csv_has_a_row_for_every_variant_the_v2_sections_require():
+    from repopulse import readme_results
+
+    assert readme_results.missing_variants(runs_rows()) == []
 
 
 def test_results_block_is_what_the_generator_makes_from_runs_csv():
