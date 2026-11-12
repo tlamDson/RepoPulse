@@ -11,11 +11,13 @@ Row (``variant`` = ``path-a-runner`` | ``path-b-databricks``):
 - ``total_seconds``: sum of the timed pipeline steps of the run (end to end, runner setup and
   queueing excluded; a failed run sums the steps that ran).
 - ``q1_seconds`` .. ``q6_seconds``: time to read the mart of each question from the path's gold.
-- ``row_count``: rows the bronze/silver step inserted into silver.
+- ``row_count``: rows the bronze/silver step inserted into silver (0 when the path's silver
+  already held the hours of the window; A starts from an empty lake on every run).
 - ``notes``: ``status=success|failed``, ``failed_step=<step>`` (failed runs), ``hour``, ``hours``,
   ``<step>_seconds`` for each timed step, the waits (``queue_seconds``, ``setup_seconds`` of the
   runner; on B also ``job_queue_seconds``, ``job_setup_seconds`` of the serverless job and
-  ``warehouse_start_seconds``), ``missing_hours``, ``run_id``, ``trigger``.
+  ``warehouse_start_seconds``), ``missing_hours``, ``bronze_rows`` (rows the bronze/silver step
+  read: equal on A and B when both processed the same window), ``run_id``, ``trigger``.
 
 Percentiles are **nearest-rank**: for n sorted values, the p-th percentile is the value at rank
 ``ceil(p / 100 * n)`` (1-based, at least 1). It is always one of the measured values; an empty
@@ -167,6 +169,7 @@ def build_row(
     waits: Mapping[str, object] | None = None,
     queries: Mapping[str, object] | None = None,
     row_count: int | None = None,
+    bronze_rows: int | None = None,
     run_id: str,
     trigger: str,
     ingest_records: Sequence[Mapping[str, Any]] | None = None,
@@ -205,6 +208,10 @@ def build_row(
         isinstance(row_count, bool) or not isinstance(row_count, int) or row_count < 0
     ):
         raise PathCompareError(f"row_count must be an int >= 0 (got {row_count!r})")
+    if bronze_rows is not None and (
+        isinstance(bronze_rows, bool) or not isinstance(bronze_rows, int) or bronze_rows < 0
+    ):
+        raise PathCompareError(f"bronze_rows must be an int >= 0 (got {bronze_rows!r})")
 
     notes: dict[str, str] = {"status": status}
     if failed_step is not None:
@@ -218,6 +225,8 @@ def build_row(
     if ingest_records is not None:
         missing_hours = sum(1 for r in ingest_records if r.get("status") == "missing")
         notes["missing_hours"] = str(missing_hours)
+    if bronze_rows is not None:
+        notes["bronze_rows"] = str(bronze_rows)
     notes["run_id"] = _token("run_id", run_id)
     notes["trigger"] = _token("trigger", trigger)
 
@@ -817,6 +826,7 @@ def _row(args: argparse.Namespace) -> int:
     queries = (_load_json(args.queries, default={}) or {}).get("seconds")
     summary = _load_json(args.summary_json, default={})
     inserted = summary.get("silver_inserted") if isinstance(summary, dict) else None
+    bronze = summary.get("bronze_rows") if isinstance(summary, dict) else None
     records = _load_json(args.ingest_summary, default=None)
     if not isinstance(timings, dict):
         raise PathCompareError(f"{args.timings} must hold a JSON object")
@@ -834,6 +844,7 @@ def _row(args: argparse.Namespace) -> int:
         row_count=inserted
         if isinstance(inserted, int) and not isinstance(inserted, bool)
         else None,
+        bronze_rows=bronze if isinstance(bronze, int) and not isinstance(bronze, bool) else None,
         run_id=args.run_id,
         trigger=args.trigger,
         ingest_records=records if isinstance(records, list) else None,

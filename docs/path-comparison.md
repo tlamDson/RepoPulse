@@ -69,6 +69,13 @@ trình con, ghi vào `out/timings.json`, mã thoát của lệnh là kết quả
 | Khởi động SQL warehouse (B) | `pathcompare warehouse-start`: từ lúc gọi tới khi `RUNNING` (0 nếu đang chạy) | `warehouse_start_seconds`; bước `warehouse_seconds` là wall time của cả bước |
 | Q1–Q6 | `pathcompare queries`: `SELECT *` toàn bộ mart của câu hỏi (A: DuckDB `fetchall`; B: Statement Execution API tới `SUCCEEDED`) | `q1_seconds` … `q6_seconds` |
 | Số dòng | `silver_inserted` của bước bronze/silver | `row_count` |
+| Số dòng đọc vào | `bronze_rows` của bước bronze/silver | `bronze_rows` trong `notes` |
+
+`row_count` là số dòng silver **nhận thêm**: đường A dựng lake mới mỗi lần chạy nên luôn chèn hết;
+silver của đường B nằm lâu dài trong Unity Catalog nên giờ đã nạp trước đó (ví dụ giờ của ngày
+chuẩn do D1 nạp) cho `row_count=0`, toàn bộ dòng bị khử trùng. `bronze_rows` là số dòng bước
+bronze/silver đọc vào: hai đường xử lý cùng cửa sổ dữ liệu thì hai số này bằng nhau. Lần chạy theo
+lịch lấy một giờ mới nên cả hai đường đều chèn thật.
 
 `notes` còn có `status=success|failed`, `failed_step=<bước>` (bước đầu tiên có kết quả khác
 `success`; bước không chạy tính như `skipped`), `hour`, `hours`, `missing_hours` (giờ GH Archive
