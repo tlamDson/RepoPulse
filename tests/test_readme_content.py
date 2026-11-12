@@ -80,8 +80,18 @@ def test_readme_labels_simulated_data_and_names_the_batch_style():
     assert "incremental batch" in readme
 
 
+def hand_written(readme):
+    """README text outside the generated Results block."""
+    if not has_markers(readme):
+        return readme
+    return readme[: readme.index(START)] + readme[readme.index(END) :]
+
+
 def test_readme_never_calls_the_pipeline_real_time_or_streaming():
-    lowered = read_text("README.md").lower()
+    # The scheduled pipeline is an incremental batch. The generated Results block is exempt: it
+    # copies variant names and notes from runs.csv, and `streaming-throughput-p<N>` is a real
+    # Kafka + Spark Structured Streaming measurement (docs/streaming.md).
+    lowered = hand_written(read_text("README.md")).lower()
 
     assert "real-time" not in lowered
     assert "streaming" not in lowered
@@ -120,10 +130,7 @@ def test_every_decimal_in_the_results_block_comes_from_runs_csv():
 
 
 def test_hand_written_readme_text_quotes_no_decimal_that_runs_csv_lacks():
-    readme = read_text("README.md")
-    outside = (
-        readme[: readme.index(START)] + readme[readme.index(END) :] if START in readme else readme
-    )
+    outside = hand_written(read_text("README.md"))
     source = read_text("runs.csv")
 
     for token in re.findall(r"\d+\.\d+", outside):
