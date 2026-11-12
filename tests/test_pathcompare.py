@@ -97,6 +97,10 @@ def test_variants_and_steps_of_the_two_paths():
         ([float(i) for i in range(1, 21)], 95, 19.0),
         ([float(i) for i in range(1, 21)], 100, 20.0),
         ([float(i) for i in range(1, 101)], 95, 95.0),
+        # rank = ceil(p/100 * n), not round: n=5 -> rank 3 (2.5 up), n=9 -> rank 5 (4.5 up)
+        ([5.0, 4.0, 3.0, 2.0, 1.0], 50, 3.0),
+        ([float(i) for i in range(1, 10)], 50, 5.0),
+        ([float(i) for i in range(1, 22)], 95, 20.0),
     ],
 )
 def test_percentile_is_nearest_rank(values, p, expected):
