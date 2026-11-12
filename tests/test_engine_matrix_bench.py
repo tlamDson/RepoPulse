@@ -513,11 +513,23 @@ def ok(body) -> HttpResponse:
 
 
 class FakeDatabricks:
-    """Databricks REST API on the fixture: Statement API answers with DuckDB's own results."""
+    """Databricks REST API on the fixture: Statement API answers with DuckDB's own results.
+
+    The result cache is modelled as the real warehouse showed it (run 43173868610: unique
+    trailing comments did not stop 26 of 30 timed statements from being cache hits): a query
+    is answered from the cache when the same query ran before and neither table was updated
+    since. ``ALTER TABLE ... SET TBLPROPERTIES`` is an update (a new Delta table version), as
+    "both caches are invalidated when the underlying tables are updated" (Databricks docs,
+    query caching). ``cache_hit=True`` forces every query to be a cache hit.
+    """
 
     def __init__(self, reference, *, cache_hit=False, tamper=None, me_status=200) -> None:
         self.reference = reference
         self.cache_hit = cache_hit
+        self.table_versions = {"raw_events": 0, "repos": 0}
+        self.cached_at: dict[str, tuple[int, int]] = {}  # query -> table versions of its result
+        self.from_cache: dict[str, bool] = {}  # statement id -> answered from the cache
+        self.alters: list[tuple[int, str]] = []  # (statement index, table)
         self.tamper = tamper
         self.me_status = me_status
         self.requests: list[HttpRequest] = []
@@ -551,6 +563,15 @@ class FakeDatabricks:
         done = {"statement_id": sid, "status": {"state": "SUCCEEDED"}}
         if re.match(r"\s*CREATE OR REPLACE TABLE workspace\.repopulse_matrix\.\w+ AS", sql):
             return done
+        alter = re.match(
+            r"\s*ALTER TABLE workspace\.repopulse_matrix\.(raw_events|repos) SET TBLPROPERTIES "
+            r"\('repopulse\.matrix_run' = '[^']+'\)",
+            sql,
+        )
+        if alter:
+            self.table_versions[alter.group(1)] += 1
+            self.alters.append((len(self.statements), alter.group(1)))
+            return done
         if re.fullmatch(
             r"\s*SELECT count\(\*\) AS row_count FROM workspace\.repopulse_matrix\.raw_events\s*",
             sql,
@@ -563,6 +584,9 @@ class FakeDatabricks:
         for q, text in self.spark_sql.items():
             if sql.startswith(text):
                 self.query_ids[sid] = q
+                versions = (self.table_versions["raw_events"], self.table_versions["repos"])
+                self.from_cache[sid] = self.cache_hit or self.cached_at.get(q) == versions
+                self.cached_at[q] = versions
                 ref = self.reference["results"][q]
                 rows = self._rows(q)
                 columns = [
@@ -659,7 +683,7 @@ class FakeDatabricks:
                 {
                     "query_id": i,
                     "status": "FINISHED",
-                    "metrics": {"result_from_cache": self.cache_hit},
+                    "metrics": {"result_from_cache": self.from_cache.get(i, False)},
                 }
                 for i in ids
             ]
@@ -713,7 +737,7 @@ def test_databricks_sql_uploads_loads_its_own_schema_and_writes_a_row(
     assert notes["timing"] == "client"
     assert notes["cross_check"] == "content"
     assert notes["schema"] == "workspace.repopulse_matrix"
-    assert notes["result_cache"] == "unique_comment"
+    assert notes["result_cache"] == "table_version_bump"
     assert notes["cache_check"] == "query_history"
     assert notes["warehouse_size"] == "2X-Small"
     # data and seed went to the matrix Volume only
@@ -742,6 +766,15 @@ def test_databricks_sql_uploads_loads_its_own_schema_and_writes_a_row(
     assert len(queries) == 6 * 3  # warm-up + 2 timed runs
     assert len(set(queries)) == len(queries)
     assert fake.history_queries and len(fake.history_queries[-1]) == 6 * 2
+    # right before every timed run both tables get a new version (metadata only), so the
+    # warehouse result cache cannot answer a timed query; the history confirms no hit
+    assert sorted(t for _, t in fake.alters) == ["raw_events", "raw_events", "repos", "repos"]
+    q1_at = [i for i, t in enumerate(texts, start=1) if t.startswith(fake.spark_sql["q1"])]
+    alter_at = {i for i, _ in fake.alters}
+    assert len(q1_at) == 3
+    for pos in q1_at[1:]:
+        assert {pos - 2, pos - 1} <= alter_at, (pos, sorted(alter_at))
+    assert not any(fake.from_cache[i] for i in fake.history_queries[-1])
     for secret in (TOKEN, "fake-ws.cloud.databricks.com", WAREHOUSE, USER):
         assert secret not in out.out + out.err
 
