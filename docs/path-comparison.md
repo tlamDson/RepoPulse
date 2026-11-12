@@ -127,7 +127,11 @@ python -m repopulse.readme_results
 ```
 
 `record_run.py` bỏ qua dòng đã có (gộp lại cùng artifact không sinh trùng). Mục Results của README
-liệt kê các dòng này ở "Other runs" cho tới khi R2 dựng bảng riêng.
+có mục riêng cho hai đường (R2): bảng dòng mới nhất của mỗi đường với các cột bước lấy từ `notes`,
+và bảng đếm mọi lần chạy theo (variant, trigger) với số lần chạy, số lần thành công, p50/p95
+nearest-rank của `total_seconds` trên các lần thành công (chép nguyên văn ô của lần chạy được
+chọn, không in lại qua số thực). README không chép kết luận chọn đường; kết luận nằm ở
+[`probe-result.md`](probe-result.md).
 
 ## Tắt cron khi D4 đủ số
 
