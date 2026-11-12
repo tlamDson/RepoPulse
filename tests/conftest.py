@@ -114,6 +114,21 @@ def _diag_watchdog() -> None:
         os._exit(3)
 
 
+def _diag_histogram() -> str:
+    """Live objects of the session JVM (forces a full GC): top classes and the total."""
+    try:
+        pids = subprocess.run(
+            ["pgrep", "-x", "java"], capture_output=True, text=True, timeout=30, check=False
+        ).stdout.split()
+    except (OSError, subprocess.SubprocessError) as exc:
+        return f"pgrep failed: {exc!r}"
+    parts = []
+    for pid in pids:
+        lines = _diag_tool("jmap", "-histo:live", pid).splitlines()
+        parts.append("\n".join([f"jmap -histo:live {pid}", *lines[:45], *lines[-1:]]))
+    return "\n".join(parts)
+
+
 def _diag_start(config) -> None:
     import threading
 
@@ -133,6 +148,8 @@ def pytest_runtest_setup(item):
         except Exception as exc:  # noqa: BLE001
             heap = f"heap unavailable: {exc!r}"
         _diag_say(f"start {item.nodeid} | {heap}")
+        if item.nodeid.endswith("test_spark_counts_every_raw_line_including_duplicates"):
+            _diag_say(_diag_histogram())
 
 
 @pytest.hookimpl(trylast=True)
@@ -205,7 +222,10 @@ def spark(tmp_path_factory):
         .config("spark.ui.enabled", "false")
         .config("spark.sql.session.timeZone", "UTC")
         .config("spark.databricks.delta.snapshotPartitions", "1")
-        .config("spark.driver.memory", "1g")
+        # One JVM serves every Spark test of the run and its heap only grows (state kept per
+        # Delta table). At 1g the old generation filled up before the last Spark tests and the
+        # run stalled in back-to-back full GCs until the CI job timeout.
+        .config("spark.driver.memory", "2g")
         # Managed tables by name (test_spark_catalog_tables.py) live in tmp, not ./spark-warehouse.
         .config("spark.sql.warehouse.dir", str(tmp_path_factory.mktemp("spark-warehouse")))
     )
