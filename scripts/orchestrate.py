@@ -66,6 +66,7 @@ from repopulse.orchestrator import (  # noqa: E402
     is_stalled,
     load_tasks,
     mark_trusted,
+    merge_failure_reason,
     merge_ready,
     merged_task_ids,
     next_ready,
@@ -371,7 +372,12 @@ def merge_pr(pr: str, head_sha: str) -> str | None:
     sh(["gh", "pr", "merge", pr, "--squash", "--delete-branch", "--match-head-commit", head_sha])
     state = sh(["gh", "pr", "view", pr, "--json", "state"])
     if '"MERGED"' not in state:
-        return f"merge PR #{pr} thất bại"
+        out = sh(["gh", "pr", "view", pr, "--json", "mergeable,mergeStateStatus"])
+        try:
+            view = json.loads(out or "{}")
+        except json.JSONDecodeError:
+            view = {}
+        return merge_failure_reason(pr, view)
     return None
 
 
