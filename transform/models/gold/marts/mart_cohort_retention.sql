@@ -33,7 +33,7 @@ select
     ) as retention_w12_pct
 from cohorts as c
 left join activity as a4
-    on a4.actor_login = c.actor_login and a4.week = c.cohort_week + 28
+    on a4.actor_login = c.actor_login and a4.week = {{ add_days('c.cohort_week', 28) }}
 left join activity as a12
-    on a12.actor_login = c.actor_login and a12.week = c.cohort_week + 84
+    on a12.actor_login = c.actor_login and a12.week = {{ add_days('c.cohort_week', 84) }}
 group by c.cohort_week

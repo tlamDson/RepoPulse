@@ -58,6 +58,7 @@ How to read it:
 
 - A row is compared with `variant=baseline` only when it has the same `data_date`, so the same day of data and the same queries Q1–Q6. Only the first table does this.
 - The Spark and DuckDB rows use another data date. They are compared with each other, not with `baseline`.
+- The engine matrix runs Q1–Q6 on the day of `baseline` on each engine, one row per engine. Its Snowflake row is reused from the dbt build on the seed fixture, so it is not comparable with the others.
 - The dbt rows build a small seed fixture, not GH Archive data.
 - The fault-injection rows are **simulated** data. The baseline, layout, Spark and DuckDB rows use real GH Archive data.
 - `run_at`, `git_sha` (first 7 characters) and `data_date` identify the row in `runs.csv`.
@@ -71,11 +72,24 @@ Real GH Archive data (not simulated). Each row has the same `data_date` as a `ba
 
 | variant | data_date | total_seconds | q1_seconds | q2_seconds | q3_seconds | q4_seconds | q5_seconds | q6_seconds | peak_rss_mb | bytes_read | row_count | run_at | git_sha |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| baseline | 2026-10-25 | 4.013378 | 0.065736 | 0.083608 | 0.039719 | 0.05792 | 0.028184 | 0.059881 | 1212.05 | 295319902 | 1670400 | 2026-11-11T18:53:13+00:00 | e94e9d8 |
+| baseline | 2026-10-25 | 3.611956 | 0.061664 | 0.076715 | 0.039159 | 0.05246 | 0.026339 | 0.052887 | 1210.5 | 295319902 | 1670400 | 2026-11-12T01:24:39+00:00 | 5866025 |
 | qopt-clustered | 2026-10-25 | 1.607098 | 0.033002 | 0.361557 | 0.428338 | 0.399178 | 0.023794 | 0.394635 | 975.85 | 416707826 | 1670400 | 2026-11-11T18:53:55+00:00 | e94e9d8 |
 | qopt-flat | 2026-10-25 | 1.828283 | 0.133773 | 0.443666 | 0.382593 | 0.391836 | 0.073611 | 0.405215 | 1429.85 | 1491737160 | 1670400 | 2026-11-11T18:53:55+00:00 | e94e9d8 |
 | qopt-partitioned | 2026-10-25 | 0.947003 | 0.018212 | 0.250082 | 0.041727 | 0.323164 | 0.016177 | 0.332979 | 1229.95 | 310347620 | 1670400 | 2026-11-11T18:53:55+00:00 | e94e9d8 |
 | qopt-partitioned-clustered | 2026-10-25 | 0.941688 | 0.01802 | 0.238865 | 0.040602 | 0.315754 | 0.018154 | 0.322356 | 1220.75 | 290407457 | 1670400 | 2026-11-11T18:53:55+00:00 | e94e9d8 |
+
+### Engine matrix: Q1 to Q6 on six engines (real GH Archive data)
+
+Real GH Archive data (not simulated): the same reference day as `baseline` and the same queries Q1 to Q6 on every engine, one row per engine in a fixed order (the newest `matrix-<engine>` run). Each engine loads the day first (not timed), runs Q1 to Q6 once as a warm-up, then several timed runs; `q1_seconds` to `q6_seconds` are medians and `total_seconds` is the median of the per-run sum of Q1 to Q6, so unlike `baseline` it does not include loading. `timing` says where the clock runs: `in-process` engines (`duckdb`, `spark`) are timed in the process that runs the query, `client` engines (`motherduck`, `databricks-sql`) are timed by the client on the runner, so their times include the network, and `notebook` (`databricks-serverless`) is timed inside the Databricks notebook. A row is written only when its results matched DuckDB on the same data (`cross_check`). The `snowflake` row is reused from `dbt-build-snowflake` (the trial is not spent again): the build time of the marts with `dbt build` on the seed fixture, a different measurement that is not comparable with the other rows. Method: [`docs/engine-matrix.md`](docs/engine-matrix.md).
+
+| engine | source | variant | data_date | total_seconds | q1_seconds | q2_seconds | q3_seconds | q4_seconds | q5_seconds | q6_seconds | row_count | timing | cross_check | run_at | git_sha |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| duckdb | measured: Q1-Q6 on the reference day | matrix-duckdb | 2026-10-25 | 1.379693 | 0.070564 | 0.088508 | 0.977428 | 0.162533 | 0.030462 | 0.057046 | 1670400 | in-process | content | 2026-11-12T07:32:38+00:00 | c82658b |
+| spark | measured: Q1-Q6 on the reference day | matrix-spark | 2026-10-25 | 19.264915 | 2.311471 | 1.365517 | 5.332565 | 6.270693 | 0.910143 | 3.14992 | 1670400 | in-process | content | 2026-11-12T07:32:54+00:00 | c82658b |
+| databricks-serverless | measured: Q1-Q6 on the reference day | matrix-databricks-serverless | 2026-10-25 | 11.951003 | 1.938565 | 1.346388 | 2.213751 | 2.439241 | 1.367668 | 2.561126 | 1670400 | notebook | content | 2026-11-12T07:37:35+00:00 | c82658b |
+| databricks-sql | measured: Q1-Q6 on the reference day | matrix-databricks-sql | 2026-10-25 | 10.036121 | 1.639145 | 1.202641 | 1.883172 | 2.073748 | 1.131386 | 1.878064 | 1670400 | client | content | 2026-11-12T07:35:56+00:00 | c82658b |
+| motherduck | measured: Q1-Q6 on the reference day | matrix-motherduck | 2026-10-25 | 1.945281 | 0.084298 | 0.106439 | 1.26195 | 0.308665 | 0.04579 | 0.078294 | 1670400 | client | content | 2026-11-12T07:35:32+00:00 | c82658b |
+| snowflake | reused dbt-build-snowflake: dbt build of the marts on the seed fixture, not comparable | dbt-build-snowflake | 2026-01-05 | 22.600090742111206 | 1.398242473602295 | 1.2782909870147705 | 2.0330214500427246 | 1.7248523235321045 | 1.2184998989105225 | 1.9702086448669434 | 36 | — | — | 2026-11-11T16:20:35+00:00 | ee38cf0 |
 
 ### Spark vs DuckDB at 1, 7 and 30 days
 
@@ -106,6 +120,35 @@ Simulated data: app events from `simkit` (no real users) with a known number of 
 | variant | data_date | total_seconds | row_count | simulated | seed | users | days | injected | caught | false_alarms | clean_runs | duplicate | null | wrong_type | late | schema_drift | bot | run_at | git_sha |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | dq-fault-injection | 2026-11-01 | 81.907 | 677 | true | 42 | 60 | 2 | 27 | 27 | 0 | 3 | 5/5 | 5/5 | 5/5 | 5/5 | 5/5 | 2/2 | 2026-11-11T18:22:59+00:00 | 0bc1ad4 |
+
+### dbt build on a Databricks SQL warehouse (real GH Archive data)
+
+Real GH Archive data (not simulated): the dbt project builds on a Databricks SQL warehouse from the silver Delta table written by the Databricks bronze/silver job, not from the hand-made CI events, so these rows are compared neither with the builds above nor with `baseline`. `total_seconds` is the whole `dbt build`; `q1_seconds` to `q6_seconds` are the build time of the mart for Q1 to Q6; `row_count` is the number of staged events and `data_date` the earliest `event_date`; `max_event_date` and `lines_changed` are read from `notes`. Method: [`docs/dbt-databricks.md`](docs/dbt-databricks.md).
+
+| variant | data_date | total_seconds | q1_seconds | q2_seconds | q3_seconds | q4_seconds | q5_seconds | q6_seconds | peak_rss_mb | bytes_read | row_count | max_event_date | lines_changed | run_at | git_sha |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| dbt-build-databricks | 2026-10-25 | 121.6275634765625 | 10.2672700881958 | 7.4214441776275635 | 9.794240236282349 | 9.563957691192627 | 7.928206205368042 | 7.523385286331177 | — | — | 206827 | 2026-10-25 | 501 | 2026-11-12T06:15:38+00:00 | 4553df1 |
+
+### Other runs
+
+Not compared with `baseline`: either there is no baseline row with the same `data_date`, or the variant is not one of the groups above. `notes` is copied from `runs.csv`.
+
+| variant | data_date | total_seconds | q1_seconds | q2_seconds | q3_seconds | q4_seconds | q5_seconds | q6_seconds | peak_rss_mb | bytes_read | row_count | run_at | git_sha | notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| airflow-backfill-2d | 2026-10-25 | 88.716 | — | — | — | — | — | — | — | — | 105070 | 2026-11-12T02:32:40+00:00 | d1cc3f5 | engine=airflow-3.4.0 days=2 hours_per_day=1 last_hour=15 runs_success=2 runs_failed=0 sla_minutes=30 sla_missed=0 max_active_runs=1 target=ci run_id=43142141658 trigger=pull_request |
+| databricks-bronze-silver | 2026-10-25 | 107.948 | — | — | — | — | — | — | — | — | 206827 | 2026-11-12T01:32:05+00:00 | b965514 | source=gharchive last_hour=2026-10-25T23 hours=3 bronze_rows=206827 quarantined_total=0 duplicates_dropped=0 upload_s=3.79 setup_s=3.0 execution_s=88.0 cleanup_s=1.0 run_s=92.42 run_id=43134787015 trigger=push rerun_silver_inserted=0 |
+| path-a-runner | 2026-10-25 | 56.49300000000001 | 0.25826 | 0.059017 | 0.059248 | 0.05919 | 0.059446 | 0.059322 | — | — | 68488 | 2026-11-12T07:27:53+00:00 | 52c9d56 | status=success hour=23 hours=1 ingest_seconds=1.635 spark_seconds=24.605 export_seconds=11.017 dbt_seconds=17.795 queries_seconds=1.441 queue_seconds=2.0 setup_seconds=22.149878 missing_hours=0 bronze_rows=68488 run_id=43175427031 trigger=push |
+| path-b-databricks | 2026-10-25 | 162.142 | 0.822 | 0.758 | 0.833 | 0.76 | 0.724 | 0.778 | — | — | 0 | 2026-11-12T07:27:52+00:00 | 52c9d56 | status=success hour=23 hours=1 ingest_seconds=2.095 databricks_seconds=50.846 warehouse_seconds=0.206 dbt_seconds=104.253 queries_seconds=4.742 queue_seconds=2.0 setup_seconds=28.303435 job_setup_seconds=3.0 warehouse_start_seconds=0.0 missing_hours=0 bronze_rows=68488 run_id=43175427031 trigger=push |
+| sql-agent-qwen3-6-35b-a3b | 2026-04-07 | 354.638 | — | — | — | — | — | — | — | — | 16 | 2026-11-12T07:36:34+00:00 | 13adca6 | accuracy=14/16; p50_question_s=19.037; model=Qwen3.6-35B-A3B; hw=RTX4060-laptop-8GB llama.cpp -ngl99 --cpu-moe; dataset=ci-fixture |
+| streaming-fault-broker-kill | 2026-10-25 | 105.89 | — | — | — | — | — | — | — | — | 1670400 | 2026-11-12T02:40:47+00:00 | 19eaaa2 | case=broker-kill lost=0 duplicates=0 offset_duplicates=0 content_duplicates=0 unexpected=0 source_rows=1670400 delta_rows=1670400 distinct_offsets=1670400 failover_seconds=6.071 resync_seconds=4.904 max_delivery_gap_after_kill_seconds=8.359 max_delivery_gap_before_kill_seconds=0.048 killed_broker=kafka-3 kill_at_fraction=0.3 kill_threshold=501120 delivered_at_kill=507002 sent_at_kill=687702 produce_seconds=30.049 produced=1670400 produce_failed=0 undelivered=0 kill_at_seconds=13.929 consume_seconds=75.841 topic_messages=1670400 micro_batches_before_kill=0 micro_batches_after_kill=34 partitions=3 brokers=3 rf=3 min_isr=2 hours=24 max_offsets_per_trigger=50000 kafka=apache/kafka:4.0.0 |
+| streaming-fault-consumer-kill | 2026-10-25 | 138.041 | — | — | — | — | — | — | — | — | 1670400 | 2026-11-12T02:40:47+00:00 | 19eaaa2 | case=consumer-kill lost=0 duplicates=0 offset_duplicates=0 content_duplicates=0 unexpected=0 source_rows=1670400 delta_rows=1670400 distinct_offsets=1670400 restart_first_commit_seconds=18.46 restart_drain_seconds=81.363 kill_after_batches=5 micro_batches_before_kill=5 uncommitted_batches_at_kill=1 rows_before_restart=249992 run1_seconds=27.911 produce_seconds=28.167 produced=1670400 topic_messages=1670400 micro_batches_after_kill=29 input_rows_after_restart=1420408 run2_seconds=81.964 partitions=3 brokers=3 rf=3 min_isr=2 hours=24 max_offsets_per_trigger=50000 kafka=apache/kafka:4.0.0 |
+| streaming-throughput-p1 | 2026-10-25 | 72.101 | — | — | — | — | — | — | — | 1371864797 | 1670400 | 2026-11-12T01:18:30+00:00 | d5df6de | partitions=1 brokers=3 rf=3 min_isr=2 produce_seconds=24.132 consume_seconds=47.969 produce_events_per_s=69219.3 consume_events_per_s=34822.5 batch_rows=1670400 match=true trigger=availableNow micro_batches=9 max_offsets_per_trigger=200000 unkeyed=0 kafka=apache/kafka:4.0.0 |
+| streaming-throughput-p3 | 2026-10-25 | 49.884 | — | — | — | — | — | — | — | 1371864797 | 1670400 | 2026-11-12T01:18:30+00:00 | d5df6de | partitions=3 brokers=3 rf=3 min_isr=2 produce_seconds=25.261 consume_seconds=24.623 produce_events_per_s=66125.6 consume_events_per_s=67839.0 batch_rows=1670400 match=true trigger=availableNow micro_batches=9 max_offsets_per_trigger=200000 unkeyed=0 kafka=apache/kafka:4.0.0 |
+| streaming-throughput-p6 | 2026-10-25 | 50.067 | — | — | — | — | — | — | — | 1371864797 | 1670400 | 2026-11-12T01:18:30+00:00 | d5df6de | partitions=6 brokers=3 rf=3 min_isr=2 produce_seconds=26.947 consume_seconds=23.12 produce_events_per_s=61988.3 consume_events_per_s=72249.1 batch_rows=1670400 match=true trigger=availableNow micro_batches=9 max_offsets_per_trigger=200000 unkeyed=0 kafka=apache/kafka:4.0.0 |
+| trino-clustered | 2026-10-25 | 4.732549 | 0.292307 | 0.402464 | 0.840337 | 1.958731 | 0.138126 | 1.031803 | — | 1283007819 | 1670400 | 2026-11-12T01:26:14+00:00 | 5866025 | runs=10 stat=median warmup=1 engine=trino trino=484 partition_by=none sort_by=type+repo.name+created_at files=1 layout_bytes=302287930 bytes=physical_input_bytes bytes_from=run1 bytes_equal_across_runs=true cross_check=full q1_input_bytes=23910714 q1_input_rows=737628 q2_input_bytes=111396772 q2_input_rows=368814 q3_input_bytes=414674636 q3_input_rows=614748 q4_input_bytes=514114714 q4_input_rows=614690 q5_input_bytes=6386958 q5_input_rows=245876 q6_input_bytes=212524025 q6_input_rows=491810 |
+| trino-flat | 2026-10-25 | 11.065254 | 1.064501 | 1.071864 | 2.365977 | 4.24397 | 0.363652 | 1.994511 | — | 5272074760 | 1670400 | 2026-11-12T01:26:14+00:00 | 5866025 | runs=10 stat=median warmup=1 engine=trino trino=484 partition_by=none sort_by=none files=1 layout_bytes=370155952 bytes=physical_input_bytes bytes_from=run1 bytes_equal_across_runs=true cross_check=full q1_input_bytes=482142870 q1_input_rows=10022748 q2_input_bytes=528842439 q2_input_rows=5011374 q3_input_bytes=1487135678 q3_input_rows=8352348 q4_input_bytes=1774905345 q4_input_rows=8352290 q5_input_bytes=143534232 q5_input_rows=3340916 q6_input_bytes=855514196 q6_input_rows=6681890 |
+| trino-partitioned | 2026-10-25 | 4.031387 | 0.378627 | 0.248051 | 0.456132 | 1.685715 | 0.171349 | 1.086085 | — | 439061897 | 1670400 | 2026-11-12T01:26:14+00:00 | 5866025 | runs=10 stat=median warmup=1 engine=trino trino=484 partition_by=type sort_by=none files=16 layout_bytes=350231636 bytes=physical_input_bytes bytes_from=run1 bytes_equal_across_runs=true cross_check=full q1_input_bytes=13607700 q1_input_rows=305856 q2_input_bytes=11122234 q2_input_rows=124341 q3_input_bytes=26344702 q3_input_rows=90452 q4_input_bytes=253263286 q4_input_rows=165078 q5_input_bytes=3965774 q5_input_rows=101952 q6_input_bytes=130758201 q6_input_rows=184520 |
+| trino-partitioned-clustered | 2026-10-25 | 3.844165 | 0.309468 | 0.214639 | 0.380599 | 1.704482 | 0.150717 | 1.005081 | — | 408029209 | 1670400 | 2026-11-12T01:26:14+00:00 | 5866025 | runs=10 stat=median warmup=1 engine=trino trino=484 partition_by=type sort_by=repo.name+created_at files=16 layout_bytes=302247116 bytes=physical_input_bytes bytes_from=run1 bytes_equal_across_runs=true cross_check=full q1_input_bytes=12123984 q1_input_rows=305856 q2_input_bytes=10088866 q2_input_rows=124341 q3_input_bytes=24277752 q3_input_rows=90452 q4_input_bytes=236368867 q4_input_rows=165078 q5_input_bytes=3381196 q5_input_rows=101952 q6_input_bytes=121788544 q6_input_rows=184520 |
 
 The full log, with every run and not only the newest, is [`runs.csv`](runs.csv).
 <!-- results:end -->
@@ -160,7 +203,9 @@ Most pages are in Vietnamese; the two benchmark pages are in English.
 | [`docs/dashboard.md`](docs/dashboard.md) | The static site and the Tableau CSV export |
 | [`docs/query-optimization.md`](docs/query-optimization.md) | Partitioned and clustered layouts against the baseline |
 | [`docs/benchmark-scale.md`](docs/benchmark-scale.md) | Spark against DuckDB at 1, 7 and 30 days |
+| [`docs/engine-matrix.md`](docs/engine-matrix.md) | Q1–Q6 on the reference day on six engines, one README table |
 | [`docs/snowflake-port.md`](docs/snowflake-port.md) | Running the dbt project on Snowflake |
+| [`docs/databricks-job.md`](docs/databricks-job.md) | The same bronze/silver incremental batch as a serverless Databricks job (Plan v2, outside this deployment) |
 
 ## Baseline benchmark
 

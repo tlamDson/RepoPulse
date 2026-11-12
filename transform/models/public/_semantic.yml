@@ -1,0 +1,516 @@
+version: 2
+
+# Semantic layer (MetricFlow) of the Q1-Q6 marts of schema `public`; docs/semantic-layer.md.
+# Spec: top-level `semantic_models:` (with measures) + `metrics:`, parsed by every dbt-core >= 1.8
+# used by this repo's workflows; MetricFlow (shipped with dbt-core >= 1.12) reads
+# target/semantic_manifest.json. Semantic models only ref pub_mart_* (schema public).
+#
+# Each semantic model has one row per grain of its mart and its own primary entity (no joins
+# between marts). Metric names = mart column names. Grouping a metric by the full grain of its
+# mart returns the mart value, i.e. the result of benchmarks/queries/qN.sql
+# (tests/test_dbt_semantic_layer.py). Columns that cannot be re-aggregated (distinct counts,
+# percentiles, top-N shares, scores, rank) say "Not additive" in their description.
+#
+# MetricFlow needs an aggregation time dimension per measure. Q1 uses period_start, Q2
+# cohort_week. Q3-Q6 are all-time aggregates without a time column: they get `all_time_anchor`,
+# a constant date (expr), a convention and not an event time.
+
+models:
+  - name: metricflow_time_spine
+    description: >
+      Time spine of the semantic layer: one row per calendar day, 2020-01-01 to 2030-12-31.
+      Used by MetricFlow only (time spine joins); no personal data.
+    time_spine:
+      standard_granularity_column: date_day
+    columns:
+      - name: date_day
+        description: Calendar day.
+        data_type: date
+        granularity: day
+        config: {meta: {pii: none}}
+        data_tests: [not_null, unique]
+
+semantic_models:
+  - name: q1_daily_active_contributors
+    description: >
+      Q1 (q1.sql) over public mart_daily_active_contributors. One row per (period, period_start,
+      scope, scope_key): active human contributors per day or ISO week, per seed repo or category,
+      new vs returning.
+    model: ref('pub_mart_daily_active_contributors')
+    primary_entity: q1_activity
+    defaults:
+      agg_time_dimension: period_start
+    dimensions:
+      - name: period
+        description: "'day' or 'week': granularity of the row. Always group by it."
+        type: categorical
+      - name: period_start
+        description: First day of the period (the day, or the Monday of the ISO week).
+        type: time
+        type_params:
+          time_granularity: day
+      - name: scope
+        description: "'repo' or 'category': what scope_key is."
+        type: categorical
+      - name: scope_key
+        description: Seed repo name (scope repo) or seed category (scope category).
+        type: categorical
+    measures:
+      - name: q1_active_contributors
+        description: Column active_contributors of the Q1 mart.
+        agg: sum
+        expr: active_contributors
+      - name: q1_new_contributors
+        description: Column new_contributors of the Q1 mart.
+        agg: sum
+        expr: new_contributors
+      - name: q1_returning_contributors
+        description: Column returning_contributors of the Q1 mart.
+        agg: sum
+        expr: returning_contributors
+
+  - name: q2_cohort_retention
+    description: >
+      Q2 (q2.sql) over public mart_cohort_retention. One row per cohort_week: human actors by the
+      ISO week of their first PR opened on a seed repo, retained at exactly W+4 / W+12.
+    model: ref('pub_mart_cohort_retention')
+    primary_entity: q2_cohort
+    defaults:
+      agg_time_dimension: cohort_week
+    dimensions:
+      - name: cohort_week
+        description: Monday of the ISO week of the cohort's first PR opened.
+        type: time
+        type_params:
+          time_granularity: week
+    measures:
+      - name: q2_cohort_size
+        description: Column cohort_size of the Q2 mart.
+        agg: sum
+        expr: cohort_size
+      - name: q2_retained_w4
+        description: Column retained_w4 of the Q2 mart.
+        agg: sum
+        expr: retained_w4
+      - name: q2_retained_w12
+        description: Column retained_w12 of the Q2 mart.
+        agg: sum
+        expr: retained_w12
+
+  - name: q3_contribution_funnel
+    description: >
+      Q3 (q3.sql) over public mart_contribution_funnel. One row per seed repo (all-time): fork ->
+      PR opened -> PR merged, hours to first merge p50/p90.
+    model: ref('pub_mart_contribution_funnel')
+    primary_entity: q3_funnel
+    defaults:
+      agg_time_dimension: all_time_anchor
+    dimensions: &repo_dimensions
+      - name: repo_name
+        description: Seed repo name (owner/name, lower case as in the seed).
+        type: categorical
+      - name: category
+        description: Seed category of the repo.
+        type: categorical
+      - &all_time_anchor
+        name: all_time_anchor
+        description: >
+          Conventional constant date 1970-01-01, NOT an event time. This mart is an all-time
+          aggregate with no time column; MetricFlow needs an aggregation time dimension, so
+          metric_time of these metrics is always 1970-01-01. Do not filter or group on it.
+        type: time
+        expr: cast('1970-01-01' as date)
+        type_params:
+          time_granularity: day
+    measures:
+      - name: q3_forkers
+        description: Column forkers of the Q3 mart.
+        agg: sum
+        expr: forkers
+      - name: q3_forkers_with_pr
+        description: Column forkers_with_pr of the Q3 mart.
+        agg: sum
+        expr: forkers_with_pr
+      - name: q3_forkers_with_merge
+        description: Column forkers_with_merge of the Q3 mart.
+        agg: sum
+        expr: forkers_with_merge
+      - name: q3_prs_opened
+        description: Column prs_opened of the Q3 mart.
+        agg: sum
+        expr: prs_opened
+      - name: q3_prs_merged
+        description: Column prs_merged of the Q3 mart.
+        agg: sum
+        expr: prs_merged
+      - name: q3_merge_hours_p50
+        description: Column merge_hours_p50 of the Q3 mart (one value per repo).
+        agg: max
+        expr: merge_hours_p50
+      - name: q3_merge_hours_p90
+        description: Column merge_hours_p90 of the Q3 mart (one value per repo).
+        agg: max
+        expr: merge_hours_p90
+
+  - name: q4_responsiveness
+    description: >
+      Q4 (q4.sql) over public mart_responsiveness. One row per (seed repo, item_type) (all-time):
+      first human response time p50/p90 and close rate of issues and PRs opened by humans.
+    model: ref('pub_mart_responsiveness')
+    primary_entity: q4_responsiveness
+    defaults:
+      agg_time_dimension: all_time_anchor
+    dimensions:
+      - name: repo_name
+        description: Seed repo name (owner/name, lower case as in the seed).
+        type: categorical
+      - name: item_type
+        description: "'issue' or 'pull_request'."
+        type: categorical
+      - *all_time_anchor
+    measures:
+      - name: q4_opened
+        description: Column opened of the Q4 mart.
+        agg: sum
+        expr: opened
+      - name: q4_responded
+        description: Column responded of the Q4 mart.
+        agg: sum
+        expr: responded
+      - name: q4_closed
+        description: Column closed of the Q4 mart.
+        agg: sum
+        expr: closed
+      - name: q4_response_hours_p50
+        description: Column response_hours_p50 of the Q4 mart (one value per repo and item type).
+        agg: max
+        expr: response_hours_p50
+      - name: q4_response_hours_p90
+        description: Column response_hours_p90 of the Q4 mart (one value per repo and item type).
+        agg: max
+        expr: response_hours_p90
+
+  - name: q5_repo_concentration
+    description: >
+      Q5 (q5.sql) over public mart_repo_concentration. One row per seed repo (all-time): bus
+      factor (top-N human share of human contributions) and bot share.
+    model: ref('pub_mart_repo_concentration')
+    primary_entity: q5_concentration
+    defaults:
+      agg_time_dimension: all_time_anchor
+    dimensions: *repo_dimensions
+    measures:
+      - name: q5_contributions
+        description: Column contributions of the Q5 mart.
+        agg: sum
+        expr: contributions
+      - name: q5_bot_contributions
+        description: Column bot_contributions of the Q5 mart.
+        agg: sum
+        expr: bot_contributions
+      - name: q5_human_contributors
+        description: Column human_contributors of the Q5 mart.
+        agg: sum
+        expr: human_contributors
+      - name: q5_top1_share_pct
+        description: Column top1_share_pct of the Q5 mart (one value per repo).
+        agg: max
+        expr: top1_share_pct
+      - name: q5_top2_share_pct
+        description: Column top2_share_pct of the Q5 mart (one value per repo).
+        agg: max
+        expr: top2_share_pct
+      - name: q5_top3_share_pct
+        description: Column top3_share_pct of the Q5 mart (one value per repo).
+        agg: max
+        expr: top3_share_pct
+
+  - name: q6_repo_health_score
+    description: >
+      Q6 (q6.sql) over public mart_repo_health_score. One row per scored seed repo (all-time):
+      health score from Q1-Q5 components, formula in benchmarks/queries/q6.sql and README.md.
+    model: ref('pub_mart_repo_health_score')
+    primary_entity: q6_health
+    defaults:
+      agg_time_dimension: all_time_anchor
+    dimensions: *repo_dimensions
+    measures:
+      - name: q6_health_rank
+        description: Column health_rank of the Q6 mart (one value per repo).
+        agg: max
+        expr: health_rank
+      - name: q6_activity_score
+        description: Column activity_score of the Q6 mart (one value per repo).
+        agg: max
+        expr: activity_score
+      - name: q6_retention_score
+        description: Column retention_score of the Q6 mart (one value per repo).
+        agg: max
+        expr: retention_score
+      - name: q6_merge_score
+        description: Column merge_score of the Q6 mart (one value per repo).
+        agg: max
+        expr: merge_score
+      - name: q6_response_score
+        description: Column response_score of the Q6 mart (one value per repo).
+        agg: max
+        expr: response_score
+      - name: q6_close_score
+        description: Column close_score of the Q6 mart (one value per repo).
+        agg: max
+        expr: close_score
+      - name: q6_diversity_score
+        description: Column diversity_score of the Q6 mart (one value per repo).
+        agg: max
+        expr: diversity_score
+      - name: q6_health_score
+        description: Column health_score of the Q6 mart (one value per repo).
+        agg: max
+        expr: health_score
+
+metrics:
+  # ---------------------------------------------------------------- Q1
+  - name: active_contributors
+    label: Active contributors (Q1)
+    description: >
+      Q1. Distinct human actors with >= 1 contribution in the period and scope. Not additive:
+      only valid at the mart grain (period, period_start, scope, scope_key); summing over days,
+      weeks, repos or categories counts the same person several times.
+    type: simple
+    type_params: {measure: q1_active_contributors}
+  - name: new_contributors
+    label: New contributors (Q1)
+    description: >
+      Q1. Active contributors whose first contribution in that scope falls in this period. Not
+      additive: only valid at the mart grain (period, period_start, scope, scope_key).
+    type: simple
+    type_params: {measure: q1_new_contributors}
+  - name: returning_contributors
+    label: Returning contributors (Q1)
+    description: >
+      Q1. Active contributors already seen in that scope before this period. Not additive: only
+      valid at the mart grain (period, period_start, scope, scope_key).
+    type: simple
+    type_params: {measure: q1_returning_contributors}
+
+  # ---------------------------------------------------------------- Q2
+  - name: cohort_size
+    label: Cohort size (Q2)
+    description: Q2. Human actors whose first PR opened falls in the cohort week; sums over cohorts.
+    type: simple
+    type_params: {measure: q2_cohort_size}
+  - name: retained_w4
+    label: Retained at W+4 (Q2)
+    description: Q2. Cohort members with >= 1 contribution in exactly week W+4; sums over cohorts.
+    type: simple
+    type_params: {measure: q2_retained_w4}
+  - name: retained_w12
+    label: Retained at W+12 (Q2)
+    description: Q2. Cohort members with >= 1 contribution in exactly week W+12; sums over cohorts.
+    type: simple
+    type_params: {measure: q2_retained_w12}
+  - name: retention_w4_pct
+    label: Retention W+4 % (Q2)
+    description: >
+      Q2. 100 * retained_w4 / cohort_size rounded to 2 decimals, computed from the summed
+      measures, so it stays correct when cohorts are pooled.
+    type: derived
+    type_params:
+      expr: round(100 * cast(retained_w4 as double) / cohort_size, 2)
+      metrics: [retained_w4, cohort_size]
+  - name: retention_w12_pct
+    label: Retention W+12 % (Q2)
+    description: >
+      Q2. 100 * retained_w12 / cohort_size rounded to 2 decimals, computed from the summed
+      measures, so it stays correct when cohorts are pooled.
+    type: derived
+    type_params:
+      expr: round(100 * cast(retained_w12 as double) / cohort_size, 2)
+      metrics: [retained_w12, cohort_size]
+
+  # ---------------------------------------------------------------- Q3
+  - name: forkers
+    label: Forkers (Q3)
+    description: Q3. Distinct human actors with a ForkEvent on the repo; sums to (forker, repo) pairs.
+    type: simple
+    type_params: {measure: q3_forkers}
+  - name: forkers_with_pr
+    label: Forkers with a PR (Q3)
+    description: Q3. Forkers who opened a PR on the repo at or after their first fork.
+    type: simple
+    type_params: {measure: q3_forkers_with_pr}
+  - name: forkers_with_merge
+    label: Forkers with a merged PR (Q3)
+    description: Q3. Forkers whose PR opened after the fork was merged.
+    type: simple
+    type_params: {measure: q3_forkers_with_merge}
+  - name: prs_opened
+    label: PRs opened (Q3)
+    description: Q3. PRs whose 'opened' event is in the data, author human.
+    type: simple
+    type_params: {measure: q3_prs_opened}
+  - name: prs_merged
+    label: PRs merged (Q3)
+    description: Q3. Of prs_opened, PRs with a merge event at or after opening.
+    type: simple
+    type_params: {measure: q3_prs_merged}
+  - name: merge_hours_p50
+    label: Hours to merge p50 (Q3)
+    description: >
+      Q3. Median hours from PR opened to its first merge (rounded to 2). Not additive: a
+      percentile, only valid at the mart grain (repo_name); grouping wider returns the max of
+      the repo values, not a pooled percentile.
+    type: simple
+    type_params: {measure: q3_merge_hours_p50}
+  - name: merge_hours_p90
+    label: Hours to merge p90 (Q3)
+    description: >
+      Q3. 90th percentile of hours from PR opened to its first merge (rounded to 2). Not
+      additive: a percentile, only valid at the mart grain (repo_name).
+    type: simple
+    type_params: {measure: q3_merge_hours_p90}
+
+  # ---------------------------------------------------------------- Q4
+  - name: opened
+    label: Items opened (Q4)
+    description: Q4. Issues or PRs opened by a human (earliest 'opened' event in the data).
+    type: simple
+    type_params: {measure: q4_opened}
+  - name: responded
+    label: Items responded (Q4)
+    description: Q4. Of opened, items with a first comment/review by another human.
+    type: simple
+    type_params: {measure: q4_responded}
+  - name: closed
+    label: Items closed (Q4)
+    description: Q4. Of opened, items closed (PRs - closed or merged) at or after opening.
+    type: simple
+    type_params: {measure: q4_closed}
+  - name: close_rate_pct
+    label: Close rate % (Q4)
+    description: >
+      Q4. 100 * closed / opened rounded to 2 decimals, computed from the summed measures, so it
+      stays correct when repos or item types are pooled.
+    type: derived
+    type_params:
+      expr: round(100 * cast(closed as double) / opened, 2)
+      metrics: [closed, opened]
+  - name: response_hours_p50
+    label: Hours to first response p50 (Q4)
+    description: >
+      Q4. Median hours to the first human response (rounded to 2). Not additive: a percentile,
+      only valid at the mart grain (repo_name, item_type).
+    type: simple
+    type_params: {measure: q4_response_hours_p50}
+  - name: response_hours_p90
+    label: Hours to first response p90 (Q4)
+    description: >
+      Q4. 90th percentile of hours to the first human response (rounded to 2). Not additive: a
+      percentile, only valid at the mart grain (repo_name, item_type).
+    type: simple
+    type_params: {measure: q4_response_hours_p90}
+
+  # ---------------------------------------------------------------- Q5
+  - name: contributions
+    label: Contributions (Q5)
+    description: Q5. Contribution events on the repo, bots included.
+    type: simple
+    type_params: {measure: q5_contributions}
+  - name: bot_contributions
+    label: Bot contributions (Q5)
+    description: Q5. Contribution events by bots (login ending in [bot] or -bot).
+    type: simple
+    type_params: {measure: q5_bot_contributions}
+  - name: human_contributors
+    label: Human contributors (Q5)
+    description: Q5. Distinct human actors with >= 1 contribution; sums to (person, repo) pairs.
+    type: simple
+    type_params: {measure: q5_human_contributors}
+  - name: bot_share_pct
+    label: Bot share % (Q5)
+    description: >
+      Q5. 100 * bot_contributions / contributions rounded to 2 decimals, computed from the summed
+      measures, so it stays correct when repos are pooled.
+    type: derived
+    type_params:
+      expr: round(100 * cast(bot_contributions as double) / contributions, 2)
+      metrics: [bot_contributions, contributions]
+  - name: top1_share_pct
+    label: Top-1 human share % (Q5)
+    description: >
+      Q5. 100 * contributions of the most active human / human contributions. Not additive:
+      only valid at the mart grain (repo_name); the mart has no per-person counts to recompute it.
+    type: simple
+    type_params: {measure: q5_top1_share_pct}
+  - name: top2_share_pct
+    label: Top-2 human share % (Q5)
+    description: >
+      Q5. 100 * contributions of the 2 most active humans / human contributions. Not additive:
+      only valid at the mart grain (repo_name).
+    type: simple
+    type_params: {measure: q5_top2_share_pct}
+  - name: top3_share_pct
+    label: Top-3 human share % (Q5)
+    description: >
+      Q5. 100 * contributions of the 3 most active humans / human contributions. Not additive:
+      only valid at the mart grain (repo_name).
+    type: simple
+    type_params: {measure: q5_top3_share_pct}
+
+  # ---------------------------------------------------------------- Q6
+  - name: health_rank
+    label: Health rank (Q6)
+    description: >
+      Q6. Rank by health_score desc, then repo_name (1 = healthiest). Not additive: a rank, only
+      valid at the mart grain (repo_name).
+    type: simple
+    type_params: {measure: q6_health_rank}
+  - name: activity_score
+    label: Activity score (Q6)
+    description: >
+      Q6. Human contributors / max over scored repos, in [0, 1]. Not additive: a score, only
+      valid at the mart grain (repo_name).
+    type: simple
+    type_params: {measure: q6_activity_score}
+  - name: retention_score
+    label: Retention score (Q6)
+    description: >
+      Q6. Share of human contributors active in >= 2 ISO weeks, in [0, 1]. Not additive: a
+      score, only valid at the mart grain (repo_name).
+    type: simple
+    type_params: {measure: q6_retention_score}
+  - name: merge_score
+    label: Merge score (Q6)
+    description: >
+      Q6. PRs merged / human PRs opened, in [0, 1]. Not additive: a score, only valid at the mart
+      grain (repo_name).
+    type: simple
+    type_params: {measure: q6_merge_score}
+  - name: response_score
+    label: Response score (Q6)
+    description: >
+      Q6. Items with a first response / items opened, in [0, 1]. Not additive: a score, only
+      valid at the mart grain (repo_name).
+    type: simple
+    type_params: {measure: q6_response_score}
+  - name: close_score
+    label: Close score (Q6)
+    description: >
+      Q6. Items closed / items opened, in [0, 1]. Not additive: a score, only valid at the mart
+      grain (repo_name).
+    type: simple
+    type_params: {measure: q6_close_score}
+  - name: diversity_score
+    label: Diversity score (Q6)
+    description: >
+      Q6. 1 - top-1 human share of human contributions, in [0, 1]. Not additive: a score, only
+      valid at the mart grain (repo_name).
+    type: simple
+    type_params: {measure: q6_diversity_score}
+  - name: health_score
+    label: Health score (Q6)
+    description: >
+      Q6. 100 * (0.25 activity + 0.15 retention + 0.15 merge + 0.20 response + 0.10 close + 0.15
+      diversity), rounded to 2. Not additive: a score, only valid at the mart grain (repo_name).
+    type: simple
+    type_params: {measure: q6_health_score}

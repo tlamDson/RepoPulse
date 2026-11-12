@@ -1,0 +1,138 @@
+# Evaluation set of the SQL agent (repopulse/sql_agent.py, docs/sql-agent.md).
+#
+# Each [[question]]: id (unique), question (English, names the columns to return), sql (reference
+# answer on schema main_public), ordered (default false: rows compare as a multiset).
+# The expected result is what `sql` returns on the database at evaluation time (execution
+# accuracy), never a hard-coded value: the data changes every hour. Column names do not matter
+# and extra columns are allowed; values, row counts and (when ordered) row order do.
+# Questions go roughly from easy (one table, filter) to harder (aggregates, fact-dim joins).
+
+[[question]]
+id = "repos_in_streaming"
+question = "List the repo_name of every repository in the 'streaming' category. Return one column: repo_name."
+sql = "SELECT repo_name FROM main_public.dim_repo WHERE category = 'streaming'"
+
+[[question]]
+id = "repos_per_category"
+question = "How many repositories does each category have? Return category and the number of repositories."
+sql = "SELECT category, count(*) AS repos FROM main_public.dim_repo GROUP BY category"
+
+[[question]]
+id = "events_per_type"
+question = "How many events are there of each event type? Return event_type and the number of events."
+sql = "SELECT event_type, count(*) AS events FROM main_public.fct_events GROUP BY event_type"
+
+[[question]]
+id = "latest_event_date"
+question = "On which date did the most recent event happen? Return one value: the date."
+sql = "SELECT max(event_date) AS latest FROM main_public.fct_events"
+
+[[question]]
+id = "top3_health"
+question = "Which 3 repositories have the highest health score? Return repo_name and health_score, from the highest score to the lowest, ties broken by repo_name ascending."
+sql = """
+SELECT repo_name, health_score
+FROM main_public.mart_repo_health_score
+ORDER BY health_score DESC, repo_name
+LIMIT 3
+"""
+ordered = true
+
+[[question]]
+id = "cohort_retention_w4"
+question = "For each weekly cohort of new contributors, return cohort_week, cohort_size and retention_w4_pct (the percentage of the cohort still active four weeks later)."
+sql = "SELECT cohort_week, cohort_size, retention_w4_pct FROM main_public.mart_cohort_retention"
+
+[[question]]
+id = "funnel_merges"
+question = "For each repository in the contribution funnel (fork, pull request, merge), return repo_name, prs_opened, prs_merged and merge_hours_p50 (median hours from opening to merge)."
+sql = """
+SELECT repo_name, prs_opened, prs_merged, merge_hours_p50
+FROM main_public.mart_contribution_funnel
+"""
+
+[[question]]
+id = "pr_close_rate"
+question = "For pull requests only (item_type 'pull_request'), return repo_name and close_rate_pct from the responsiveness metrics."
+sql = """
+SELECT repo_name, close_rate_pct
+FROM main_public.mart_responsiveness
+WHERE item_type = 'pull_request'
+"""
+
+[[question]]
+id = "repos_with_bots"
+question = "Which repositories have bot contributions? Return repo_name and bot_share_pct for the repositories whose bot_share_pct is greater than 0."
+sql = """
+SELECT repo_name, bot_share_pct
+FROM main_public.mart_repo_concentration
+WHERE bot_share_pct > 0
+"""
+
+[[question]]
+id = "max_daily_repo_contributors"
+question = "What is the largest number of active contributors that a single repository had on a single day? Return one number."
+sql = """
+SELECT max(active_contributors) AS max_active
+FROM main_public.mart_daily_active_contributors
+WHERE period = 'day' AND scope = 'repo'
+"""
+
+[[question]]
+id = "weekly_category_new_vs_returning"
+question = "For weekly periods at the category scope, return period_start, the category (scope_key), new_contributors and returning_contributors."
+sql = """
+SELECT period_start, scope_key, new_contributors, returning_contributors
+FROM main_public.mart_daily_active_contributors
+WHERE period = 'week' AND scope = 'category'
+"""
+
+[[question]]
+id = "current_bot_users"
+question = "Counting only the current version of each user (is_current is true), how many users are flagged as bots and how many are not? Return is_bot and the number of users."
+sql = """
+SELECT is_bot, count(*) AS users
+FROM main_public.dim_user
+WHERE is_current
+GROUP BY is_bot
+"""
+
+[[question]]
+id = "avg_health_per_category"
+question = "What is the average health_score of the repositories of each category? Return category and the average health score rounded to 2 decimals."
+sql = """
+SELECT category, round(avg(health_score), 2) AS avg_health
+FROM main_public.mart_repo_health_score
+GROUP BY category
+"""
+
+[[question]]
+id = "events_per_category"
+question = "How many events does each repository category have? Join the events to the repositories on repo_key and return category and the number of events."
+sql = """
+SELECT r.category, count(*) AS events
+FROM main_public.fct_events AS e
+JOIN main_public.dim_repo AS r ON e.repo_key = r.repo_key
+GROUP BY r.category
+"""
+
+[[question]]
+id = "pr_authors_per_repo"
+question = "For each repository, how many distinct users (user_key) have pull request events (event_type 'PullRequestEvent')? Join the events to the repositories on repo_key and return repo_name and the number of distinct users."
+sql = """
+SELECT r.repo_name, count(DISTINCT e.user_key) AS users
+FROM main_public.fct_events AS e
+JOIN main_public.dim_repo AS r ON e.repo_key = r.repo_key
+WHERE e.event_type = 'PullRequestEvent'
+GROUP BY r.repo_name
+"""
+
+[[question]]
+id = "bot_events"
+question = "How many events were made by users flagged as bots? Join the events to the users on user_key and return one number."
+sql = """
+SELECT count(*) AS bot_events
+FROM main_public.fct_events AS e
+JOIN main_public.dim_user AS u ON e.user_key = u.user_key
+WHERE u.is_bot
+"""

@@ -2,7 +2,7 @@
 
 RepoPulse: data platform nhỏ đo "sức khoẻ" các dự án open source hệ data (Spark, dbt, DuckDB, Airflow, Kafka...) từ dữ liệu sự kiện GitHub công khai (GH Archive), kèm một luồng event app mô phỏng theo logging spec. Stack: Python 3.11, PySpark + Delta Lake (Databricks Free Edition, hoặc chạy trên runner GitHub Actions nếu dùng đường dự phòng), dbt (DuckDB trên CI, Databricks SQL hoặc MotherDuck cho gold), GitHub Actions điều phối, dashboard tĩnh trên GitHub Pages.
 
-**Đường đã chọn (bước thử 2026-11-11): dự phòng** — PySpark + Delta trên runner GitHub Actions, gold trên MotherDuck (khoá phiên bản DuckDB theo bản MotherDuck hỗ trợ). Databricks chưa kiểm được vì secret `DATABRICKS_TOKEN` không phải personal access token. Chi tiết và cách thử lại: `docs/probe-result.md`.
+**Đường đang chạy: A (dự phòng)** — PySpark + Delta trên runner GitHub Actions, gold trên MotherDuck (khoá phiên bản DuckDB theo bản MotherDuck hỗ trợ). Probe chạy lại với personal access token đúng (2026-11-11) ra `primary`: Databricks điều khiển được từ GitHub Actions. Vẫn chạy đường A theo luật chọn đường của Plan v2 (`python -m repopulse.pathdecision`), vì `runs.csv` chưa đủ lần chạy theo lịch để áp luật. Chi tiết và khi nào áp lại: `docs/probe-result.md`.
 
 Kế hoạch: `docs/plan.md`. Tiến độ: `python scripts/orchestrate.py report` (nguồn sự thật là PR đã merge). Việc chờ chủ repo: `docs/lam-checklist.md`, `logs/run-<ngày>.md` và email báo cáo ngày (`logs/daily-<ngày>.md`; số đo vận hành ở `logs/orchestrator-metrics.csv`, không phải `runs.csv`).
 
@@ -39,8 +39,12 @@ python -m pytest
 python -m dbt.cli.main build --project-dir transform --profiles-dir transform --target ci
 python -m dbt.cli.main build --project-dir transform --profiles-dir transform --target ci --vars "{silver_gharchive_parquet: '<glob>/*.parquet'}"   # đọc silver parquet thay seed fixture (docs/dbt-models.md)
 python -m pytest tests/test_dbt_marts.py         # mart Q1-Q6 so khớp benchmarks/queries/q*.sql, contract, PII
+python -m pytest tests/test_dbt_semantic_layer.py   # semantic layer MetricFlow: dbt parse kiểm semantic manifest, metric Q1-Q6 khớp q*.sql (docs/semantic-layer.md)
+python -m repopulse.semantic sql --metrics cohort_size,retention_w4_pct --group-by q2_cohort__cohort_week__week   # SQL DuckDB của metric từ transform/target/semantic_manifest.json (sau dbt build/parse)
 python -m repopulse.governance scan --db ci.duckdb --schema main_gold --schema main_public   # email thô ở gold/public? exit 0 sạch, 1 có finding (docs/governance.md)
 python -m repopulse.governance check --manifest transform/target/manifest.json --policy transform/governance.yml --db ci.duckdb   # nhãn meta.pii + quyền theo vai
+python -m repopulse.sql_agent ask --db ci.duckdb --model <model> "<câu hỏi>"   # SQL agent chỉ đọc main_public qua LLM OpenAI-compatible (REPOPULSE_LLM_BASE_URL, mặc định llama-server 127.0.0.1:8080); exit 1 hết lượt thử, 2 lỗi cấu hình/LLM (docs/sql-agent.md)
+python -m repopulse.sql_agent eval --db ci.duckdb --model <model> --report out/sql-agent-eval.json --out out/sql-agent-row.csv --git-sha <sha>   # bộ câu hỏi repopulse/sql_agent_eval.toml, execution accuracy; LLM không gọi được thì exit 2, không ghi dòng; gộp bằng record_run.py
 gh pr checks <số-PR> --watch --interval 30
 
 python benchmarks/fetch_reference.py             # tải + kiểm sha256 ngày chuẩn (benchmarks/reference.toml)
@@ -49,7 +53,14 @@ python benchmarks/record_run.py <benchmark-row.csv> [<pipeline-row.csv> ...]   #
 python benchmarks/scale_prepare.py               # tải + lọc + rút gọn 30 ngày GH Archive cho benchmark scale (docs/benchmark-scale.md)
 python benchmarks/scale_bench.py --git-sha <sha> --out out/scale-rows.csv   # Spark vs DuckDB 1/7/30 ngày; gộp bằng record_run.py
 python benchmarks/query_opt.py --runs 10 --git-sha <sha> --out out/query-opt-rows.csv --summary out/query-opt-summary.md   # Q1-Q6 trên parquet phẳng/partition/clustering (ngày chuẩn); byte quét chỉ đo được trên Linux (docs/query-optimization.md)
+python benchmarks/trino_bench.py --print-ddl     # DDL Trino/Hive của 4 layout (không cần Docker); đo thật chỉ chạy trong workflow trino-bench.yml (Docker Compose trên runner, docs/trino-hive.md)
+docker compose -f benchmarks/kafka/docker-compose.yml up -d --wait   # Kafka 3 broker KRaft (cần Docker; down -v để dọn)
+python benchmarks/streaming_bench.py --git-sha <sha> --partitions 1,3,6 --out out/streaming-rows.csv --summary out/streaming-summary.md   # Kafka -> Spark Structured Streaming (availableNow) -> Delta, đối chiếu đếm; cần extra spark,streaming + Java 17 (docs/streaming.md)
+python benchmarks/streaming_fault.py --git-sha <sha> --out out/streaming-fault-rows.csv --summary out/streaming-fault-summary.md   # kill broker / kill consumer giữa chừng: đối soát mất/trùng theo nội dung + thời gian phục hồi; phép đo vô hiệu thì không ghi dòng; cần cluster Kafka + Docker + Java 17 (docs/streaming-fault.md)
+python benchmarks/engine_matrix.py --engine duckdb --runs 5 --git-sha <sha> --out out/engine-matrix-rows.csv --summary out/engine-matrix-summary.md   # E1: Q1-Q6 trên một engine, nối một dòng matrix-<engine>; spark cần Java 17 + extra spark; motherduck/databricks-sql/databricks-serverless chỉ chạy trong workflow engine-matrix.yml; snowflake không đo (README dùng lại dbt-build-snowflake); docs/engine-matrix.md
 python benchmarks/snowflake_port.py --engine duckdb --run-results transform/target/run_results.json --git-sha <sha> --out out/snowflake-port-rows.csv   # dòng runs.csv cho một dbt build (port Snowflake, docs/snowflake-port.md); target snowflake chỉ chạy trong workflow snowflake-port.yml
+python benchmarks/dbt_databricks.py --run-results transform/target/run_results.json --show-log out/dbt-databricks-show.jsonl --git-sha <sha> --out out/dbt-databricks-rows.csv   # dòng runs.csv variant=dbt-build-databricks; target databricks (silver Delta Unity Catalog của D1) chỉ chạy trong workflow dbt-databricks.yml (docs/dbt-databricks.md)
+python -m repopulse.probe http-path --github-env   # http path SQL warehouse (secret DATABRICKS_HTTP_PATH hoặc tự tìm qua API) -> DBT_DATABRICKS_HTTP_PATH trong $GITHUB_ENV; chỉ dùng trên Actions
 
 python -m eventspec.generate                     # sinh lại eventspec/schemas/ từ catalog (docs/eventspec.md)
 python -m simkit.generate --seed 42 --users 100 --days 7 --null 5 --bot 2   # event simulated + manifest lỗi vào data/simulated/ (docs/simkit.md)
@@ -58,7 +69,12 @@ python -m repopulse.ingest --date 2026-01-05 --hour 15 --hours 2   # ingest GH A
 python -m repopulse.ingest --summary out/ingest-summary.json      # giờ (now UTC - 2h); --force để làm lại
 python -m repopulse.spark.job --source gharchive --date 2026-01-05 --hour 16 --hours 2   # bronze/silver Delta (cần PII_HASH_SALT, Java 17, extra spark); docs/spark-jobs.md
 python -m repopulse.spark.export --lake-dir data/lake --out data/silver-export   # silver Delta -> parquet cho dbt (var silver_gharchive_parquet)
+python -m repopulse.databricks_job run --source gharchive --date 2026-10-25 --hour 23 --hours 3 --landing-dir data/landing/gharchive --wheel dist/<wheel>.whl --git-sha <sha> --verify-rerun --summary out/databricks-summary.json --out out/databricks-row.csv   # cùng bronze/silver chạy serverless trên Databricks (DATABRICKS_HOST/TOKEN, PII_HASH_SALT); workflow databricks-bronze-silver.yml; docs/databricks-job.md
 python -m repopulse.pipeline {window,timed,counts,row,md-reset} --help   # helper của .github/workflows/pipeline.yml (incremental batch theo giờ); docs/pipeline.md
+python -m repopulse.pathcompare summary --runs runs.csv --out out/path-summary.md   # D3: số lần chạy, tỉ lệ thành công, p50/p95 (nearest-rank) end-to-end/từng bước/xếp hàng của path-a-runner vs path-b-databricks, chỉ từ runs.csv
+python -m repopulse.pathdecision --runs runs.csv --doc docs/probe-result.md [--check]   # D4: luật chọn đường chính Plan v2 (chỉ trigger=schedule) -> khối giữa marker path-decision của docs/probe-result.md; --check exit 1 khi lệch; không --doc thì in ra stdout
+python -m repopulse.pathcompare {window,runner-waits,warehouse-start,queries,md-ensure,row} --help   # helper của .github/workflows/path-comparison.yml (A runner+MotherDuck repopulse_path_a vs B Databricks, cùng cửa sổ dữ liệu; cron chỉ chạy sau release); docs/path-comparison.md
+python -m repopulse.dagspec {window,wait,row,check-ingest} --help   # helper của DAG Airflow dags/repopulse_pipeline.py và .github/workflows/airflow.yml (backfill N ngày, variant airflow-backfill-<N>d; Airflow chỉ chạy trên runner Linux); docs/airflow.md
 python -m dbt.cli.main build --project-dir transform --profiles-dir transform --target ci --full-refresh   # dựng lại fct_events (staging giữ lịch sử); khi nào cần: docs/dbt-models.md
 python -m repopulse.quality faults --seed 42 --users 30 --days 2 --clean-runs 2 --git-sha <sha> --report out/dq-faults.json --out out/dq-fault-row.csv   # 6 lỗi simkit (simulated) qua Spark; exit 1 khi sót lỗi/báo động giả (cần PII_HASH_SALT, Java 17); docs/data-quality.md
 python -m repopulse.quality check --database ci.duckdb --report out/dq-report.json   # khối lượng + độ tươi của stg_gharchive_events (md:repopulse cần MOTHERDUCK_TOKEN); ngưỡng ở repopulse/quality.toml
@@ -68,7 +84,7 @@ python -m repopulse.quality alert --report out/dq-report.json --run-url <url> --
 python -m repopulse.export_site --db ci.duckdb --runs runs.csv --out _site   # 6 mart public + runs.csv -> trang + CSV Tableau; thiếu mart/cột thì exit 1 (docs/dashboard.md)
 python -m http.server 8000 --bind 127.0.0.1 --directory _site                # xem thử trang local
 
-python -m repopulse.readme_results               # sinh lại mục Results của README.md (giữa marker results:start/end) từ runs.csv; --check exit 1 khi lệch. Chạy lại sau mỗi lần record_run.py thêm dòng (tests/test_readme_content.py đỏ nếu quên); không sửa tay bảng đó
+python -m repopulse.readme_results               # sinh lại mục Results của README.md (giữa marker results:start/end) từ runs.csv; --check exit 1 khi lệch. Engine thiếu trong bảng Engine matrix chỉ in cảnh báo ra stderr, không đổi exit code. Chạy lại sau mỗi lần record_run.py thêm dòng (tests/test_readme_content.py đỏ nếu quên); không sửa tay bảng đó
 
 python scripts/orchestrate.py run --dry-run      # xem sẽ chạy việc nào
 python scripts/orchestrate.py run                # chạy headless, không cần người (mặc định 5 phiên)

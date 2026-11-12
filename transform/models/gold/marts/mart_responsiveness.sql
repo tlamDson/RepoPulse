@@ -75,8 +75,8 @@ items as (
 )
 
 select
-    cast(repo_name as varchar) as repo_name,
-    cast(item_type as varchar) as item_type,
+    cast(repo_name as string) as repo_name,
+    cast(item_type as string) as item_type,
     cast(count(*) as bigint) as opened,
     cast(count(response_hours) as bigint) as responded,
     cast(
