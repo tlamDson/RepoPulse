@@ -71,7 +71,7 @@ Real GH Archive data (not simulated). Each row has the same `data_date` as a `ba
 
 | variant | data_date | total_seconds | q1_seconds | q2_seconds | q3_seconds | q4_seconds | q5_seconds | q6_seconds | peak_rss_mb | bytes_read | row_count | run_at | git_sha |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| baseline | 2026-10-25 | 4.013378 | 0.065736 | 0.083608 | 0.039719 | 0.05792 | 0.028184 | 0.059881 | 1212.05 | 295319902 | 1670400 | 2026-11-11T18:53:13+00:00 | e94e9d8 |
+| baseline | 2026-10-25 | 3.611956 | 0.061664 | 0.076715 | 0.039159 | 0.05246 | 0.026339 | 0.052887 | 1210.5 | 295319902 | 1670400 | 2026-11-12T01:24:39+00:00 | 5866025 |
 | qopt-clustered | 2026-10-25 | 1.607098 | 0.033002 | 0.361557 | 0.428338 | 0.399178 | 0.023794 | 0.394635 | 975.85 | 416707826 | 1670400 | 2026-11-11T18:53:55+00:00 | e94e9d8 |
 | qopt-flat | 2026-10-25 | 1.828283 | 0.133773 | 0.443666 | 0.382593 | 0.391836 | 0.073611 | 0.405215 | 1429.85 | 1491737160 | 1670400 | 2026-11-11T18:53:55+00:00 | e94e9d8 |
 | qopt-partitioned | 2026-10-25 | 0.947003 | 0.018212 | 0.250082 | 0.041727 | 0.323164 | 0.016177 | 0.332979 | 1229.95 | 310347620 | 1670400 | 2026-11-11T18:53:55+00:00 | e94e9d8 |
@@ -106,6 +106,17 @@ Simulated data: app events from `simkit` (no real users) with a known number of 
 | variant | data_date | total_seconds | row_count | simulated | seed | users | days | injected | caught | false_alarms | clean_runs | duplicate | null | wrong_type | late | schema_drift | bot | run_at | git_sha |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | dq-fault-injection | 2026-11-01 | 81.907 | 677 | true | 42 | 60 | 2 | 27 | 27 | 0 | 3 | 5/5 | 5/5 | 5/5 | 5/5 | 5/5 | 2/2 | 2026-11-11T18:22:59+00:00 | 0bc1ad4 |
+
+### Other runs
+
+Not compared with `baseline`: either there is no baseline row with the same `data_date`, or the variant is not one of the groups above. `notes` is copied from `runs.csv`.
+
+| variant | data_date | total_seconds | q1_seconds | q2_seconds | q3_seconds | q4_seconds | q5_seconds | q6_seconds | peak_rss_mb | bytes_read | row_count | run_at | git_sha | notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| trino-clustered | 2026-10-25 | 4.732549 | 0.292307 | 0.402464 | 0.840337 | 1.958731 | 0.138126 | 1.031803 | — | 1283007819 | 1670400 | 2026-11-12T01:26:14+00:00 | 5866025 | runs=10 stat=median warmup=1 engine=trino trino=484 partition_by=none sort_by=type+repo.name+created_at files=1 layout_bytes=302287930 bytes=physical_input_bytes bytes_from=run1 bytes_equal_across_runs=true cross_check=full q1_input_bytes=23910714 q1_input_rows=737628 q2_input_bytes=111396772 q2_input_rows=368814 q3_input_bytes=414674636 q3_input_rows=614748 q4_input_bytes=514114714 q4_input_rows=614690 q5_input_bytes=6386958 q5_input_rows=245876 q6_input_bytes=212524025 q6_input_rows=491810 |
+| trino-flat | 2026-10-25 | 11.065254 | 1.064501 | 1.071864 | 2.365977 | 4.24397 | 0.363652 | 1.994511 | — | 5272074760 | 1670400 | 2026-11-12T01:26:14+00:00 | 5866025 | runs=10 stat=median warmup=1 engine=trino trino=484 partition_by=none sort_by=none files=1 layout_bytes=370155952 bytes=physical_input_bytes bytes_from=run1 bytes_equal_across_runs=true cross_check=full q1_input_bytes=482142870 q1_input_rows=10022748 q2_input_bytes=528842439 q2_input_rows=5011374 q3_input_bytes=1487135678 q3_input_rows=8352348 q4_input_bytes=1774905345 q4_input_rows=8352290 q5_input_bytes=143534232 q5_input_rows=3340916 q6_input_bytes=855514196 q6_input_rows=6681890 |
+| trino-partitioned | 2026-10-25 | 4.031387 | 0.378627 | 0.248051 | 0.456132 | 1.685715 | 0.171349 | 1.086085 | — | 439061897 | 1670400 | 2026-11-12T01:26:14+00:00 | 5866025 | runs=10 stat=median warmup=1 engine=trino trino=484 partition_by=type sort_by=none files=16 layout_bytes=350231636 bytes=physical_input_bytes bytes_from=run1 bytes_equal_across_runs=true cross_check=full q1_input_bytes=13607700 q1_input_rows=305856 q2_input_bytes=11122234 q2_input_rows=124341 q3_input_bytes=26344702 q3_input_rows=90452 q4_input_bytes=253263286 q4_input_rows=165078 q5_input_bytes=3965774 q5_input_rows=101952 q6_input_bytes=130758201 q6_input_rows=184520 |
+| trino-partitioned-clustered | 2026-10-25 | 3.844165 | 0.309468 | 0.214639 | 0.380599 | 1.704482 | 0.150717 | 1.005081 | — | 408029209 | 1670400 | 2026-11-12T01:26:14+00:00 | 5866025 | runs=10 stat=median warmup=1 engine=trino trino=484 partition_by=type sort_by=repo.name+created_at files=16 layout_bytes=302247116 bytes=physical_input_bytes bytes_from=run1 bytes_equal_across_runs=true cross_check=full q1_input_bytes=12123984 q1_input_rows=305856 q2_input_bytes=10088866 q2_input_rows=124341 q3_input_bytes=24277752 q3_input_rows=90452 q4_input_bytes=236368867 q4_input_rows=165078 q5_input_bytes=3381196 q5_input_rows=101952 q6_input_bytes=121788544 q6_input_rows=184520 |
 
 The full log, with every run and not only the newest, is [`runs.csv`](runs.csv).
 <!-- results:end -->
