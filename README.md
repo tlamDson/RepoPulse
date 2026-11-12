@@ -58,6 +58,7 @@ How to read it:
 
 - A row is compared with `variant=baseline` only when it has the same `data_date`, so the same day of data and the same queries Q1–Q6. Only the first table does this.
 - The Spark and DuckDB rows use another data date. They are compared with each other, not with `baseline`.
+- The engine matrix runs Q1–Q6 on the day of `baseline` on each engine, one row per engine. Its Snowflake row is reused from the dbt build on the seed fixture, so it is not comparable with the others.
 - The dbt rows build a small seed fixture, not GH Archive data.
 - The fault-injection rows are **simulated** data. The baseline, layout, Spark and DuckDB rows use real GH Archive data.
 - `run_at`, `git_sha` (first 7 characters) and `data_date` identify the row in `runs.csv`.
@@ -76,6 +77,19 @@ Real GH Archive data (not simulated). Each row has the same `data_date` as a `ba
 | qopt-flat | 2026-10-25 | 1.828283 | 0.133773 | 0.443666 | 0.382593 | 0.391836 | 0.073611 | 0.405215 | 1429.85 | 1491737160 | 1670400 | 2026-11-11T18:53:55+00:00 | e94e9d8 |
 | qopt-partitioned | 2026-10-25 | 0.947003 | 0.018212 | 0.250082 | 0.041727 | 0.323164 | 0.016177 | 0.332979 | 1229.95 | 310347620 | 1670400 | 2026-11-11T18:53:55+00:00 | e94e9d8 |
 | qopt-partitioned-clustered | 2026-10-25 | 0.941688 | 0.01802 | 0.238865 | 0.040602 | 0.315754 | 0.018154 | 0.322356 | 1220.75 | 290407457 | 1670400 | 2026-11-11T18:53:55+00:00 | e94e9d8 |
+
+### Engine matrix: Q1 to Q6 on six engines (real GH Archive data)
+
+Real GH Archive data (not simulated): the same reference day as `baseline` and the same queries Q1 to Q6 on every engine, one row per engine in a fixed order (the newest `matrix-<engine>` run). Each engine loads the day first (not timed), runs Q1 to Q6 once as a warm-up, then several timed runs; `q1_seconds` to `q6_seconds` are medians and `total_seconds` is the median of the per-run sum of Q1 to Q6, so unlike `baseline` it does not include loading. `timing` says where the clock runs: `in-process` engines (`duckdb`, `spark`) are timed in the process that runs the query, `client` engines (`motherduck`, `databricks-sql`) are timed by the client on the runner, so their times include the network, and `notebook` (`databricks-serverless`) is timed inside the Databricks notebook. A row is written only when its results matched DuckDB on the same data (`cross_check`). The `snowflake` row is reused from `dbt-build-snowflake` (the trial is not spent again): the build time of the marts with `dbt build` on the seed fixture, a different measurement that is not comparable with the other rows. Method: [`docs/engine-matrix.md`](docs/engine-matrix.md).
+
+| engine | source | variant | data_date | total_seconds | q1_seconds | q2_seconds | q3_seconds | q4_seconds | q5_seconds | q6_seconds | row_count | timing | cross_check | run_at | git_sha |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| duckdb | measured: Q1-Q6 on the reference day | matrix-duckdb | 2026-10-25 | 1.379693 | 0.070564 | 0.088508 | 0.977428 | 0.162533 | 0.030462 | 0.057046 | 1670400 | in-process | content | 2026-11-12T07:32:38+00:00 | c82658b |
+| spark | measured: Q1-Q6 on the reference day | matrix-spark | 2026-10-25 | 19.264915 | 2.311471 | 1.365517 | 5.332565 | 6.270693 | 0.910143 | 3.14992 | 1670400 | in-process | content | 2026-11-12T07:32:54+00:00 | c82658b |
+| databricks-serverless | measured: Q1-Q6 on the reference day | matrix-databricks-serverless | 2026-10-25 | 11.951003 | 1.938565 | 1.346388 | 2.213751 | 2.439241 | 1.367668 | 2.561126 | 1670400 | notebook | content | 2026-11-12T07:37:35+00:00 | c82658b |
+| databricks-sql | measured: Q1-Q6 on the reference day | matrix-databricks-sql | 2026-10-25 | 10.036121 | 1.639145 | 1.202641 | 1.883172 | 2.073748 | 1.131386 | 1.878064 | 1670400 | client | content | 2026-11-12T07:35:56+00:00 | c82658b |
+| motherduck | measured: Q1-Q6 on the reference day | matrix-motherduck | 2026-10-25 | 1.945281 | 0.084298 | 0.106439 | 1.26195 | 0.308665 | 0.04579 | 0.078294 | 1670400 | client | content | 2026-11-12T07:35:32+00:00 | c82658b |
+| snowflake | reused dbt-build-snowflake: dbt build of the marts on the seed fixture, not comparable | dbt-build-snowflake | 2026-01-05 | 22.600090742111206 | 1.398242473602295 | 1.2782909870147705 | 2.0330214500427246 | 1.7248523235321045 | 1.2184998989105225 | 1.9702086448669434 | 36 | — | — | 2026-11-11T16:20:35+00:00 | ee38cf0 |
 
 ### Spark vs DuckDB at 1, 7 and 30 days
 
@@ -188,6 +202,7 @@ Most pages are in Vietnamese; the two benchmark pages are in English.
 | [`docs/dashboard.md`](docs/dashboard.md) | The static site and the Tableau CSV export |
 | [`docs/query-optimization.md`](docs/query-optimization.md) | Partitioned and clustered layouts against the baseline |
 | [`docs/benchmark-scale.md`](docs/benchmark-scale.md) | Spark against DuckDB at 1, 7 and 30 days |
+| [`docs/engine-matrix.md`](docs/engine-matrix.md) | Q1–Q6 on the reference day on six engines, one README table |
 | [`docs/snowflake-port.md`](docs/snowflake-port.md) | Running the dbt project on Snowflake |
 | [`docs/databricks-job.md`](docs/databricks-job.md) | The same bronze/silver incremental batch as a serverless Databricks job (Plan v2, outside this deployment) |
 

@@ -1,0 +1,208 @@
+name: Engine matrix
+
+# E1 (docs/plan.md, docs/engine-matrix.md): the same Q1-Q6 on the reference day of
+# benchmarks/reference.toml (real GH Archive data, the data_date of variant=baseline) on DuckDB,
+# Spark on this runner, MotherDuck, a Databricks SQL warehouse and a Databricks serverless
+# notebook. One runs.csv row per engine (variant matrix-<engine>) lands in the `engine-matrix`
+# artifact; merge it with `python benchmarks/record_run.py out/engine-matrix-rows.csv`, then run
+# `python -m repopulse.readme_results`. Snowflake is not measured again (trial credits): the
+# README reuses the dbt-build-snowflake row and marks it as not comparable.
+#
+# Triggers:
+# - workflow_dispatch only shows in the Actions tab once this file is on `main` (after release).
+# - So `push` is limited to the branch feature/engine-matrix to run it inside this PR, and only
+#   for files that change the measurement: a commit that only records rows (runs.csv, README.md,
+#   docs/) does not start a new run. After the merge the branch is deleted and push no longer
+#   fires.
+# - No pull_request and no schedule: this workflow writes to MotherDuck (database
+#   repopulse_matrix) and Databricks (schema workspace.repopulse_matrix and its Volume), and
+#   Databricks Free Edition has a daily quota (MotherDuck Lite has limits too).
+#
+# Missing secrets: the step of that engine is skipped at step level (notice), the run stays
+# green and there is no row for it. Every engine step has continue-on-error, so one engine that
+# fails does not cost the rows of the others; the job summary shows every outcome, and the last
+# step turns the run red when an engine failed (after the artifact upload). Secrets enter only
+# through `env:`; the Databricks steps mask the bare hostname, user name and warehouse.
+# duckdb is pinned to 1.5.6 because MotherDuck rejects a newer client (same pin as pipeline.yml);
+# matrix-duckdb runs that same client in this job (version in its notes).
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feature/engine-matrix]
+    paths:
+      - ".github/workflows/engine-matrix.yml"
+      - "benchmarks/engine_matrix.py"
+      - "benchmarks/naive_duckdb.py"
+      - "benchmarks/spark_naive.py"
+      - "benchmarks/trino_bench.py"
+      - "benchmarks/measure.py"
+      - "benchmarks/reference.*"
+      - "benchmarks/fetch_reference.py"
+      - "benchmarks/queries/**"
+      - "benchmarks/queries_spark/**"
+      - "repopulse/databricks_job.py"
+      - "repopulse/probe.py"
+      - "pyproject.toml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: engine-matrix
+  cancel-in-progress: false
+
+jobs:
+  engine-matrix:
+    name: Engine matrix (Q1-Q6 per engine)
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    env:
+      GIT_SHA: ${{ github.sha }}
+      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+      MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # MotherDuck rejects a DuckDB client newer than it supports: same pin as pipeline.yml.
+      - name: Install
+        run: pip install -e ".[dev,spark]" "duckdb==1.5.6"
+
+      - name: Cache reference day
+        uses: actions/cache@v4
+        with:
+          path: data/raw/gharchive
+          key: gharchive-${{ hashFiles('benchmarks/reference.toml') }}
+
+      - name: Download and verify reference files (stops on any checksum mismatch)
+        run: python benchmarks/fetch_reference.py
+
+      - name: Databricks secrets missing
+        if: env.DATABRICKS_HOST == '' || env.DATABRICKS_TOKEN == ''
+        run: echo "::notice::Databricks secrets are not set; skipped databricks-sql and databricks-serverless (no matrix row for them)."
+
+      - name: MotherDuck secret missing
+        if: env.MOTHERDUCK_TOKEN == ''
+        run: echo "::notice::The MotherDuck token secret is not set; skipped motherduck (no matrix row for it)."
+
+      - name: DuckDB (in-process)
+        id: duckdb
+        continue-on-error: true
+        run: >-
+          python benchmarks/engine_matrix.py --engine duckdb --runs 5
+          --git-sha "$GIT_SHA"
+          --out out/engine-matrix-rows.csv
+          --summary out/engine-matrix-summary.md
+
+      - name: Spark on the runner (in-process, child process)
+        id: spark
+        continue-on-error: true
+        run: >-
+          python benchmarks/engine_matrix.py --engine spark --runs 5
+          --git-sha "$GIT_SHA"
+          --out out/engine-matrix-rows.csv
+          --summary out/engine-matrix-summary.md
+
+      - name: MotherDuck (client, database repopulse_matrix)
+        id: motherduck
+        if: env.MOTHERDUCK_TOKEN != ''
+        continue-on-error: true
+        run: >-
+          python benchmarks/engine_matrix.py --engine motherduck --runs 5
+          --git-sha "$GIT_SHA"
+          --out out/engine-matrix-rows.csv
+          --summary out/engine-matrix-summary.md
+
+      - name: Databricks SQL warehouse (client, schema repopulse_matrix)
+        id: databricks_sql
+        if: env.DATABRICKS_HOST != '' && env.DATABRICKS_TOKEN != ''
+        continue-on-error: true
+        env:
+          DATABRICKS_HTTP_PATH: ${{ secrets.DATABRICKS_HTTP_PATH }}
+        run: >-
+          python benchmarks/engine_matrix.py --engine databricks-sql --runs 5
+          --git-sha "$GIT_SHA"
+          --out out/engine-matrix-rows.csv
+          --summary out/engine-matrix-summary.md
+          --add-mask
+
+      - name: Databricks serverless notebook (timed in the notebook)
+        id: databricks_serverless
+        if: env.DATABRICKS_HOST != '' && env.DATABRICKS_TOKEN != ''
+        continue-on-error: true
+        run: >-
+          python benchmarks/engine_matrix.py --engine databricks-serverless --runs 5
+          --git-sha "$GIT_SHA"
+          --out out/engine-matrix-rows.csv
+          --summary out/engine-matrix-summary.md
+          --add-mask
+
+      - name: Job summary
+        if: always()
+        env:
+          OUT_DUCKDB: ${{ steps.duckdb.outcome }}
+          OUT_SPARK: ${{ steps.spark.outcome }}
+          OUT_MOTHERDUCK: ${{ steps.motherduck.outcome }}
+          OUT_DBX_SQL: ${{ steps.databricks_sql.outcome }}
+          OUT_DBX_SERVERLESS: ${{ steps.databricks_serverless.outcome }}
+        run: |
+          {
+            echo "### Engine matrix: step outcomes"
+            echo
+            echo "| engine | step outcome |"
+            echo "|---|---|"
+            echo "| duckdb | ${OUT_DUCKDB:-not run} |"
+            echo "| spark | ${OUT_SPARK:-not run} |"
+            echo "| databricks-serverless | ${OUT_DBX_SERVERLESS:-not run} |"
+            echo "| databricks-sql | ${OUT_DBX_SQL:-not run} |"
+            echo "| motherduck | ${OUT_MOTHERDUCK:-not run} |"
+            echo "| snowflake | not measured (the README reuses dbt-build-snowflake) |"
+            echo
+            if [ -f out/engine-matrix-summary.md ]; then
+              cat out/engine-matrix-summary.md
+            else
+              echo "No engine summary (the run stopped before the first engine)."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: engine-matrix
+          path: |
+            out/engine-matrix-rows.csv
+            out/engine-matrix-summary.md
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Fail when an engine failed
+        if: always()
+        env:
+          OUT_DUCKDB: ${{ steps.duckdb.outcome }}
+          OUT_SPARK: ${{ steps.spark.outcome }}
+          OUT_MOTHERDUCK: ${{ steps.motherduck.outcome }}
+          OUT_DBX_SQL: ${{ steps.databricks_sql.outcome }}
+          OUT_DBX_SERVERLESS: ${{ steps.databricks_serverless.outcome }}
+        run: |
+          failed=""
+          for pair in "duckdb=$OUT_DUCKDB" "spark=$OUT_SPARK" "motherduck=$OUT_MOTHERDUCK" \
+                      "databricks-sql=$OUT_DBX_SQL" "databricks-serverless=$OUT_DBX_SERVERLESS"; do
+            if [ "${pair#*=}" = "failure" ]; then failed="$failed ${pair%%=*}"; fi
+          done
+          if [ -n "$failed" ]; then
+            echo "::error::engine(s) failed:$failed; no row was written for them (see the job summary)"
+            exit 1
+          fi
+          echo "no engine failed (skipped engines have no secret)"
