@@ -79,6 +79,18 @@ test DagBag với `REPOPULSE_REQUIRE_AIRFLOW=1` (thiếu Airflow là fail), `dag
 chạy nền, chờ DAG được nạp, `airflow dags unpause`, `airflow backfill create --max-active-runs 1`,
 `dagspec wait` (thăm dò `airflow dags list-runs -o json`), `dagspec row`.
 
+Ba điểm rút ra từ các lần chạy thật trên runner (Airflow 3.4.0):
+
+- `airflow standalone` khởi động scheduler, dag processor, triggerer, API server bằng lệnh trần
+  `airflow`, nên `bin/` của venv Airflow phải nằm trong `PATH` (nối vào **cuối**, để `python` vẫn là
+  interpreter của project). Bước khởi động chờ dòng `Airflow is ready` trong `standalone.log` và
+  fail sau 5 phút nếu không thấy, thay vì để bước chờ backfill treo tới hết giờ.
+- `AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS=True`: instance tạm trên localhost không cần đăng
+  nhập, nên không có mật khẩu sinh tự động nào bị in vào log được upload.
+- `airflow dags list-runs -o json` in cả dòng log (có `[warning  ]`) ra stdout trước mảng JSON;
+  `dagspec.parse_runs` bỏ qua các dòng đó. Output không có `run_type`: run backfill được nhận ra
+  qua `run_id` bắt đầu bằng `backfill__`.
+
 `REPOPULSE_AIRFLOW_END_DATE` đặt `end_date` của DAG ở trưa ngày logical cuối: các run backfill (nửa
 đêm) nằm trong khoảng, còn scheduler không tự tạo run theo lịch khi DAG được unpause, nên không có
 run nào chạy chen với backfill.
