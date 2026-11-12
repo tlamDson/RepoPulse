@@ -569,3 +569,181 @@ def test_main_rejects_missing_runs_csv_and_wrong_header(tmp_path):
     assert readme_results.main(args(missing, readme)) != 0
     assert readme_results.main(args(bad, readme)) != 0
     assert readme.read_text(encoding="utf-8") == readme_with("x")
+
+
+# --- engine matrix (E1) ----------------------------------------------------------------------
+
+MATRIX = "Engine matrix: Q1 to Q6 on six engines (real GH Archive data)"
+MATRIX_ENGINES = (
+    "duckdb",
+    "spark",
+    "databricks-serverless",
+    "databricks-sql",
+    "motherduck",
+    "snowflake",
+)
+
+
+def matrix_row(engine, total, run_at="2026-11-12T12:00:00+00:00", timing="in-process", **cells):
+    return row(
+        f"matrix-{engine}",
+        "2026-10-25",
+        run_at,
+        "abcabca1111111111111111111111111111111111",
+        total,
+        f"engine={engine} runs=5 stat=median warmup=1 timing={timing} cross_check=content",
+        row_count="1670400",
+        **cells,
+    )
+
+
+M_DUCK = matrix_row("duckdb", "0.411111", q1_seconds="0.051111")
+M_SPARK = matrix_row("spark", "6.222222")
+M_DBX_SERVERLESS = matrix_row("databricks-serverless", "8.333333", timing="notebook")
+M_DBX_SQL = matrix_row("databricks-sql", "9.444444", timing="client")
+M_MD = matrix_row("motherduck", "3.555555", timing="client")
+M_SNOW = matrix_row("snowflake", "4.666666", timing="client")
+M_ODD = matrix_row("oracle", "5.777777")
+
+
+def matrix_table(out):
+    body = sections(out)[MATRIX]
+    lines = [ln for ln in body.splitlines() if ln.startswith("|")]
+    return body, table(body), lines
+
+
+def test_matrix_section_has_exactly_one_table_with_one_row_per_engine_in_fixed_order():
+    out = readme_results.render([M_SNOW, M_MD, M_DUCK, M_SPARK, M_DBX_SQL, M_DBX_SERVERLESS])
+
+    body, rows, lines = matrix_table(out)
+    assert sum(1 for ln in lines if re.fullmatch(r"\|( --- \|)+", ln)) == 1, "one table only"
+    assert [r["engine"] for r in rows] == list(MATRIX_ENGINES)
+    assert [r["variant"] for r in rows] == [f"matrix-{e}" for e in MATRIX_ENGINES]
+    duck = rows[0]
+    assert duck["total_seconds"] == "0.411111"
+    assert duck["q1_seconds"] == "0.051111"
+    assert duck["row_count"] == "1670400"
+    assert duck["timing"] == "in-process"
+    assert duck["cross_check"] == "content"
+    assert rows[3]["timing"] == "client"
+    assert rows[2]["timing"] == "notebook"
+    assert out.count(f"### {MATRIX}") == 1
+
+
+def test_matrix_section_with_every_engine_has_no_warning():
+    out = readme_results.render([M_DUCK, M_SPARK, M_DBX_SERVERLESS, M_DBX_SQL, M_MD, M_SNOW])
+
+    body = sections(out)[MATRIX]
+    assert "warning" not in body.lower()
+
+
+def test_missing_engine_keeps_its_row_with_dashes_and_is_warned_by_name():
+    out = readme_results.render([M_DUCK, M_SPARK, M_SNOW])
+
+    body, rows, _ = matrix_table(out)
+    assert [r["engine"] for r in rows] == list(MATRIX_ENGINES)
+    missing = {r["engine"]: r for r in rows if r["engine"] not in ("duckdb", "spark", "snowflake")}
+    for r in missing.values():
+        assert r["variant"] == "—"
+        assert r["total_seconds"] == "—"
+        assert r["q3_seconds"] == "—"
+        assert "missing" in r["source"]
+    warning_lines = [ln for ln in body.splitlines() if "warning" in ln.lower()]
+    assert warning_lines, "a warning line is shown with the table"
+    warned = " ".join(warning_lines)
+    for engine in missing:
+        assert f"matrix-{engine}" in warned
+    assert "matrix-duckdb" not in warned
+
+
+def test_snowflake_reused_dbt_build_row_is_labelled_as_not_comparable():
+    out = readme_results.render([M_DUCK, M_SPARK, M_DBX_SERVERLESS, M_DBX_SQL, M_MD, DBT_SNOW])
+
+    body, rows, _ = matrix_table(out)
+    snow = rows[-1]
+    assert snow["engine"] == "snowflake"
+    assert snow["variant"] == "dbt-build-snowflake"
+    assert snow["total_seconds"] == "22.600090742111206"
+    assert "reused" in snow["source"]
+    assert "not comparable" in snow["source"]
+    assert "reused" in body and "not comparable" in body
+    assert "warning" not in body.lower()
+    assert rows[0]["source"] != snow["source"]
+    # the dbt section still lists the build it comes from
+    assert "dbt-build-snowflake" in [r["variant"] for r in table(sections(out)[DBT])]
+
+
+def test_matrix_prose_says_real_data_and_how_engines_are_timed():
+    body = sections(readme_results.render([M_DUCK]))[MATRIX]
+
+    assert "not simulated" in body
+    assert "in the process" in body
+    assert "client" in body and "network" in body
+    assert "notebook" in body
+    assert "reused" in body
+    assert "docs/engine-matrix.md" in body
+
+
+def test_matrix_rows_are_not_listed_again_in_other_runs():
+    out = readme_results.render([M_DUCK, M_SPARK, PIPELINE])
+
+    other = [r["variant"] for r in table(sections(out)[OTHER])]
+    assert other == ["pipeline-incremental"]
+    assert out.count("matrix-duckdb") == 1
+    assert OTHER not in sections(readme_results.render([M_DUCK, M_SPARK, M_MD]))
+
+
+def test_older_matrix_run_is_not_shown():
+    old = matrix_row("duckdb", "0.999999", run_at="2026-11-01T00:00:00+00:00")
+
+    out = readme_results.render([old, M_DUCK])
+
+    assert "0.411111" in out and "0.999999" not in out
+
+
+def test_matrix_variant_of_an_unknown_engine_falls_back_to_other_runs_and_is_warned():
+    out = readme_results.render([M_DUCK, M_ODD])
+
+    secs = sections(out)
+    assert [r["variant"] for r in table(secs[OTHER])] == ["matrix-oracle"]
+    assert "matrix-oracle" not in [r["variant"] for r in table(secs[MATRIX])]
+    assert "matrix-oracle" in " ".join(ln for ln in secs[MATRIX].splitlines() if "arning" in ln)
+
+
+def test_matrix_section_is_shown_even_with_no_rows_and_warns_about_every_engine():
+    body, rows, _ = matrix_table(readme_results.render([]))
+
+    assert [r["engine"] for r in rows] == list(MATRIX_ENGINES)
+    assert all(r["variant"] == "—" for r in rows)
+    for engine in MATRIX_ENGINES:
+        assert f"matrix-{engine}" in body
+
+
+def test_matrix_numbers_are_copied_verbatim():
+    rows_in = [M_DUCK, M_SPARK, M_DBX_SERVERLESS, M_DBX_SQL, M_MD, DBT_SNOW]
+    out = readme_results.render(rows_in)
+
+    source = haystack(rows_in)
+    for token in re.findall(r"\d+\.\d+", sections(out)[MATRIX]):
+        assert token in source, token
+
+
+def test_main_prints_missing_engine_warnings_to_stderr_without_changing_exit_code(tmp_path, capsys):
+    runs, readme = setup(tmp_path, readme_with("stale"))
+
+    assert readme_results.main(args(runs, readme)) == 0
+    err = capsys.readouterr().err
+    assert "matrix-duckdb" in err and "matrix-motherduck" in err
+    assert readme_results.main(args(runs, readme, "--check")) == 0
+    assert "matrix-spark" in capsys.readouterr().err
+
+
+def test_main_prints_no_matrix_warning_when_every_engine_has_a_row(tmp_path, capsys):
+    runs = tmp_path / "runs.csv"
+    readme = tmp_path / "README.md"
+    write_runs(runs, [M_DUCK, M_SPARK, M_DBX_SERVERLESS, M_DBX_SQL, M_MD, M_SNOW])
+    readme.write_text(readme_with("stale"), encoding="utf-8", newline="\n")
+
+    assert readme_results.main(args(runs, readme)) == 0
+
+    assert "matrix-" not in capsys.readouterr().err
