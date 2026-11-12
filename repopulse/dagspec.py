@@ -48,6 +48,8 @@ ENGINE = f"airflow-{AIRFLOW_VERSION}"
 TASK_ORDER: tuple[str, ...] = ("ingest", "spark_bronze_silver", "export_silver", "dbt_build")
 DATA_DATE_TEMPLATE = "{{ macros.ds_add(ds, -1) }}"
 MAX_BACKFILL_DAYS = 7
+# Airflow 3 retry_exponential_backoff is a multiplier: the retry delay doubles on each retry.
+BACKOFF_MULTIPLIER = 2.0
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 DEFAULT_HOUR = 12

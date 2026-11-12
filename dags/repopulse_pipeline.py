@@ -43,7 +43,9 @@ with DAG(
             cwd=str(SPEC.home),
             retries=task.retries,
             retry_delay=timedelta(seconds=task.retry_delay_seconds),
-            retry_exponential_backoff=task.exponential_backoff,
+            retry_exponential_backoff=(
+                dagspec.BACKOFF_MULTIPLIER if task.exponential_backoff else 0
+            ),
             execution_timeout=timedelta(minutes=task.timeout_minutes),
         )
     for task in SPEC.tasks:

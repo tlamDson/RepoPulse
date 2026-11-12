@@ -87,7 +87,8 @@ def dag():
     except ImportError:
         from airflow.models.dagbag import DagBag
 
-    bag = DagBag(dag_folder=str(DAGS_DIR), include_examples=False)
+    # Airflow 3.4: DagBag has no include_examples argument; it only parses the folder it is given.
+    bag = DagBag(dag_folder=str(DAGS_DIR))
     assert bag.import_errors == {}, bag.import_errors
     assert dagspec.DAG_ID in bag.dags, sorted(bag.dags)
     return bag.dags[dagspec.DAG_ID]
@@ -112,7 +113,9 @@ def test_dag_retries_timeouts_and_commands_match_the_spec(dag, spec):
         op = dag.task_dict[t.task_id]
         assert op.retries == t.retries, t.task_id
         assert op.retry_delay == timedelta(seconds=t.retry_delay_seconds), t.task_id
-        assert bool(op.retry_exponential_backoff) is t.exponential_backoff, t.task_id
+        # Airflow 3: a multiplier, not a flag (True would mean x1, i.e. a constant delay).
+        multiplier = dagspec.BACKOFF_MULTIPLIER if t.exponential_backoff else 0
+        assert op.retry_exponential_backoff == multiplier, t.task_id
         assert op.execution_timeout == timedelta(minutes=t.timeout_minutes), t.task_id
         assert op.bash_command == t.command, t.task_id
         assert str(op.cwd) == str(spec.home), t.task_id
