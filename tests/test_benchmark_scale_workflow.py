@@ -137,7 +137,7 @@ def test_benchmark_writes_rows_and_summary():
 
 def test_uploads_rows_and_manifest_even_on_failure():
     all_steps = steps(load())
-    upload = all_steps[_index(all_steps, _uses("actions/upload-artifact@v4"))]
+    upload = all_steps[_index(all_steps, _uses("actions/upload-artifact@v7"))]
     assert upload.get("if") == "always()"
     with_ = upload["with"]
     assert with_["name"] == "benchmark-scale"
