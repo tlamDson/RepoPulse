@@ -1,281 +1,281 @@
-# RepoPulse — kế hoạch triển khai
+# RepoPulse — implementation plan
 
-## RepoPulse làm gì
+## What RepoPulse does
 
-RepoPulse là một data platform nhỏ đo "sức khoẻ" của các dự án open source từ dữ liệu sự kiện GitHub công khai (GH Archive), kèm một luồng event ứng dụng theo logging spec.
+RepoPulse is a small data platform that measures the "health" of open-source projects from public GitHub event data (GH Archive), together with an application event stream following a logging spec.
 
-- **Đầu vào:** event GitHub thật theo giờ; event app mô phỏng sinh theo một catalog event có schema.
-- **Xử lý:** pipeline batch ELT chạy theo lịch: làm sạch và băm PII bằng PySpark + Delta Lake, dựng star schema bằng dbt, có test, contract và cảnh báo bất thường.
-- **Đầu ra:** các metric như contributor hoạt động hằng ngày, retention theo cohort, funnel fork → PR → merge; một dashboard công khai; và sổ số đo `runs.csv` ghi lại mọi lần chạy.
+- **Input:** real hourly GitHub events; simulated app events generated from an event catalog with a schema.
+- **Processing:** a scheduled batch ELT pipeline: cleaning and PII hashing with PySpark + Delta Lake, a star schema built with dbt, with tests, contracts and anomaly alerts.
+- **Output:** metrics such as daily active contributors, cohort retention, the fork → PR → merge funnel; a public dashboard; and the measurement ledger `runs.csv` recording every run.
 
-## Kết quả dự án: trả lời câu hỏi gì
+## Project outcome: which questions it answers
 
-Gold và dashboard tập trung vào khoảng 50–150 **repo hệ data** (Spark, dbt, DuckDB, Airflow, Kafka, Trino, Delta, Iceberg, Polars, pandas…), danh sách ở seed `transform/seeds/repos_data_ecosystem.csv` kèm `category` (compute, orchestration, storage-format, warehouse, streaming, dataframe, bi). Ingest vẫn xử lý toàn bộ event GH Archive để có số quy mô (M1).
+Gold and the dashboard focus on about 50–150 **data-ecosystem repos** (Spark, dbt, DuckDB, Airflow, Kafka, Trino, Delta, Iceberg, Polars, pandas…), listed in the seed `transform/seeds/repos_data_ecosystem.csv` with a `category` (compute, orchestration, storage-format, warehouse, streaming, dataframe, bi). Ingest still processes all GH Archive events to obtain scale numbers (M1).
 
-Bộ query cố định Q1–Q6 vừa là câu hỏi dự án trả lời, vừa là bộ đo tốc độ dùng lại ở mọi lần đo:
+The fixed query set Q1–Q6 is both the questions the project answers and the speed benchmark set reused in every measurement:
 
-| Q | Câu hỏi | Mart |
+| Q | Question | Mart |
 |---|---|---|
-| Q1 | Mỗi ngày, mỗi tuần có bao nhiêu contributor hoạt động trên mỗi repo và mỗi category? Người mới so với người quay lại? | `mart_daily_active_contributors` |
-| Q2 | Retention theo cohort: trong nhóm có PR đầu tiên ở tuần W, bao nhiêu % còn hoạt động ở W+4, W+12? | `mart_cohort_retention` |
-| Q3 | Funnel fork → mở PR → PR merge; thời gian tới lần merge đầu p50/p90 | `mart_contribution_funnel` |
-| Q4 | Thời gian tới phản hồi đầu tiên cho issue/PR p50/p90; tỉ lệ đóng | `mart_responsiveness` |
-| Q5 | Bus factor: top 1–3 contributor chiếm bao nhiêu % đóng góp; tỉ lệ bot | `mart_repo_concentration` |
-| Q6 | Xếp hạng sức khoẻ các repo hệ data (điểm tổng hợp từ Q1–Q5, công thức ghi trong README) | `mart_repo_health_score` |
+| Q1 | How many contributors are active per day and per week on each repo and each category? New versus returning people? | `mart_daily_active_contributors` |
+| Q2 | Cohort retention: of the group with a first PR in week W, what % are still active at W+4, W+12? | `mart_cohort_retention` |
+| Q3 | Funnel fork → open PR → merged PR; time to first merge p50/p90 | `mart_contribution_funnel` |
+| Q4 | Time to first response for issues/PRs p50/p90; close rate | `mart_responsiveness` |
+| Q5 | Bus factor: what % of contributions the top 1–3 contributors account for; bot share | `mart_repo_concentration` |
+| Q6 | Health ranking of data-ecosystem repos (a composite score from Q1–Q5, formula in the README) | `mart_repo_health_score` |
 
-**Giá trị cho DE/DA.** DE: mỗi kỹ thuật (incremental, partition, Spark so với DuckDB, data contract, cảnh báo chất lượng) có số trước/sau đo trên cùng bộ Q1–Q6 và cùng ngày dữ liệu. DA: định nghĩa metric, cohort, funnel, dashboard công khai.
+**Value for DE/DA.** DE: each technique (incremental, partition, Spark versus DuckDB, data contract, quality alerts) has before/after numbers measured on the same Q1–Q6 set and the same data day. DA: metric definitions, cohorts, funnels, a public dashboard.
 
-**Baseline đo trước tiên (PR B, ngay sau S0.4).** Một ngày GH Archive cố định (24 file, ngày và checksum ghi trong `benchmarks/reference.toml`), pipeline ngây thơ `benchmarks/naive_duckdb.py` (DuckDB đọc thẳng `*.json.gz`, full refresh, không partition, không khử trùng) tính Q1–Q6 bằng `benchmarks/queries/q1.sql`…`q6.sql`. Đo tổng thời gian, thời gian từng query, peak RAM, dữ liệu đọc, số dòng; 5 lần lấy median; workflow `benchmark.yml` trên runner chuẩn; ghi `runs.csv` với `variant=baseline`. PR 5, 7, 10, 12 chạy lại đúng workflow này với `variant=<tên>`, README so mỗi biến thể với baseline.
+**First baseline measurement (PR B, right after S0.4).** One fixed GH Archive day (24 files, day and checksums recorded in `benchmarks/reference.toml`), the naive pipeline `benchmarks/naive_duckdb.py` (DuckDB reading `*.json.gz` directly, full refresh, no partitioning, no dedup) computes Q1–Q6 with `benchmarks/queries/q1.sql`…`q6.sql`. It measures total time, per-query time, peak RAM, data read, row counts; 5 runs, take the median; workflow `benchmark.yml` on a standard runner; writes `runs.csv` with `variant=baseline`. PRs 5, 7, 10, 12 re-run exactly this workflow with `variant=<name>`, and the README compares each variant with the baseline.
 
-Làm theo hai giai đoạn. Giai đoạn 1 chạy hoàn toàn trên dịch vụ cloud miễn phí và GitHub Actions, không cần Docker trên máy. Giai đoạn 2 chạy trên máy, thêm phần cloud miễn phí không làm được: Kafka, Trino/Hive, Airflow và thử chịu lỗi.
+Work is done in two phases. Phase 1 runs entirely on free cloud services and GitHub Actions, with no Docker on the local machine. Phase 2 runs on the local machine, adding what free cloud cannot do: Kafka, Trino/Hive, Airflow and fault-tolerance testing.
 
-## Những gì đã kiểm về dịch vụ cloud miễn phí (2026-11-10)
+## What was checked about free cloud services (2026-11-10)
 
-| Dịch vụ | Kết quả kiểm | Hệ quả cho thiết kế |
+| Service | Finding | Consequence for the design |
 |---|---|---|
-| Databricks Free Edition | Chỉ có serverless; 1 SQL warehouse cỡ 2X-Small; tối đa 5 job task đồng thời; vượt quota thì compute tắt tới hết ngày; cấm mục đích thương mại. **Tài liệu chính thức không xác nhận** việc tạo token và điều khiển từ bên ngoài (CLI, GitHub Actions); chỉ có một bài trên diễn đàn nói làm được | Bước đầu tiên là một bước thử. Không qua thì dùng đường dự phòng |
-| Databricks: truy cập internet | Bị giới hạn theo danh sách domain; chưa biết `data.gharchive.org` có tải được không | GitHub Actions tải dữ liệu rồi đẩy lên Databricks |
-| Databricks: streaming | Chỉ chạy kiểu batch (`availableNow`) | Giai đoạn 1 gọi đúng tên là "incremental batch", không gọi là real-time |
-| Databricks: dashboard | Không chia sẻ công khai được | Dashboard công khai làm bằng cách khác |
-| Airflow managed miễn phí | Không có lựa chọn miễn phí lâu dài | Giai đoạn 1 điều phối bằng GitHub Actions. Airflow để giai đoạn 2 |
-| Kafka managed miễn phí | Chỉ có trial 30 ngày, hoặc gói rất nhỏ tự tắt | Kafka để giai đoạn 2 |
-| GitHub Actions (repo public) | Miễn phí; runner 4 CPU, 16 GB RAM, 14 GB đĩa; mỗi job tối đa 6 giờ; cron ngắn nhất 5 phút, chỉ chạy trên nhánh mặc định, có thể trễ, tự tắt sau 60 ngày repo không hoạt động | Runner đủ mạnh để chạy PySpark. Đây là đường dự phòng cho Databricks |
-| MotherDuck Lite | Miễn phí lâu dài: 10 GB, 10 giờ compute mỗi tháng; dùng được với dbt qua token | Warehouse dự phòng |
-| Snowflake trial | 30 ngày, hết hạn thì khoá | Chỉ đăng ký khi pipeline đã chạy ổn |
-| Tableau Public | Đọc CSV; chỉ tự làm mới với Google Sheets; còn lại phải publish lại bằng tay | Publish bằng tay ở các mốc. Trang dashboard tự cập nhật làm bằng trang tĩnh |
+| Databricks Free Edition | Serverless only; 1 SQL warehouse of size 2X-Small; at most 5 concurrent job tasks; when the quota is exceeded compute is off until the end of the day; commercial use is forbidden. **Official documentation does not confirm** creating a token and controlling it from outside (CLI, GitHub Actions); only one forum post says it works | The first step is a probe step. If it fails, use the fallback path |
+| Databricks: internet access | Limited by a domain allow-list; unknown whether `data.gharchive.org` is reachable | GitHub Actions downloads the data and pushes it to Databricks |
+| Databricks: streaming | Runs only in batch style (`availableNow`) | Phase 1 is named honestly as "incremental batch", not real-time |
+| Databricks: dashboard | Cannot be shared publicly | The public dashboard is built another way |
+| Managed Airflow, free | No long-term free option | Phase 1 orchestrates with GitHub Actions. Airflow is left for phase 2 |
+| Managed Kafka, free | Only a 30-day trial, or a very small tier that shuts itself off | Kafka is left for phase 2 |
+| GitHub Actions (public repo) | Free; runner 4 CPU, 16 GB RAM, 14 GB disk; each job up to 6 hours; cron shortest 5 minutes, only runs on the default branch, may be delayed, turns itself off after 60 days of repo inactivity | The runner is strong enough to run PySpark. This is the fallback path for Databricks |
+| MotherDuck Lite | Free long-term: 10 GB, 10 compute hours per month; works with dbt through a token | Fallback warehouse |
+| Snowflake trial | 30 days, locked on expiry | Only sign up once the pipeline runs stably |
+| Tableau Public | Reads CSV; only refreshes itself with Google Sheets; otherwise must be republished by hand | Publish by hand at milestones. The self-updating dashboard page is a static page |
 
-## Giai đoạn 1 (cloud): thiết kế
+## Phase 1 (cloud): design
 
-**Mục tiêu:** một pipeline batch ELT chạy theo lịch trên cloud, có logging spec, data modeling, data quality, governance và dashboard, với số đo thật ghi trong `runs.csv`.
+**Goal:** a scheduled batch ELT pipeline on the cloud, with a logging spec, data modeling, data quality, governance and a dashboard, with real measurements recorded in `runs.csv`.
 
 ```
-Nguồn dữ liệu
-  GH Archive (event GitHub thật, công khai) ──┐
-  Event app mô phỏng (simkit, theo logging spec) ──┤  GitHub Actions (cron)
-  Event thật của TravelPlan (tuỳ chọn, bước cuối) ──┘        │ tải, kiểm schema, đẩy lên
+Data sources
+  GH Archive (real, public GitHub events) ──┐
+  Simulated app events (simkit, per logging spec) ──┤  GitHub Actions (cron)
+  Real TravelPlan events (optional, last step) ──┘        │ download, validate schema, push
                                                              ▼
-Bronze/Silver: PySpark + Delta Lake trên Databricks (serverless)
-   kiểu dữ liệu, khử trùng, sự kiện đến muộn, băm PII, bảng quarantine cho event sai
+Bronze/Silver: PySpark + Delta Lake on Databricks (serverless)
+   data types, dedup, late events, PII hashing, quarantine table for bad events
                                                              ▼
-Gold: dbt star schema (fct_events, dim_user SCD2, dim_repo; mart DAU, retention, funnel)
-   test, contract, kiểm độ tươi; CI chạy cùng project dbt trên DuckDB
+Gold: dbt star schema (fct_events, dim_user SCD2, dim_repo; DAU, retention, funnel marts)
+   tests, contracts, freshness checks; CI runs the same dbt project on DuckDB
                                                              ▼
-Dashboard: trang tĩnh tự cập nhật trên GitHub Pages + Tableau Public (publish tay)
-Sổ số đo: runs.csv trong repo, mỗi lần chạy một dòng
+Dashboard: self-updating static page on GitHub Pages + Tableau Public (manual publish)
+Measurement ledger: runs.csv in the repo, one row per run
 ```
 
-**Đường dự phòng nếu Databricks không điều khiển được từ ngoài:** PySpark + Delta chạy ngay trên runner của GitHub Actions (16 GB RAM), gold nằm trên MotherDuck. Khi đó vẫn dùng Spark và Delta Lake, chỉ không có Databricks; README ghi rõ điều này.
+**Fallback path if Databricks cannot be controlled from outside:** PySpark + Delta run directly on the GitHub Actions runner (16 GB RAM), with gold on MotherDuck. In that case Spark and Delta Lake are still used, only Databricks is absent; the README says this explicitly.
 
-**Những thứ cố ý không làm ở giai đoạn 1** (để giữ phạm vi gọn): agent hỏi đáp SQL, Terraform, Kafka, Airflow, Trino/Hive, thử chịu lỗi.
+**Things deliberately not done in phase 1** (to keep the scope tight): a SQL question-answering agent, Terraform, Kafka, Airflow, Trino/Hive, fault-tolerance testing.
 
-## Subplan S0: dựng repo, GitHub DevOps và harness trước khi chạy thật
+## Subplan S0: set up the repo, GitHub DevOps and harness before the real run
 
-Repo tạo bằng `gh`; harness `.claude` lấy từ TravelPlan rồi chỉnh cho Python và dbt; harness được kiểm bằng một PR mẫu đi hết vòng. S0 phải xong và báo cáo kiểm harness phải sạch thì mới làm PR 2 trở đi.
+The repo is created with `gh`; the `.claude` harness is taken from TravelPlan and adapted for Python and dbt; the harness is checked with a sample PR that goes through the full loop. S0 must be finished and the harness check report must be clean before PR 2 onward is started.
 
-### S0.1 Tạo repo
+### S0.1 Create the repo
 
-- `gh repo create tlamDson/RepoPulse --public --clone` vào `D:\Desktop\RepoPulse`, kèm mô tả và topics.
-- Git flow như TravelPlan: feature → `develop` (squash), release `develop` → `main` (merge commit). `main` là nhánh mặc định vì workflow chạy theo lịch chỉ chạy trên nhánh mặc định; pipeline bắt đầu chạy sau release. Orchestrator tự release ở các mốc sau PR B, 7, 11, 14 khi CI xanh (cập nhật 2026-11-11, thay cho "chỉ một nhánh `main`").
-- Cấu hình repo: chỉ cho squash merge, tự xoá nhánh sau merge.
-- File gốc: `README.md`, `LICENSE` (MIT), `.gitignore` (Python, dbt, `.env`, `.claude/settings.local.json`, `.claude/worktrees/`), `.gitattributes`, `.env.example`, `pyproject.toml` có khoá phiên bản.
+- `gh repo create tlamDson/RepoPulse --public --clone` into `D:\Desktop\RepoPulse`, with a description and topics.
+- Git flow as in TravelPlan: feature → `develop` (squash), release `develop` → `main` (merge commit). `main` is the default branch because scheduled workflows only run on the default branch; the pipeline starts running after release. The orchestrator releases automatically at the milestones after PR B, 7, 11, 14 when CI is green (updated 2026-11-11, replacing "a single `main` branch only").
+- Repo configuration: allow squash merge only, auto-delete branches after merge.
+- Root files: `README.md`, `LICENSE` (MIT), `.gitignore` (Python, dbt, `.env`, `.claude/settings.local.json`, `.claude/worktrees/`), `.gitattributes`, `.env.example`, `pyproject.toml` with pinned versions.
 
 ### S0.2 GitHub DevOps
 
-| Hạng mục | Làm gì |
+| Item | What to do |
 |---|---|
-| CI trên PR | `.github/workflows/ci.yml`: ruff (lint và format), pytest, `dbt build` trên DuckDB. Tên job cố định để làm check bắt buộc |
-| Bảo vệ nhánh `main` | Bắt buộc qua PR; bắt buộc các job CI xanh; cấm force push và cấm xoá nhánh; không bắt buộc người duyệt (repo một người, review do agent làm và ghi vào PR) |
-| Bảo mật | Bật secret scanning và push protection (TravelPlan đang bật); Dependabot cho `pip` và `github-actions`; workflow khai `permissions` tối thiểu, có `timeout-minutes` và `concurrency` |
-| Mẫu | Mẫu PR có mục `## Summary`, `## RED` (output test đỏ), `## Test plan`; mẫu issue cho sự cố dữ liệu |
-| GitHub Pages | Bật nguồn là GitHub Actions, để PR dashboard dùng sau |
-| Secret | Lam tự thêm bằng `gh secret set` hoặc trên web: `DATABRICKS_HOST`, `DATABRICKS_TOKEN`, `MOTHERDUCK_TOKEN`. Agent không đọc và không in giá trị |
-| pre-commit | ruff và một bộ quét secret, chạy cả ở local lẫn trong CI |
+| CI on PRs | `.github/workflows/ci.yml`: ruff (lint and format), pytest, `dbt build` on DuckDB. Fixed job names so they can be required checks |
+| `main` branch protection | Require PRs; require the CI jobs to be green; forbid force push and branch deletion; no required human approver (one-person repo, the review is done by agents and recorded in the PR) |
+| Security | Enable secret scanning and push protection (enabled on TravelPlan); Dependabot for `pip` and `github-actions`; workflows declare minimal `permissions`, with `timeout-minutes` and `concurrency` |
+| Templates | PR template with sections `## Summary`, `## RED` (red test output), `## Test plan`; an issue template for data incidents |
+| GitHub Pages | Enable GitHub Actions as the source, for the dashboard PR to use later |
+| Secrets | Lam adds them with `gh secret set` or on the web: `DATABRICKS_HOST`, `DATABRICKS_TOKEN`, `MOTHERDUCK_TOKEN`. Agents do not read or print the values |
+| pre-commit | ruff and a secret scanner, run both locally and in CI |
 
-Workflow chạy pipeline theo lịch và workflow deploy Pages thuộc PR 7 và PR 11, không làm ở S0.
+The workflow that runs the scheduled pipeline and the workflow that deploys Pages belong to PR 7 and PR 11, not done in S0.
 
-### S0.3 Cài harness `.claude` từ TravelPlan
+### S0.3 Install the `.claude` harness from TravelPlan
 
-| Từ TravelPlan | Sang RepoPulse | Điều chỉnh |
+| From TravelPlan | To RepoPulse | Adjustment |
 |---|---|---|
-| `.claude/rules/tdd.md` | Giữ | Đổi sang pytest và test của dbt; giữ Red → Green → Refactor và yêu cầu thấy đỏ thật |
-| `.claude/rules/workflow.md`, `developer-guide.md` | Giữ | Nhánh gốc là `main`; worktree mới rẽ từ `origin/main` là đúng mặc định, không cần bước `reset --hard origin/develop`; merge khi CI xanh và review PASS; cập nhật nhánh bằng `gh pr update-branch`, không rebase |
-| `.claude/rules/tech-defaults.md` | Viết mới | Stack của RepoPulse; luật "số đo chỉ lấy từ `runs.csv`"; luật ghi rõ dữ liệu mô phỏng; mục nợ kỹ thuật |
-| `.claude/agents/code-reviewer.md` | Giữ | Thêm: chạy lại test và chép output, kiểm commit đầu chỉ có test, thử mutation, kết luận PASS hoặc FAIL |
-| `.claude/agents/qa-testing.md`, `researcher.md` | Giữ | Đổi lệnh test sang Python và dbt |
-| Hook định dạng sau khi sửa file | Giữ ý tưởng | Đổi `prettier` thành `ruff format` cho file `.py` |
-| Hook âm báo (dừng, hỏi quyền, chờ nhập) | Giữ nguyên | — |
-| `.claude/commands/pr.md`, `ci-watch.md`, `scripts/ci-stop-guard.ps1` | **Không mang sang** | Cơ chế này chỉ theo dõi được một PR và bị xoá khi mở phiên mới. Phiên điều phối theo dõi CI bằng `gh pr checks --watch` |
-| `rules/design.md`, `debug-chrome-mcp.md`, các skill UI, `itinerary-builder`, `rag-destinations`, `travelplan-devops` | Không mang sang | Không liên quan tới project data |
-| `CLAUDE.md` | Viết mới | Tổng quan, lệnh hay dùng, bảng vai và model, các cổng cần Lam, trỏ tới rules |
+| `.claude/rules/tdd.md` | Keep | Switch to pytest and dbt tests; keep Red → Green → Refactor and the requirement to see a real red |
+| `.claude/rules/workflow.md`, `developer-guide.md` | Keep | The base branch is `main`; a new worktree cut from `origin/main` is the correct default, no `reset --hard origin/develop` step needed; merge when CI is green and review PASSes; update branches with `gh pr update-branch`, not rebase |
+| `.claude/rules/tech-defaults.md` | Write new | RepoPulse's stack; the rule "measurements come only from `runs.csv`"; the rule to label simulated data; the technical debt section |
+| `.claude/agents/code-reviewer.md` | Keep | Add: re-run tests and copy the output, check that the first commit contains only tests, try mutations, verdict PASS or FAIL |
+| `.claude/agents/qa-testing.md`, `researcher.md` | Keep | Switch test commands to Python and dbt |
+| Format-after-edit hook | Keep the idea | Replace `prettier` with `ruff format` for `.py` files |
+| Sound hooks (stop, permission prompt, waiting for input) | Keep as is | — |
+| `.claude/commands/pr.md`, `ci-watch.md`, `scripts/ci-stop-guard.ps1` | **Do not carry over** | This mechanism can only track one PR and is deleted when a new session opens. The orchestrating session watches CI with `gh pr checks --watch` |
+| `rules/design.md`, `debug-chrome-mcp.md`, the UI skills, `itinerary-builder`, `rag-destinations`, `travelplan-devops` | Do not carry over | Unrelated to a data project |
+| `CLAUDE.md` | Write new | Overview, frequently used commands, the roles and models table, the gates needing Lam, pointers to the rules |
 
-**File `.claude/settings.json` cần Lam cho phép rõ ràng.** Chế độ Auto chặn agent tự ghi cấu hình quyền và hook, trừ khi chính Lam viết trong tin nhắn đúng thay đổi đó. Vì vậy câu mở đầu của S0 (Lam dán) có ghi rõ: "cho phép ghi `.claude/settings.json` của repo này với danh sách allow, ask, deny và hook như trong `docs/plan.md` mục S0.3". Nội dung:
-- `allow`: `git`, `gh`, `python`, `pip`, `uv`, `pytest`, `ruff`, `dbt`, `databricks`, `duckdb`, `npm`/`npx` (cho trang dashboard), `curl` tới localhost.
-- `ask`: `gh secret *`, `gh repo delete*`, `databricks bundle destroy*`, lệnh ghi lên Snowflake.
-- `deny`: đọc `.env`, `git push` thẳng vào `main`, `git push --force`, `gh pr merge --admin`.
-- Hook: `ruff format` sau khi sửa file `.py`; ba âm báo.
-- Chế độ Auto bật bằng cờ lúc mở phiên, không đặt trong file này.
+**The file `.claude/settings.json` needs Lam's explicit permission.** Auto mode blocks agents from writing permission and hook configuration themselves, unless Lam writes exactly that change in a message. So the opening message of S0 (pasted by Lam) states: "allow writing this repo's `.claude/settings.json` with the allow, ask, deny lists and hooks as in `docs/plan.md` section S0.3". Contents:
+- `allow`: `git`, `gh`, `python`, `pip`, `uv`, `pytest`, `ruff`, `dbt`, `databricks`, `duckdb`, `npm`/`npx` (for the dashboard page), `curl` to localhost.
+- `ask`: `gh secret *`, `gh repo delete*`, `databricks bundle destroy*`, commands that write to Snowflake.
+- `deny`: reading `.env`, `git push` directly to `main`, `git push --force`, `gh pr merge --admin`.
+- Hooks: `ruff format` after editing `.py` files; three sound alerts.
+- Auto mode is enabled by a flag when opening the session, not set in this file.
 
-### S0.4 Kiểm harness bằng một PR mẫu
+### S0.4 Check the harness with a sample PR
 
-PR mẫu là thứ đằng nào cũng cần: module ghi `runs.csv` (hàm thêm một dòng số đo, có kiểm schema). Nó đi hết vòng thật:
+The sample PR is something needed anyway: the `runs.csv` writing module (a function that appends one measurement row, with schema validation). It goes through the real full loop:
 
-1. Phiên chính viết kế hoạch ngắn cho PR, có mục test phải đỏ.
-2. Subagent Opus trong worktree viết test đỏ, commit, rồi code, mở PR.
-3. CI chạy trên PR.
-4. Subagent Opus khác review: chạy lại test, thử mutation, kết luận.
-5. Phiên chính merge khi CI xanh và review PASS.
+1. The main session writes a short plan for the PR, with a section for the tests that must be red.
+2. An Opus subagent in a worktree writes the red test, commits, then writes the code and opens the PR.
+3. CI runs on the PR.
+4. A different Opus subagent reviews: re-runs the tests, tries mutations, reaches a verdict.
+5. The main session merges when CI is green and the review PASSes.
 
-Trong lúc đó ghi lại vào `docs/harness-check.md`:
+During that, record in `docs/harness-check.md`:
 
-| Kiểm | Đạt khi |
+| Check | Passes when |
 |---|---|
-| Hỏi quyền | Liệt kê mọi lần bị hỏi; mục tiêu là 0 lần ngoài các lệnh thuộc `ask` |
-| Worktree của subagent | Tạo được, đúng nhánh gốc `main`; lỗi lệch `d:`/`D:` có xảy ra không |
-| Model và effort của subagent | Đúng Opus medium và Sonnet high như đã giao |
-| Hook | `ruff format` chạy sau khi sửa file; âm báo kêu |
-| Bảo vệ nhánh | API báo `main` bắt buộc PR và bắt buộc check; push thẳng bị từ chối bởi luật `deny` |
-| CI | Đỏ trên commit chỉ có test, xanh sau khi có code |
-| Review | Reviewer chép được output test thật và bắt được mutation |
-| Secret | Push protection đang bật; file `.env` không đọc được |
+| Permission prompts | List every time a prompt appeared; the goal is 0 times outside commands in `ask` |
+| Subagent worktree | Can be created, from the correct base branch `main`; whether the `d:`/`D:` mismatch error occurs |
+| Subagent model and effort | Exactly Opus medium and Sonnet high as assigned |
+| Hook | `ruff format` runs after editing a file; the sound plays |
+| Branch protection | The API reports `main` requires PRs and checks; a direct push is rejected by the `deny` rule |
+| CI | Red on the test-only commit, green once the code exists |
+| Review | The reviewer can copy real test output and catches mutations |
+| Secret | Push protection is on; the `.env` file cannot be read |
 
-Chỗ nào không đạt thì sửa harness rồi chạy lại phần đó. Lam xem `docs/harness-check.md` trước khi cho chạy PR 2.
+Where a check fails, fix the harness and re-run that part. Lam reads `docs/harness-check.md` before letting PR 2 run.
 
-### Danh sách PR giai đoạn 1 (repo mới)
+### Phase 1 PR list (new repo)
 
-| # | Nhánh | Nội dung | Test đỏ viết trước |
+| # | Branch | Content | Red test written first |
 |---|---|---|---|
-| S0 | (subplan ở trên) | Tạo repo, DevOps, harness, PR mẫu `feature/runs-log` | Test của module `runs.csv` |
-| 1 | (bước thử, không PR) | Sau khi Lam thêm secret: từ GitHub Actions chạy thử đẩy file lên Volume, chạy một job serverless, `dbt debug` tới SQL warehouse; trong notebook thử tải `data.gharchive.org`. Ghi kết quả vào `docs/progress.md`, chọn đường chính hay đường dự phòng | — |
-| B | `feature/baseline-naive` | Ngày dữ liệu chuẩn + checksum, pipeline ngây thơ DuckDB, bộ query Q1–Q6, `benchmark.yml` (5 lần, median), ghi `runs.csv` `variant=baseline` | Parser kết quả đo đúng schema `runs.csv`; checksum sai thì dừng; Q1–Q6 trên fixture nhỏ ra đúng số tính tay |
-| 2 | `feature/event-spec` | `eventspec/`: catalog event dạng YAML sinh JSON Schema; hàm kiểm event; quy tắc khoá chống trùng | Event thiếu trường bắt buộc bị từ chối; event trùng khoá bị nhận diện |
-| 3 | `feature/simkit-generator` | `simkit/`: sinh người dùng mô phỏng theo persona, có seed; chèn 6 loại lỗi dữ liệu biết trước (trùng, null, sai kiểu, đến muộn, đổi schema, bot) | Cùng seed ra cùng dữ liệu; số lỗi chèn đúng bằng số yêu cầu |
-| 4 | `feature/ingest-gharchive` | Tải file theo giờ, lọc loại event, idempotent theo (ngày, giờ), đẩy lên vùng landing; workflow cron | Chạy lại cùng giờ không sinh bản ghi trùng |
-| 5 | `feature/bronze-silver-spark` | Job PySpark: bronze raw, silver có kiểu, khử trùng, cửa sổ đến muộn, băm PII trước silver, quarantine | Test PySpark trên dữ liệu nhỏ: trùng bị loại, email không còn dạng thô, event sai vào quarantine |
-| 6 | `feature/dbt-star-schema` | Project dbt: staging, marts, `dim_user` SCD2, mart DAU, retention, funnel; test, contract, unit test | `dbt build` trên DuckDB đỏ khi vi phạm contract |
-| 7 | `feature/incremental-and-schedule` | Model incremental thay full refresh; workflow chạy theo lịch nối ingest, job Spark, `dbt build`; ghi `runs.csv` | So khớp số dòng giữa incremental và full refresh trên fixture |
-| 8 | `feature/data-quality-alerts` | Chạy bộ lỗi chèn qua pipeline; phát hiện bất thường về khối lượng và độ tươi; cảnh báo bằng GitHub Issue | Mỗi loại lỗi có test bắt được; chạy sạch không báo động |
-| 9 | `feature/governance` | Phân quyền theo vai, gắn nhãn cột PII, che cột; kiểm tự động rằng gold không chứa email thô. Dùng Unity Catalog nếu Free Edition có (chưa kiểm), không thì làm ở tầng dbt | Test tìm email thô trong gold phải đỏ khi cố ý bỏ bước băm |
-| 10 | `feature/query-optimization` | Đo query dashboard trước và sau khi partition và clustering; ghi số | Parser kết quả đo ra đúng schema |
-| 11 | `feature/dashboard-site` | Trang tĩnh trên GitHub Pages đọc dữ liệu gold đã tổng hợp, tự cập nhật sau mỗi lần chạy; xuất CSV cho Tableau | Build trang thất bại khi thiếu mart |
-| 12 | `feature/spark-vs-duckdb-benchmark` | Chạy cùng phép biến đổi bằng PySpark và DuckDB ở 1, 7, 30 ngày dữ liệu trên runner | Parser benchmark |
-| 13 | `feature/snowflake-port` | Chạy cùng project dbt trên Snowflake trial; ghi thời gian, số dòng phải sửa | `dbt build` profile Snowflake trong workflow chạy tay |
-| 14 | `docs/results` | README có bảng kết quả lấy từ `runs.csv`, sơ đồ, quyết định thiết kế | — |
+| S0 | (subplan above) | Create the repo, DevOps, harness, sample PR `feature/runs-log` | Tests of the `runs.csv` module |
+| 1 | (probe step, no PR) | After Lam adds the secrets: from GitHub Actions try pushing a file to a Volume, run a serverless job, `dbt debug` to the SQL warehouse; in a notebook try downloading `data.gharchive.org`. Record the result in `docs/progress.md`, choose the primary or fallback path | — |
+| B | `feature/baseline-naive` | Reference data day + checksum, naive DuckDB pipeline, the Q1–Q6 query set, `benchmark.yml` (5 runs, median), writes `runs.csv` `variant=baseline` | The measurement-result parser matches the `runs.csv` schema; a wrong checksum stops the run; Q1–Q6 on a small fixture give hand-computed numbers |
+| 2 | `feature/event-spec` | `eventspec/`: YAML event catalog generating JSON Schema; event validation function; dedup key rules | An event missing a required field is rejected; an event with a duplicate key is recognized |
+| 3 | `feature/simkit-generator` | `simkit/`: generates simulated users by persona, with a seed; injects 6 known data fault types (duplicate, null, wrong type, late, schema change, bot) | The same seed gives the same data; the number of faults injected equals the number requested |
+| 4 | `feature/ingest-gharchive` | Download files by hour, filter event types, idempotent by (date, hour), push to the landing zone; cron workflow | Re-running the same hour does not create duplicate records |
+| 5 | `feature/bronze-silver-spark` | PySpark job: raw bronze, typed silver, dedup, late-arrival window, PII hashing before silver, quarantine | PySpark tests on small data: duplicates dropped, emails no longer raw, bad events go to quarantine |
+| 6 | `feature/dbt-star-schema` | dbt project: staging, marts, `dim_user` SCD2, DAU, retention and funnel marts; tests, contracts, unit tests | `dbt build` on DuckDB is red when a contract is violated |
+| 7 | `feature/incremental-and-schedule` | Incremental models instead of full refresh; a scheduled workflow chaining ingest, the Spark job, `dbt build`; writes `runs.csv` | Row counts match between incremental and full refresh on a fixture |
+| 8 | `feature/data-quality-alerts` | Run the injected-fault set through the pipeline; detect volume and freshness anomalies; alert via GitHub Issue | Each fault type has a test that catches it; a clean run raises no alarm |
+| 9 | `feature/governance` | Role-based permissions, PII column labels, column masking; an automatic check that gold contains no raw email. Use Unity Catalog if Free Edition has it (not yet checked), otherwise do it in the dbt layer | The test looking for raw email in gold must be red when the hashing step is deliberately removed |
+| 10 | `feature/query-optimization` | Measure the dashboard queries before and after partitioning and clustering; record the numbers | The measurement-result parser matches the schema |
+| 11 | `feature/dashboard-site` | A static GitHub Pages site reading aggregated gold data, self-updating after every run; export CSVs for Tableau | The site build fails when a mart is missing |
+| 12 | `feature/spark-vs-duckdb-benchmark` | Run the same transformation with PySpark and DuckDB at 1, 7, 30 days of data on the runner | Benchmark parser |
+| 13 | `feature/snowflake-port` | Run the same dbt project on the Snowflake trial; record time and the number of lines to change | `dbt build` with the Snowflake profile in a manually run workflow |
+| 14 | `docs/results` | README with a results table taken from `runs.csv`, diagrams, design decisions | — |
 
-Một PR ở **repo TravelPlan** (tuỳ chọn, làm riêng bên đó) để có event thật của một app:
+One PR in the **TravelPlan repo** (optional, done separately there) to get real events from an app:
 
-| Nhánh | Nội dung |
+| Branch | Content |
 |---|---|
-| `feature/product-event-logging` | SDK ghi event ở client và server theo đúng catalog của `eventspec`; endpoint nhận event có kiểm schema; lưu vào một collection Mongo có hạn; đo độ phủ hành động quan trọng. Sau đó một workflow ở RepoPulse xuất event thật mỗi ngày (cần Lam thêm secret chỉ đọc) |
+| `feature/product-event-logging` | An SDK that logs events on client and server following the `eventspec` catalog; an endpoint that receives events with schema validation; storage in a capped Mongo collection; measuring coverage of key actions. Afterwards a workflow in RepoPulse exports the real events daily (needs Lam to add a read-only secret) |
 
-### Số đo giai đoạn 1
+### Phase 1 measurements
 
-| ID | Số đo | Điều kiện | Baseline |
+| ID | Measurement | Conditions | Baseline |
 |---|---|---|---|
-| M1 | Số event và dung lượng đã xử lý | Đếm ở bronze, silver, gold | Số quy mô |
-| M2 | Thời gian build khi thêm một ngày dữ liệu | Median 5 lần | Full refresh (`variant=baseline`) |
-| M3 | Độ tươi dữ liệu p50/p95 | ≥168 lần chạy theo lịch. Chạy trên cloud nên tự tích luỹ, không cần máy Lam | Mục tiêu đặt trước |
-| M4 | Số lỗi chèn vào bị bắt; số báo động giả | 6 loại lỗi; N lần chạy sạch | Không có test: 0 |
-| M5 | Điểm giao nhau Spark và DuckDB | 1, 7, 30 ngày; 3 lần mỗi mức | DuckDB |
-| M7 | Port sang Snowflake: số dòng sửa, thời gian | Cùng `dbt build` | Bản chính |
-| M9 | Tỉ lệ event bị loại vì sai schema; tỉ lệ trùng | Event mô phỏng (ghi rõ là mô phỏng) và event thật nếu có | Trước khi có spec |
-| M10 | p50 thời gian query và lượng dữ liệu quét | Bộ Q1–Q6, 10 lần | Bảng chưa partition (`variant=baseline`) |
+| M1 | Number of events and size processed | Counted at bronze, silver, gold | Scale figures |
+| M2 | Build time when adding one day of data | Median of 5 | Full refresh (`variant=baseline`) |
+| M3 | Data freshness p50/p95 | ≥168 scheduled runs. Runs on the cloud so it accumulates on its own, no need for Lam's machine | A target set in advance |
+| M4 | Injected faults caught; number of false alarms | 6 fault types; N clean runs | No tests: 0 |
+| M5 | Spark and DuckDB crossover point | 1, 7, 30 days; 3 runs per level | DuckDB |
+| M7 | Port to Snowflake: lines changed, time | Same `dbt build` | The primary version |
+| M9 | Share of events dropped for schema errors; duplicate rate | Simulated events (clearly labeled simulated) and real events if any | Before the spec exists |
+| M10 | p50 query time and data scanned | The Q1–Q6 set, 10 runs | Unpartitioned table (`variant=baseline`) |
 
-## Plan v2 (2026-11-11): so sánh hai đường, mở rộng engine, giai đoạn 2, AI
+## Plan v2 (2026-11-11): comparing two paths, widening engines, phase 2, AI
 
-Giai đoạn 1 đã xong (16/16 việc, release #45). Lần chạy lại probe với token đúng ([run 43104609971](https://github.com/tlamDson/RepoPulse/actions/runs/43104609971), 2026-11-11) cho kết quả `primary`: cả 9 bước đều pass. `docs/probe-result.md` hiện vẫn ghi lần thử đầu (`fallback`, lỗi 401); việc D4 cập nhật file đó cùng bảng so sánh. Plan v2 đo hai đường đối đầu, rồi chọn đường chính theo một luật đã ghi **trước khi đo**. Ngoài ra nó thêm ma trận engine, Iceberg so với Delta, giai đoạn 2 và một SQL agent chạy bằng model local. Chủ repo đã chốt ngày 2026-11-11: mọi thứ phải miễn phí, giai đoạn 2 chạy trên runner GitHub Actions, orchestrator chạy tới hết quota.
+Phase 1 is done (16/16 tasks, release #45). Re-running the probe with the correct token ([run 43104609971](https://github.com/tlamDson/RepoPulse/actions/runs/43104609971), 2026-11-11) gave `primary`: all 9 steps pass. `docs/probe-result.md` still recorded the first attempt (`fallback`, 401 error); task D4 updates that file together with the comparison table. Plan v2 measures the two paths against each other, then chooses the primary path by a rule written down **before measuring**. It also adds an engine matrix, Iceberg versus Delta, phase 2 and a SQL agent running a local model. The repo owner settled on 2026-11-11: everything must be free, phase 2 runs on GitHub Actions runners, and the orchestrator runs until the quota is exhausted.
 
-### Luật chọn đường chính (chốt trước khi đo, PR D4 áp dụng y nguyên)
+### Primary-path selection rule (fixed before measuring, applied exactly as is by PR D4)
 
-Gọi A là runner + MotherDuck (đường hiện tại), B là Databricks serverless + SQL warehouse. Mỗi đường chạy cùng pipeline end-to-end (ingest → bronze/silver → gold → bộ Q1–Q6) trên cùng dữ liệu, đủ số lần chạy theo lịch để có p50 và tỉ lệ thành công.
+Call A runner + MotherDuck (the current path), and B Databricks serverless + SQL warehouse. Each path runs the same end-to-end pipeline (ingest → bronze/silver → gold → the Q1–Q6 set) on the same data, with enough scheduled runs to have a p50 and a success rate.
 
-1. Loại đường nào **không chạy đủ 24 lần/ngày trong quota miễn phí**, hoặc có **tỉ lệ thành công < 95%**.
-2. Trong các đường còn lại, chọn đường có **p50 thời gian end-to-end nhỏ hơn**.
-3. Nếu hai đường chênh nhau **dưới 10%**, giữ đường hiện tại (A).
+1. Drop any path that **does not run the full 24 times/day within the free quota** (`24 lần/ngày` in the original Vietnamese), or that has a **success rate < 95%**.
+2. Among the remaining paths, choose the one with the **lower end-to-end p50 time**.
+3. If the two paths differ by **less than 10%**, keep the current path (A).
 
-D4 ghi bảng số liệu, luật và kết luận vào `docs/probe-result.md`. Bảng chỉ dùng số trong `runs.csv`. D4 chỉ đổi `pipeline.yml` khi luật nói đổi.
+D4 records the data table, the rule and the conclusion in `docs/probe-result.md`. The table only uses numbers in `runs.csv`. D4 changes `pipeline.yml` only when the rule says to switch.
 
-### Các việc (DAG ở `scripts/prs.toml`)
+### Tasks (DAG in `scripts/prs.toml`)
 
-| Việc | Nhánh | Nội dung | Test đỏ viết trước | Số đo vào `runs.csv` |
+| Task | Branch | Content | Red test written first | Measurement into `runs.csv` |
 |---|---|---|---|---|
-| D1 | `feature/databricks-bronze-silver` | Job bronze/silver chạy serverless trên Databricks: Delta trong Unity Catalog, dùng chung logic với `repopulse/spark/`, nạp bằng Files API + Jobs API từ GitHub Actions | Logic gọi API (mock HTTP): dựng payload job, retry, idempotent theo (ngày, giờ) | `variant=databricks-bronze-silver` |
-| D2 | `feature/dbt-databricks-target` | Target `databricks` đã có trong `transform/profiles.yml` (probe dùng nó cho `dbt debug`). Việc này dựng **phần gold còn thiếu** trên SQL warehouse: nguồn đọc từ bảng silver Delta của D1 (Unity Catalog), macro khác dialect (ngày giờ, mảng) chạy được trên cả DuckDB và Databricks, workflow chạy `dbt build --target databricks` | Test macro dialect trên DuckDB đỏ trước; unit test dbt khẳng định mart cho cùng kết quả trên fixture ở cả hai adapter | `variant=dbt-build-databricks` |
-| D3 | `feature/pipeline-path-comparison` | Workflow chạy A và B end-to-end theo lịch, ghi thời gian từng bước, thời gian khởi động/xếp hàng, kết quả thành công; script tổng hợp p50/p95 và tỉ lệ thành công | Parser và hàm tổng hợp trên fixture | `variant=path-a-runner`, `variant=path-b-databricks` |
-| D4 | `feature/primary-path-switch` | Áp luật chọn ở trên; cập nhật `docs/probe-result.md`; đổi `pipeline.yml` nếu luật nói đổi | Hàm luật chọn (thuần) trên các bộ số mẫu, gồm cả trường hợp chênh dưới 10% | — |
-| E1 | `feature/engine-matrix` | Cùng bộ Q1–Q6 trên DuckDB, Spark trên runner, Databricks serverless, Databricks SQL, MotherDuck, Snowflake (lấy lại số đã có). README sinh một bảng duy nhất | Parser ma trận; cảnh báo khi thiếu engine | `variant=matrix-<engine>` |
-| E2 | `feature/iceberg-vs-delta` | Cùng dữ liệu ghi bằng Delta và Apache Iceberg (PySpark trên runner): ghi, đọc Q1–Q6, MERGE, time travel | Trên fixture nhỏ: số dòng và kết quả Q1–Q6 bằng nhau giữa Delta và Iceberg; MERGE chạy lại không sinh trùng (idempotent); time travel đọc đúng phiên bản trước MERGE | `variant=format-delta`, `variant=format-iceberg` |
-| P2a | `feature/streaming-kafka` | **Apache Kafka** 3 broker chế độ KRaft (image chính thức `apache/kafka`, không ZooKeeper) làm Docker service trong workflow; producer phát event GH Archive của ngày chuẩn vào topic có N partition; Spark Structured Streaming đọc Kafka, ghi Delta (checkpoint, exactly-once tới sink); đối chiếu số dòng với batch | Producer/consumer trên fixture; đối chiếu đếm | `variant=streaming-throughput-p<N>` |
-| P2b | `feature/streaming-fault-tolerance` | Kill một broker và một consumer giữa chừng; đo số event mất, trùng, thời gian phục hồi | Hàm đối soát mất/trùng | `variant=streaming-fault-<case>` |
-| P2c | `feature/trino-hive` | Trino + Hive Metastore + MinIO làm Docker service; gold dạng Hive-partitioned; Q1–Q6 trên Trino trước và sau tối ưu | Sinh DDL partition; parser kết quả | `variant=trino-<layout>` |
-| P2d | `feature/airflow-dags` | Airflow standalone trong workflow; DAG có backfill, retry, SLA thay cho cron; đo backfill N ngày | DAG import được, không lỗi chu trình; thứ tự task | `variant=airflow-backfill-<N>d` |
-| AI1 | `feature/dbt-semantic-layer` | Semantic model và metric (MetricFlow) cho Q1–Q6 trên gold public | `dbt parse` kiểm semantic manifest; metric khớp SQL của Q1–Q6 trên fixture | — |
-| AI2 | `feature/sql-agent` | SQL agent gọi qua API OpenAI-compatible (`base_url` và model là cấu hình): chỉ đọc schema `public`, chặn mọi câu lệnh ghi, giới hạn số dòng; bộ câu hỏi đánh giá có đáp án; CI dùng LLM giả lập | Chặn câu lệnh ghi; sinh và chạy SQL với LLM giả; chấm đáp án | — (đo ở AI3) |
-| R2 | `docs/results-v2` | README kết quả v2 sinh từ `runs.csv`: bảng hai đường, ma trận engine, Iceberg/Delta, giai đoạn 2, agent | Generator báo lỗi khi thiếu biến thể | — |
+| D1 | `feature/databricks-bronze-silver` | A bronze/silver job running serverless on Databricks: Delta in Unity Catalog, sharing logic with `repopulse/spark/`, loaded with the Files API + Jobs API from GitHub Actions | API-calling logic (mock HTTP): building the job payload, retry, idempotent by (date, hour) | `variant=databricks-bronze-silver` |
+| D2 | `feature/dbt-databricks-target` | The `databricks` target already exists in `transform/profiles.yml` (the probe uses it for `dbt debug`). This task builds the **missing gold part** on the SQL warehouse: a source reading D1's Delta silver table (Unity Catalog), dialect-specific macros (datetime, arrays) that work on both DuckDB and Databricks, and a workflow running `dbt build --target databricks` | Dialect macro tests on DuckDB red first; a dbt unit test asserts the marts give the same result on the fixture on both adapters | `variant=dbt-build-databricks` |
+| D3 | `feature/pipeline-path-comparison` | A workflow running A and B end to end on a schedule, recording per-step time, startup/queueing time and success outcome; a script aggregating p50/p95 and success rate | Parser and aggregation function on a fixture | `variant=path-a-runner`, `variant=path-b-databricks` |
+| D4 | `feature/primary-path-switch` | Apply the selection rule above; update `docs/probe-result.md`; change `pipeline.yml` if the rule says to switch | The (pure) selection rule function on sample number sets, including the case with a gap under 10% | — |
+| E1 | `feature/engine-matrix` | The same Q1–Q6 set on DuckDB, Spark on the runner, Databricks serverless, Databricks SQL, MotherDuck, Snowflake (reusing the existing numbers). The README generates a single table | Matrix parser; a warning when an engine is missing | `variant=matrix-<engine>` |
+| E2 | `feature/iceberg-vs-delta` | The same data written with Delta and Apache Iceberg (PySpark on the runner): write, read Q1–Q6, MERGE, time travel | On a small fixture: row counts and Q1–Q6 results equal between Delta and Iceberg; re-running MERGE creates no duplicates (idempotent); time travel reads the version before the MERGE correctly | `variant=format-delta`, `variant=format-iceberg` |
+| P2a | `feature/streaming-kafka` | **Apache Kafka** 3 brokers in KRaft mode (official `apache/kafka` image, no ZooKeeper) as a Docker service in the workflow; a producer emits the reference day's GH Archive events into a topic with N partitions; Spark Structured Streaming reads Kafka and writes Delta (checkpoint, exactly-once to the sink); reconcile row counts against batch | Producer/consumer on a fixture; count reconciliation | `variant=streaming-throughput-p<N>` |
+| P2b | `feature/streaming-fault-tolerance` | Kill a broker and a consumer midway; measure the number of events lost, duplicated, and recovery time | Loss/duplicate reconciliation function | `variant=streaming-fault-<case>` |
+| P2c | `feature/trino-hive` | Trino + Hive Metastore + MinIO as Docker services; gold in Hive-partitioned form; Q1–Q6 on Trino before and after optimization | Partition DDL generation; result parser | `variant=trino-<layout>` |
+| P2d | `feature/airflow-dags` | Airflow standalone in a workflow; a DAG with backfill, retry, SLA in place of cron; measure an N-day backfill | DAG imports with no cycle errors; task order | `variant=airflow-backfill-<N>d` |
+| AI1 | `feature/dbt-semantic-layer` | Semantic models and metrics (MetricFlow) for Q1–Q6 on gold public | `dbt parse` checks the semantic manifest; metrics match the Q1–Q6 SQL on a fixture | — |
+| AI2 | `feature/sql-agent` | A SQL agent calling through an OpenAI-compatible API (`base_url` and model are configuration): reads the `public` schema only, blocks every write statement, limits row count; an evaluation question set with answers; CI uses a mock LLM | Blocking write statements; generating and running SQL with a mock LLM; scoring answers | — (measured in AI3) |
+| R2 | `docs/results-v2` | README results v2 generated from `runs.csv`: two-path table, engine matrix, Iceberg/Delta, phase 2, the agent | The generator raises an error when a variant is missing | — |
 
-**AI3, chạy tay trên máy chủ repo, không qua orchestrator:** model `Qwen3.6-35B-A3B` (GGUF 18 GB) không chạy được trên runner. Sau khi AI2 merge, phiên chính xin phép chủ repo, rồi bật `llama-server` cục bộ và chạy bộ đánh giá. Độ chính xác và thời gian mỗi câu ghi vào `runs.csv` với `variant=sql-agent-qwen3.6-35b-a3b`, đưa vào qua một PR.
+**AI3, run by hand on the repo owner's machine, not through the orchestrator:** the model `Qwen3.6-35B-A3B` (GGUF 18 GB) cannot run on a runner. After AI2 merges, the main session asks the repo owner for permission, then starts a local `llama-server` and runs the evaluation set. Accuracy and time per question are recorded in `runs.csv` with `variant=sql-agent-qwen3.6-35b-a3b`, brought in through a PR.
 
-### Ràng buộc
+### Constraints
 
-- **Chỉ dịch vụ miễn phí:** Databricks Free Edition (quota theo ngày, tối đa 5 job chạy cùng lúc), MotherDuck Lite, Snowflake trial không thẻ, runner GitHub Actions (job ≤ 6 giờ, 16 GB RAM, 14 GB đĩa). Không dùng API LLM trả phí.
-- **Giai đoạn 2 chạy trên runner:** dùng `services:` hoặc `docker compose` trong workflow chạy tay hay theo lịch, không chạy trên máy chủ repo.
-- **Số đo chỉ lấy từ `runs.csv`:** mọi tối ưu so với `variant=baseline` trên cùng ngày dữ liệu và cùng bộ Q1–Q6.
+- **Free services only:** Databricks Free Edition (daily quota, at most 5 jobs at the same time), MotherDuck Lite, a Snowflake trial without a card, GitHub Actions runners (job ≤ 6 hours, 16 GB RAM, 14 GB disk). No paid LLM API.
+- **Phase 2 runs on runners:** use `services:` or `docker compose` in a manually run or scheduled workflow, not on the repo owner's machine.
+- **Measurements come only from `runs.csv`:** every optimization is compared with `variant=baseline` on the same data day and the same Q1–Q6 set.
 
-Plan v2 là phần mở rộng. Bỏ đi cũng không ảnh hưởng kết quả của giai đoạn 1.
+Plan v2 is an extension. Dropping it would not affect the results of phase 1.
 
-## Việc Lam cần làm
+## Tasks for Lam
 
-**Trước khi bắt đầu (khoảng 30 phút):**
+**Before starting (about 30 minutes):**
 
-| # | Việc | Ghi chú |
+| # | Task | Notes |
 |---|---|---|
-| 1 | Tên project đã chốt: **RepoPulse** | Agent tạo repo public `tlamDson/RepoPulse` bằng `gh` và clone về `D:\Desktop\RepoPulse` |
-| 2 | Đăng ký Databricks Free Edition | Không cần thẻ |
-| 3 | Đăng ký MotherDuck Lite | Dự phòng; không cần thẻ |
-| 4 | Đăng ký Tableau Public và cài Tableau Desktop Public Edition | Dùng ở bước dashboard |
-| 5 | Sau S0: thêm secret vào repo (token và host của Databricks, token MotherDuck) | Lam tự thêm; agent không cần thấy giá trị |
-| 6 | Xem `docs/harness-check.md` rồi cho chạy tiếp | Cổng duy nhất giữa S0 và phần còn lại |
+| 1 | The project name is settled: **RepoPulse** | The agent creates the public repo `tlamDson/RepoPulse` with `gh` and clones it into `D:\Desktop\RepoPulse` |
+| 2 | Sign up for Databricks Free Edition | No card needed |
+| 3 | Sign up for MotherDuck Lite | Fallback; no card needed |
+| 4 | Sign up for Tableau Public and install Tableau Desktop Public Edition | Used in the dashboard step |
+| 5 | After S0: add secrets to the repo (Databricks token and host, MotherDuck token) | Lam adds them himself; the agent does not need to see the values |
+| 6 | Read `docs/harness-check.md`, then let the run continue | The only gate between S0 and the rest |
 
-**Trong lúc chạy:**
-- Đăng ký Snowflake trial **khi agent báo tới PR 13**, vì đồng hồ 30 ngày tính ngay.
-- Publish dashboard lên Tableau Public (khoảng 30–60 phút, một lần).
-- Thêm secret chỉ đọc tới Mongo staging nếu muốn có event thật của TravelPlan.
+**While running:**
+- Sign up for the Snowflake trial **when the agent reports it has reached PR 13**, because the 30-day clock starts immediately.
+- Publish the dashboard to Tableau Public (about 30–60 minutes, once).
+- Add a read-only secret to the Mongo staging if real TravelPlan events are wanted.
 
-## Cách chạy
+## How to run
 
-**Cập nhật 2026-11-11:** chạy headless bằng `scripts/orchestrate.py` (DAG ở `scripts/prs.toml`, mỗi PR một phiên `claude -p` trong worktree riêng, tối đa 5 song song (trước đây 2), agent chuyên trách theo mảng, tự chờ quota, tự release). Cách dùng: `docs/kickoff.md`. Mô tả cũ bên dưới giữ để tham khảo vai trò.
+**Updated 2026-11-11:** run headless with `scripts/orchestrate.py` (DAG in `scripts/prs.toml`, one `claude -p` session per PR in its own worktree, up to 5 in parallel (previously 2), specialist agents per area, automatic quota waiting, automatic release). Usage: `docs/kickoff.md`. The old description below is kept for reference on the roles.
 
-- **Phiên chính Fable (effort high):** viết kế hoạch ngắn cho từng PR có mục test phải đỏ, giao việc, quyết định merge, ghi `docs/progress.md`.
-- **Subagent Opus (effort medium):** mỗi PR một agent trong worktree riêng, viết test đỏ rồi code; một agent Opus khác review có bằng chứng.
-- **Subagent Sonnet (effort high):** lint, cập nhật nhánh, chép bằng chứng, PR chỉ có dữ liệu.
-- Merge khi CI xanh và review PASS. Dừng khi mọi việc còn lại chờ Lam, và in checklist.
+- **Main Fable session (effort high):** writes a short plan for each PR with a section for tests that must be red, assigns the work, decides merges, writes `docs/progress.md`.
+- **Opus subagent (effort medium):** one agent per PR in its own worktree, writing the red test then the code; a different Opus agent reviews with evidence.
+- **Sonnet subagent (effort high):** lint, branch updates, copying evidence, data-only PRs.
+- Merge when CI is green and the review PASSes. Stop when everything remaining is waiting on Lam, and print the checklist.
 
-Vì mọi thứ nặng chạy trên GitHub Actions và Databricks, máy Lam chỉ chạy unit test nhỏ. Không cần Docker.
+Since everything heavy runs on GitHub Actions and Databricks, Lam's machine only runs small unit tests. No Docker needed.
 
-## Thứ tự làm S0
+## Order of S0
 
-1. **S0.1:** tạo repo public `tlamDson/RepoPulse` bằng `gh`, đặt cấu hình merge, commit đầu gồm file gốc và tài liệu trong `docs/`.
-2. **S0.2:** PR `chore/devops-bootstrap` (CI, mẫu PR, Dependabot, pre-commit, khung Python và dbt). Sau khi merge thì bật bảo vệ nhánh `main` và các cài đặt bảo mật.
-3. **S0.3:** PR `chore/claude-harness` (rules, agents, `CLAUDE.md`, `.claude/settings.json`). PR này **để mở cho chủ repo duyệt**.
-4. **S0.4:** PR mẫu `feature/runs-log`, làm trong một phiên Claude Code mở tại repo này để harness được nạp và kiểm đúng nơi nó chạy. Câu mở đầu nằm ở `docs/kickoff.md`.
+1. **S0.1:** create the public repo `tlamDson/RepoPulse` with `gh`, set the merge configuration, and make the first commit with the root files and the documentation in `docs/`.
+2. **S0.2:** PR `chore/devops-bootstrap` (CI, PR template, Dependabot, pre-commit, Python and dbt skeleton). After the merge, enable `main` branch protection and the security settings.
+3. **S0.3:** PR `chore/claude-harness` (rules, agents, `CLAUDE.md`, `.claude/settings.json`). This PR is **left open for the repo owner to review**.
+4. **S0.4:** the sample PR `feature/runs-log`, done in a Claude Code session opened in this repo so the harness is loaded and checked where it actually runs. The opening message is in `docs/kickoff.md`.
 
-## Kiểm chứng
+## Verification
 
-- **Bước 1 (bước thử)** quyết định đường chính hay dự phòng; kết quả ghi vào `docs/progress.md` trước khi làm PR 4. Cập nhật 2026-11-11: bước thử làm qua PR `docs/probe-result`, kết quả ở [`probe-result.md`](probe-result.md) — chọn **đường dự phòng**; Databricks chưa kiểm được vì token đang lưu không phải personal access token.
-- Mỗi PR: CI xanh (lint, test, `dbt build` trên DuckDB), có output test đỏ trong mô tả PR, review PASS.
-- Pipeline: workflow theo lịch chạy xanh nhiều ngày liền; `runs.csv` tăng dòng; trang GitHub Pages cập nhật.
-- Chạy lại cùng một giờ dữ liệu không sinh bản ghi trùng.
-- README chỉ trích số có trong `runs.csv`.
+- **Step 1 (the probe step)** decides the primary or fallback path; the result is recorded in `docs/progress.md` before PR 4. Updated 2026-11-11: the probe step was done through the PR `docs/probe-result`, with the result in [`probe-result.md`](probe-result.md) — it chose the **fallback path**; Databricks could not be checked because the stored token was not a personal access token.
+- Each PR: green CI (lint, tests, `dbt build` on DuckDB), red test output in the PR description, review PASS.
+- Pipeline: the scheduled workflow runs green for many days in a row; `runs.csv` gains rows; the GitHub Pages site updates.
+- Re-running the same data hour creates no duplicate records.
+- The README only quotes numbers present in `runs.csv`.
 
-## Rủi ro và điều chưa kiểm chứng
+## Risks and unverified items
 
-| Rủi ro | Xử lý |
+| Risk | Handling |
 |---|---|
-| Databricks Free Edition không cho điều khiển từ ngoài | Đường dự phòng: PySpark trên runner + MotherDuck; README ghi rõ không dùng Databricks |
-| Vượt quota Databricks trong ngày | Lịch chạy thưa (vài giờ một lần), job idempotent để hôm sau chạy bù |
-| Tài khoản Databricks bị xoá vì lâu không dùng | Code và dữ liệu gold đã tổng hợp luôn có bản trong repo |
-| Cron GitHub Actions trễ, hoặc tự tắt sau 60 ngày không hoạt động | Ghi thời điểm chạy thật vào `runs.csv`; M3 báo đúng độ trễ đo được |
-| Đĩa runner chỉ 14 GB | Mỗi lần chạy chỉ xử lý vài giờ dữ liệu; lọc loại event trước khi lưu |
-| Dữ liệu app là mô phỏng | README và mọi báo cáo ghi rõ "simulated"; GH Archive là dữ liệu thật |
-| GH Archive gần đây thiếu không đều (đo ngày 2026-11-11, file giờ 12:00) | Có giờ đủ: 2026-10-25 có 81.569 event, 82% PushEvent. Có giờ mất hẳn PushEvent, CreateEvent, DeleteEvent: 2026-10-15, 2026-11-03 (3.398 event), 2026-11-09, 2026-11-10; dung lượng 2,8–15 MB/giờ. Khối lượng cũng giảm dần theo năm: 2024-01 là 123 MB/giờ, 2025-06 là 85 MB/giờ, 2026-06 là 21 MB/giờ. Hệ quả: (1) PR B chọn ngày chuẩn là ngày đủ 24 giờ có PushEvent, kiểm bằng script và ghi tiêu chí vào `benchmarks/reference.toml`; (2) PR 12 đo Spark và DuckDB ở 1, 7, 30 ngày trên dữ liệu năm 2024–2025, khi đó một ngày khoảng 2–3 GB, vừa đĩa 14 GB; (3) Q1–Q6 dựa trên PR, issue, review, comment, fork, watch là những loại luôn có, không dựa vào PushEvent; (4) PR 8 dùng chính các giờ thiếu dữ liệu này làm bất thường thật cho phần phát hiện khối lượng. |
+| Databricks Free Edition does not allow control from outside | Fallback path: PySpark on the runner + MotherDuck; the README states clearly that Databricks is not used |
+| Exceeding the Databricks quota in a day | A sparse schedule (once every few hours), idempotent jobs so the next day can catch up |
+| The Databricks account is deleted for long inactivity | The code and the aggregated gold data always have a copy in the repo |
+| GitHub Actions cron delayed, or turned off after 60 days of inactivity | Record the real run time in `runs.csv`; M3 reports the measured delay accurately |
+| The runner disk is only 14 GB | Each run processes only a few hours of data; filter event types before storing |
+| App data is simulated | The README and every report state "simulated" clearly; GH Archive is real data |
+| Recent GH Archive is missing data unevenly (measured 2026-11-11, the 12:00 hour file) | There are complete hours: 2026-10-25 has 81,569 events, 82% PushEvent. There are hours that completely lack PushEvent, CreateEvent, DeleteEvent: 2026-10-15, 2026-11-03 (3,398 events), 2026-11-09, 2026-11-10; size 2.8–15 MB/hour. Volume has also been declining year by year: 2024-01 is 123 MB/hour, 2025-06 is 85 MB/hour, 2026-06 is 21 MB/hour. Consequences: (1) PR B chooses a reference day on which all 24 hours have PushEvent, checked by a script, with the criteria recorded in `benchmarks/reference.toml`; (2) PR 12 measures Spark and DuckDB at 1, 7, 30 days on 2024–2025 data, when one day is about 2–3 GB, fitting the 14 GB disk; (3) Q1–Q6 rely on PRs, issues, reviews, comments, forks, watches, which are always present, and do not rely on PushEvent; (4) PR 8 uses these very data-poor hours as real anomalies for the volume detection part. |
 
-**Chưa kiểm chứng:** token và CLI trên Free Edition; `data.gharchive.org` có nằm trong danh sách domain được phép không; dung lượng Volume; Free Edition có phân quyền, che cột và lineage của Unity Catalog không; con số quota theo ngày; số credit của Snowflake trial; thời gian mỗi PR ở repo mới.
+**Not yet verified:** tokens and the CLI on Free Edition; whether `data.gharchive.org` is on the allowed domain list; Volume capacity; whether Free Edition has Unity Catalog permissions, column masking and lineage; the daily quota figures; the number of credits in the Snowflake trial; the time each PR takes in a new repo.
