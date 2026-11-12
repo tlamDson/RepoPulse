@@ -156,7 +156,7 @@ def test_driver_writes_rows_and_summary():
 
 def test_uploads_rows_and_summary_under_its_own_artifact_name():
     all_steps = steps(load())
-    upload = all_steps[_index(all_steps, _uses("actions/upload-artifact@v4"))]
+    upload = all_steps[_index(all_steps, _uses("actions/upload-artifact@v7"))]
     assert upload.get("if") == "always()"
     with_ = upload["with"]
     assert with_["name"] == "streaming-fault"
