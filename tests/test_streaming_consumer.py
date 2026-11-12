@@ -165,6 +165,54 @@ def test_batch_replayed_after_a_crash_before_commit_is_not_written_twice(spark, 
     assert consumer.delta_counts(spark, delta) == {"rows": 20, "distinct_offsets": 20}
 
 
+def test_cli_parser_for_a_consumer_run_in_its_own_process(tmp_path):
+    args = consumer.build_parser().parse_args(
+        [
+            "--bootstrap",
+            "localhost:19092,localhost:29092",
+            "--topic",
+            "gh-p3",
+            "--delta",
+            str(tmp_path / "delta"),
+            "--checkpoint",
+            str(tmp_path / "ckpt"),
+            "--max-offsets-per-trigger",
+            "50000",
+            "--driver-memory",
+            "3g",
+            "--metrics-out",
+            str(tmp_path / "m.json"),
+        ]
+    )
+    assert args.bootstrap == "localhost:19092,localhost:29092"
+    assert args.topic == "gh-p3"
+    assert args.delta == tmp_path / "delta"
+    assert args.checkpoint == tmp_path / "ckpt"
+    assert args.max_offsets_per_trigger == 50000
+    assert args.driver_memory == "3g"
+    assert args.metrics_out == tmp_path / "m.json"
+
+
+def test_cli_parser_requires_topic_and_paths():
+    with pytest.raises(SystemExit):
+        consumer.build_parser().parse_args(["--bootstrap", "b:1"])
+
+
+def test_delta_message_counts_counts_distinct_offsets_per_content(spark, tmp_path):
+    lines = fixture_lines()[:3]
+    rows = kafka_rows(lines, partitions=1)
+    replay = (rows[1][0], rows[1][1], "gh-test", 0, 99, TS, 0)  # same line at a new offset
+    df = spark.createDataFrame(rows + rows[:1] + [replay], consumer.KAFKA_SCHEMA)
+    path = tmp_path / "content"
+    consumer.to_bronze(df).write.format("delta").save(str(path))
+    got = dict(consumer.delta_message_counts(spark, path))
+    assert got == {
+        hashlib.sha256(lines[0]).digest(): 1,  # written twice at one offset: one message
+        hashlib.sha256(lines[1]).digest(): 2,  # two offsets
+        hashlib.sha256(lines[2]).digest(): 1,
+    }
+
+
 def test_delta_counts_sees_duplicate_offsets(spark, tmp_path):
     rows = kafka_rows(fixture_lines()[:3], partitions=1)
     df = spark.createDataFrame(rows + rows[:1], consumer.KAFKA_SCHEMA)

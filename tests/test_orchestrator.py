@@ -971,3 +971,35 @@ def test_build_prompt_requires_foreground_agents_and_no_early_end(tasks):
     p = build_prompt(tasks[2])
     assert "run_in_background" in p and "foreground" in p
     assert "không kết thúc lượt" in p
+
+
+def test_merge_failure_reason_tells_the_retry_what_to_do():
+    # 2026-11-11: four "review PASS but merge failed" retries had only "merge PR #N thất bại"
+    # as context, so the retried session did not know the branch conflicted with develop.
+    from repopulse.orchestrator import merge_failure_reason
+
+    dirty = merge_failure_reason("50", {"mergeable": "CONFLICTING", "mergeStateStatus": "DIRTY"})
+    assert "conflict" in dirty and "origin/develop" in dirty and "#50" in dirty
+    behind = merge_failure_reason("7", {"mergeable": "MERGEABLE", "mergeStateStatus": "BEHIND"})
+    assert "gh pr update-branch 7" in behind
+    blocked = merge_failure_reason("9", {"mergeable": "MERGEABLE", "mergeStateStatus": "BLOCKED"})
+    assert "check" in blocked
+    assert "#3" in merge_failure_reason("3", {})
+
+
+def test_merge_failure_reason_detects_conflict_from_either_field():
+    from repopulse.orchestrator import merge_failure_reason
+
+    for view in (
+        {"mergeable": "UNKNOWN", "mergeStateStatus": "DIRTY"},
+        {"mergeable": "CONFLICTING", "mergeStateStatus": "UNKNOWN"},
+    ):
+        assert "origin/develop" in merge_failure_reason("50", view)
+
+
+def test_merge_failure_reason_names_the_blocking_state():
+    from repopulse.orchestrator import merge_failure_reason
+
+    for state in ("BLOCKED", "UNSTABLE"):
+        msg = merge_failure_reason("9", {"mergeable": "MERGEABLE", "mergeStateStatus": state})
+        assert state in msg and "CI" in msg
