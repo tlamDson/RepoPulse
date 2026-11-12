@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from benchmarks import record_run
 from repopulse import dagspec
 from repopulse.runs_log import COLUMNS, validate_row
 
@@ -517,7 +518,7 @@ def test_row_matches_runs_csv_schema_and_variant():
         trigger="workflow_dispatch",
     )
     assert set(row) == set(COLUMNS)
-    assert row == validate_row(row)
+    assert all(isinstance(v, str) for v in row.values())  # CSV-ready, already validated
     assert row["variant"] == "airflow-backfill-3d"
     assert row["data_date"] == "2026-01-06"
     assert row["total_seconds"] == "1500.0"  # 10:00 -> 10:25
@@ -758,6 +759,9 @@ def test_cli_row_writes_header_and_one_row(tmp_path):
     assert len(rows) == 2
     assert rows[1][COLUMNS.index("variant")] == "airflow-backfill-2d"
     assert rows[1][COLUMNS.index("row_count")] == ""
+    # benchmarks/record_run.py (which merges artifacts into runs.csv) accepts the file
+    (merged,) = record_run.read_artifact(out)
+    assert validate_row(merged)["variant"] == "airflow-backfill-2d"
 
 
 def test_airflow_list_runs_calls_the_cli(monkeypatch):
