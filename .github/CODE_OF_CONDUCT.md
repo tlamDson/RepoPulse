@@ -59,11 +59,11 @@ representative at an online or offline event.
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the maintainer privately through GitHub: contact the maintainer
-(GitHub profile `tlamDson`) by direct message or through their profile. For
-sensitive matters, open a private security advisory on this repository (the
-"Security" tab, "Report a vulnerability") so the report is visible only to the
-maintainer. Please do not report in public issues or pull requests.
+reported to the maintainer (GitHub user `tlamDson`). To report, open a new
+issue titled "Code of conduct report" and leave the body empty: do not include
+any details, names or links in it. The maintainer will reply on that issue with
+a private way to send the details, and will then close and lock it. Please do
+not describe the incident in public issues or pull requests.
 
 All complaints will be reviewed and investigated promptly and fairly.
 
