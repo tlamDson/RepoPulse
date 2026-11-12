@@ -1,24 +1,24 @@
 ---
 name: Data incident
-about: Pipeline run failed, data is late, or a data quality check raised an alert
+about: A pipeline run failed, data is late, or a data quality check raised an alert
 labels: data-incident
 ---
 
-## Triệu chứng
+## Symptoms
 
-<!-- What the system or a dashboard viewer sees. Include the link to the GitHub Actions run. -->
+<!-- What the system or a dashboard viewer sees. Include the GitHub Actions run link. -->
 
-## Phạm vi
+## Scope
 
-- Affected table or mart:
-- Data time range:
+- Affected tables or marts:
+- Data time span:
 
-## Nguyên nhân
+## Cause
 
-<!-- Where in the code or data source, with file:line if known. -->
+<!-- Where in the code or the data source, with file:line if known. -->
 
-## Điều kiện kích hoạt
+## Trigger condition
 
 <!-- When it becomes a real failure. -->
 
-## Cách xử lý và chạy bù
+## Resolution and backfill

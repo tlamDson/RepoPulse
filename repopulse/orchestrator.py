@@ -80,13 +80,13 @@ def _has_cloud(secrets: frozenset[str]) -> bool:
 
 def _need_reason(need: str, gates: Gates) -> str | None:
     if need == "cloud" and not _has_cloud(gates.secrets):
-        return "cần secret DATABRICKS_HOST + DATABRICKS_TOKEN hoặc MOTHERDUCK_TOKEN"
+        return "needs secret DATABRICKS_HOST + DATABRICKS_TOKEN or MOTHERDUCK_TOKEN"
     if need == "snowflake" and not any(s.startswith("SNOWFLAKE_") for s in gates.secrets):
-        return "cần secret SNOWFLAKE_* (đăng ký Snowflake trial)"
+        return "needs SNOWFLAKE_* secrets (sign up for the Snowflake trial)"
     if need == "harness" and not gates.harness_approved:
-        return "chờ duyệt harness (docs/harness-check.md chưa có 'Lam đã duyệt')"
+        return "waiting for harness approval (docs/harness-check.md has no 'Approved by Lam' line)"
     if need not in KNOWN_NEEDS:
-        return f"điều kiện không rõ trong prs.toml: {need}"
+        return f"unknown need in prs.toml: {need}"
     return None
 
 
@@ -234,7 +234,7 @@ def parse_hold_at(text: str) -> int:
     """Value of ``--hold-at``: a whole percent from 1 to 100."""
     value = int(text) if re.fullmatch(r"[0-9]+", text) else 0
     if not 1 <= value <= 100:
-        raise ValueError(f"ngưỡng phải là số nguyên từ 1 đến 100, nhận {text!r}")
+        raise ValueError(f"threshold must be a whole number from 1 to 100, got {text!r}")
     return value
 
 
@@ -311,7 +311,9 @@ def decide_after_exit(
         # "#31" wins over a bare number ("ready PR 2 #31" is PR 31, not task 2)
         number = _PR_HASH_RE.search(result[1]) or _PR_NUMBER_RE.search(result[1])
         if not number:
-            return Decision("failed", f"RESULT: ready thiếu số PR ({result[1] or 'trống'})")
+            return Decision(
+                "failed", f"RESULT: ready is missing the PR number ({result[1] or 'empty'})"
+            )
         return Decision("ready", number.group(1))
     if result and result[0] == "merged":
         return Decision(result[0], result[1])
@@ -337,7 +339,7 @@ _PR_NUMBER_RE = re.compile(r"(\d+)")
 
 def parse_review(text: str) -> tuple[str, str] | None:
     """Last explicit ``REVIEW: PASS|FAIL <why>`` line. Merging hangs on it, so nothing else
-    (e.g. the agent's ``Kết luận: PASS | FAIL`` template heading) counts as a verdict."""
+    (e.g. the agent's ``<conclusion>: PASS | FAIL`` template heading) counts as a verdict."""
     found = _REVIEW_RE.findall(text or "")
     if not found:
         return None
@@ -372,18 +374,21 @@ def merge_failure_reason(pr: str, view: dict) -> str:
     state = (view or {}).get("mergeStateStatus", "")
     if view and (view.get("mergeable") == "CONFLICTING" or state == "DIRTY"):
         return (
-            f"merge PR #{pr} thất bại: nhánh conflict với develop. Chạy `git fetch origin` rồi "
-            "`git merge origin/develop`, gỡ conflict (giữ thay đổi của cả hai bên), chạy lại "
-            "test, commit merge và push; chờ CI xanh rồi mới ready."
+            f"merge PR #{pr} failed: the branch conflicts with develop. Run `git fetch origin` "
+            "then `git merge origin/develop`, resolve the conflicts (keep the changes of both "
+            "sides), rerun the tests, commit the merge and push; wait for green CI before ready."
         )
     if state == "BEHIND":
         return (
-            f"merge PR #{pr} thất bại: nhánh tụt sau develop. Chạy `gh pr update-branch {pr}`, "
-            "chờ CI xanh rồi mới ready."
+            f"merge PR #{pr} failed: the branch is behind develop. Run `gh pr update-branch {pr}`, "
+            "then wait for green CI before ready."
         )
     if state in ("BLOCKED", "UNSTABLE"):
-        return f"merge PR #{pr} thất bại: check bắt buộc chưa xanh ({state}). Chờ CI xong và sửa."
-    return f"merge PR #{pr} thất bại ({state or 'không rõ trạng thái'})"
+        return (
+            f"merge PR #{pr} failed: a required check is not green ({state}). "
+            "Wait for CI to finish and fix it."
+        )
+    return f"merge PR #{pr} failed ({state or 'unknown state'})"
 
 
 def _check_bucket(checks: list[dict], name: str) -> str | None:
@@ -415,7 +420,7 @@ def merge_ready(checks: list[dict]) -> tuple[bool, str]:
     for name in REQUIRED_CHECKS:
         bucket = _check_bucket(checks, name)
         if bucket != "pass":
-            return False, f"{name}: {bucket or 'thiếu'}"
+            return False, f"{name}: {bucket or 'missing'}"
     return True, ""
 
 
@@ -516,60 +521,68 @@ def _headless(repo_root: Path, prompt: str, resume: str | None, extra: list[str]
 
 
 def build_prompt(task: Task, previous_failure: str | None = None) -> str:
-    label = f"PR {task.id}" if task.id[0].isdigit() else f"việc {task.id}"
+    label = f"PR {task.id}" if task.id[0].isdigit() else f"task {task.id}"
     about = task.title or task.branch
     retry = ""
     if previous_failure:
         retry = f"""
-Lần trước thất bại. Đây là phần cuối lần chạy trước, đọc kỹ và đừng lặp lại cùng lỗi:
-<lan-truoc>
+The previous attempt failed. This is the tail of that run; read it carefully and do not
+repeat the same mistake:
+<previous-attempt>
 {previous_failure.strip()}
-</lan-truoc>
+</previous-attempt>
 """
-    return f"""Bạn là phiên điều phối headless cho {label} của RepoPulse ({about}).{retry}
-Thư mục hiện tại là worktree riêng của việc này, nhánh `{task.branch}` rẽ từ `origin/develop`.
-Đọc trước: CLAUDE.md, docs/plan.md (mục của {label}), .claude/rules/command-style.md.
-Kiểm `gh pr list --head {task.branch} --state all`: nếu PR đã mở thì làm tiếp từ đó.
+    return f"""You are the headless orchestration session for {label} of RepoPulse ({about}).{retry}
+The current directory is a worktree dedicated to this task, branch `{task.branch}` cut from
+`origin/develop`.
+Read first: CLAUDE.md, docs/plan.md (the section for {label}), .claude/rules/command-style.md.
+Check `gh pr list --head {task.branch} --state all`: if the PR is already open, continue from it.
 
-Quy trình:
-1. Viết kế hoạch ngắn (5-10 dòng) có mục "test phải đỏ".
-2. Giao agent `{task.agent}` (subagent, KHÔNG dùng isolation worktree, làm ngay trong thư mục này)
-   viết test đỏ, commit riêng, rồi code tới khi xanh. Dán nguyên văn .claude/rules/command-style.md
-   vào brief của agent. Gọi agent ở foreground: KHÔNG đặt `run_in_background`, chờ nó trả kết
-   quả rồi mới đi tiếp. Phiên này thoát thì mọi việc chạy nền chết theo, nên không kết thúc lượt
-   khi còn agent hay lệnh nào đang chạy.
-3. Push, mở PR vào `develop` theo .github/pull_request_template.md (có ## RED và ## Giả định).
-4. Chờ CI: `gh pr checks <số> --watch --interval 30` (foreground), lặp tới khi xong.
-   CI đỏ thì sửa và push lại.
-5. CI xanh cả 3 job thì DỪNG, trả `RESULT: ready <số PR>`. Không tự review, không merge:
-   orchestrator chạy một phiên review độc lập với ngữ cảnh mới, rồi tự merge khi PASS.
-   Nếu ở trên có kết luận review FAIL, sửa đúng các finding đó, push, chờ CI xanh rồi mới ready.
+Procedure:
+1. Write a short plan (5-10 lines) that includes a "tests that must be red" item.
+2. Hand the work to agent `{task.agent}` (a subagent; do NOT use worktree isolation, work right
+   in this directory) to write the red tests, commit them separately, then code until green.
+   Paste .claude/rules/command-style.md verbatim into the agent's brief. Call the agent in the
+   foreground: do NOT set `run_in_background`; wait for its result before moving on. When this
+   session exits, every background job dies with it, so do not end your turn while any agent
+   or command is still running.
+3. Push and open the PR into `develop` following .github/pull_request_template.md (with the
+   ## RED and ## Assumptions sections).
+4. Wait for CI: `gh pr checks <number> --watch --interval 30` (foreground), repeat until done.
+   If CI is red, fix it and push again.
+5. When all 3 CI jobs are green, STOP and answer `RESULT: ready <PR number>`. Do not review or
+   merge yourself: the orchestrator runs an independent review session with fresh context and
+   merges on PASS. If a FAIL review conclusion appears above, fix exactly those findings, push,
+   and wait for green CI before ready.
 
-Luật: không hỏi người dùng; mọi giả định ghi vào mục ## Giả định của PR. Không sửa gì trong
-.claude/ ngoài worktrees/. Không đọc .env, không chạy gh secret. Bị từ chối quyền thì đổi cách
-theo command-style; vẫn không được thì dừng.
+Rules: do not ask the user; write every assumption into the PR's ## Assumptions section. Do
+not edit anything under .claude/ outside worktrees/. Do not read .env, do not run gh secret. If
+a permission is denied, change approach per command-style; if that still fails, stop.
 
-Dòng cuối cùng của câu trả lời PHẢI là một trong:
-RESULT: ready <số PR>
-RESULT: failed <lý do ngắn>
-RESULT: blocked <việc cần chủ repo làm>
+The last line of your answer MUST be one of:
+RESULT: ready <PR number>
+RESULT: failed <short reason>
+RESULT: blocked <what the repo owner must do>
 """
 
 
 def build_review_prompt(task: Task, pr: str) -> str:
-    label = f"PR {task.id}" if task.id[0].isdigit() else f"việc {task.id}"
-    return f"""Review độc lập PR #{pr} ({label} của RepoPulse, nhánh `{task.branch}` → `develop`).
-Bạn KHÔNG phải phiên đã viết code này và không thấy ngữ cảnh của nó: chỉ tin vào code, test và
-output bạn tự chạy. Thư mục hiện tại là worktree của PR, đang ở HEAD của nhánh.
+    label = f"PR {task.id}" if task.id[0].isdigit() else f"task {task.id}"
+    return f"""Independent review of PR #{pr} ({label} of RepoPulse, branch `{task.branch}` →
+`develop`).
+You are NOT the session that wrote this code and you cannot see its context: trust only the code,
+the tests and the output you run yourself. The current directory is the PR's worktree, at the
+branch HEAD.
 
-Làm đúng theo hướng dẫn agent code-reviewer của bạn: chạy lại test, kiểm commit đầu chỉ có test,
-thử mutation (hoàn tác, kiểm `git status --porcelain` sạch), kiểm luật dữ liệu, convention, bảo mật.
-Đăng kết luận lên PR bằng `gh pr comment {pr} --body-file <file trong scratchpad>`.
-Không merge, không push, không sửa code của PR. Không hỏi người dùng.
+Follow your code-reviewer agent instructions exactly: rerun the tests, check that the first
+commit contains only tests, try mutations (revert them, check `git status --porcelain` is clean),
+check the data rules, conventions and security.
+Post the conclusion on the PR with `gh pr comment {pr} --body-file <file in the scratchpad>`.
+Do not merge, do not push, do not edit the PR's code. Do not ask the user.
 
-Dòng cuối cùng của câu trả lời PHẢI là một trong:
+The last line of your answer MUST be one of:
 REVIEW: PASS
-REVIEW: FAIL <các finding [chặn] tóm tắt trên một dòng>
+REVIEW: FAIL <blocking findings summarised on one line>
 """
 
 
@@ -613,13 +626,13 @@ def clean_plan(
     for w in worktrees:
         state = pr_states.get(w.branch or "", "NONE")
         if w.path in active:
-            plan.append(CleanAction(w.path, w.branch, "keep", "đang chạy"))
+            plan.append(CleanAction(w.path, w.branch, "keep", "running"))
         elif w.dirty:
-            plan.append(CleanAction(w.path, w.branch, "keep", "còn thay đổi chưa commit"))
+            plan.append(CleanAction(w.path, w.branch, "keep", "has uncommitted changes"))
         elif state != "MERGED":
             plan.append(CleanAction(w.path, w.branch, "keep", f"PR {state}"))
         else:
-            plan.append(CleanAction(w.path, w.branch, "remove", "PR đã merge"))
+            plan.append(CleanAction(w.path, w.branch, "remove", "PR merged"))
     return plan
 
 
@@ -656,7 +669,7 @@ def should_stop(state_dir: Path) -> bool:
     return (Path(state_dir) / "STOP").exists()
 
 
-APPROVAL_RE = re.compile(r"^Lam đã duyệt\b", re.MULTILINE)
+APPROVAL_RE = re.compile(r"^(?:Approved by Lam|Lam đã duyệt)\b", re.MULTILINE)
 
 
 def harness_file_approved(text: str) -> bool:
@@ -683,7 +696,7 @@ def render_progress(
     blocked: dict[str, str],
     skipped: set[str],
 ) -> str:
-    rows = ["| Việc | Nhánh | Trạng thái | Ghi chú |", "|---|---|---|---|"]
+    rows = ["| Task | Branch | Status | Notes |", "|---|---|---|---|"]
     for t in tasks:
         if t.id in done:
             status, note = "merged", ""
@@ -700,4 +713,4 @@ def render_progress(
 
 
 def _need_reason_text(task: Task) -> str:
-    return "thiếu: " + ", ".join(task.needs) if task.needs else ""
+    return "missing: " + ", ".join(task.needs) if task.needs else ""

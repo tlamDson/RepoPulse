@@ -1,6 +1,6 @@
 """Apply the Plan v2 primary path rule to ``runs.csv`` (D4, docs/probe-result.md).
 
-The rule (docs/plan.md, "Luật chọn đường chính", fixed before measuring):
+The rule (docs/plan.md, primary-path selection, fixed before measuring):
 
 1. Drop a path that does not run 24 times a day within the free quota, or whose success rate is
    below 95%.

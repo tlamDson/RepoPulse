@@ -58,8 +58,8 @@ APP_EVENTS_FILE = "events.jsonl.gz"  # app landing file name read by repopulse.s
 APP_TABLE = "app_events"
 DEFAULT_START = date(2026, 11, 1)
 TITLES = {
-    "volume": "[dq:volume] Bất thường khối lượng dữ liệu GH Archive",
-    "freshness": "[dq:freshness] Dữ liệu GH Archive không còn tươi",
+    "volume": "[dq:volume] GH Archive data volume anomaly",
+    "freshness": "[dq:freshness] GH Archive data is no longer fresh",
 }
 
 _HOUR_FMT = "%Y-%m-%dT%H"
@@ -754,67 +754,66 @@ def template_headings(template_text: str) -> list[str]:
 
 def _symptom_lines(alerts: Sequence[Alert]) -> list[str]:
     return [
-        f"- `{a.check}` (giờ dữ liệu `{a.data_hour}` UTC): {a.message} {marker(a)}" for a in alerts
+        f"- `{a.check}` (data hour `{a.data_hour}` UTC): {a.message} {marker(a)}" for a in alerts
     ]
 
 
 def _run_line(run_url: str) -> str:
-    return (
-        f"Lần chạy GitHub Actions: {run_url}"
-        if run_url
-        else "Lần chạy GitHub Actions: (không có link)"
-    )
+    return f"GitHub Actions run: {run_url}" if run_url else "GitHub Actions run: (no link)"
 
 
 def _sections(alerts: Sequence[Alert], run_url: str) -> dict[str, str]:
     tables = sorted({a.table for a in alerts})
     hours = sorted({a.data_hour for a in alerts if a.data_hour != "empty"})
-    span = f"{hours[0]} → {hours[-1]} (UTC)" if hours else "bảng rỗng, không có giờ dữ liệu"
+    span = f"{hours[0]} → {hours[-1]} (UTC)" if hours else "empty table, no data hours"
     kinds = {a.kind for a in alerts}
     cause = []
     if "volume" in kinds:
         cause.append(
-            "- Khối lượng: kiểm tra giờ GH Archive gốc (file `YYYY-MM-DD-H.json.gz` có đủ và có "
-            "đủ loại event không; từ 2026-11 có giờ mất hẳn PushEvent/CreateEvent/DeleteEvent), "
-            "`_manifest.json` (`counts_by_type`) của landing và summary của bước ingest."
+            "- Volume: check the source GH Archive hours (is the `YYYY-MM-DD-H.json.gz` file "
+            "complete and does it have every event type; since 2026-11 some hours lack "
+            "PushEvent/CreateEvent/DeleteEvent entirely), the landing `_manifest.json` "
+            "(`counts_by_type`) and the ingest step summary."
         )
     if "freshness" in kinds:
         cause.append(
-            "- Độ tươi: pipeline theo lịch (`Pipeline (scheduled)`) có chạy và xanh không, giờ "
-            "nào đang `missing` trong `out/ingest-summary.json`, secret MotherDuck còn hợp lệ."
+            "- Freshness: did the scheduled pipeline (`Pipeline (scheduled)`) run and pass, "
+            "which hours are `missing` in `out/ingest-summary.json`, is the MotherDuck secret "
+            "still valid."
         )
+    # The keys mirror the "## " headings of .github/ISSUE_TEMPLATE/data-incident.md.
     return {
-        "Triệu chứng": "\n".join(
+        "Symptoms": "\n".join(
             [
                 _run_line(run_url),
                 "",
                 *_symptom_lines(alerts),
                 "",
-                "Dữ liệu GH Archive là dữ liệu thật; kiểm tra do `python -m repopulse.quality "
-                "check` (incremental batch theo giờ).",
+                "GH Archive data is real data; the check is done by `python -m repopulse.quality "
+                "check` (hourly incremental batch).",
             ]
         ),
-        "Phạm vi": "\n".join(
+        "Scope": "\n".join(
             [
-                f"- Bảng hoặc mart bị ảnh hưởng: {', '.join(f'`{t}`' for t in tables)} và các "
-                "mart gold dựng từ nó",
-                f"- Khoảng thời gian dữ liệu: {span}",
-                f"- Giờ dữ liệu: {', '.join(hours) if hours else '(không có)'}",
+                f"- Affected tables or marts: {', '.join(f'`{t}`' for t in tables)} and the "
+                "gold marts built from them",
+                f"- Data time span: {span}",
+                f"- Data hours: {', '.join(hours) if hours else '(none)'}",
             ]
         ),
-        "Nguyên nhân": "\n".join(cause) + "\n- Ghi `file:line` khi đã tìm ra.",
-        "Điều kiện kích hoạt": (
-            "Ngưỡng nằm ở `repopulse/quality.toml` (`[volume]`, `[freshness]`). Báo động lặp lại "
-            "mỗi lần chạy tới khi giờ dữ liệu bình thường trở lại; cùng kiểm tra và cùng giờ chỉ "
-            "được ghi một lần (marker ẩn)."
+        "Cause": "\n".join(cause) + "\n- Record `file:line` once found.",
+        "Trigger condition": (
+            "Thresholds live in `repopulse/quality.toml` (`[volume]`, `[freshness]`). The alert "
+            "repeats on every run until the data hours are back to normal; the same check and "
+            "the same hour are recorded only once (hidden marker)."
         ),
-        "Cách xử lý và chạy bù": "\n".join(
+        "Resolution and backfill": "\n".join(
             [
-                "- Chạy bù bằng `workflow_dispatch` của `Pipeline (scheduled)` với input `date` "
-                "(YYYY-MM-DD), `hour` (0..23, giờ cuối) và `hours` (1..6) phủ các giờ trên; "
-                "staging bỏ qua event đã có nên chạy lại không sinh trùng.",
-                "- Nếu nguồn GH Archive thiếu thật (không có file, hoặc mất loại event), ghi lại "
-                "ở đây và đóng issue khi giờ dữ liệu bình thường trở lại.",
+                "- Backfill with `workflow_dispatch` of `Pipeline (scheduled)` using input `date` "
+                "(YYYY-MM-DD), `hour` (0..23, last hour) and `hours` (1..6) covering the hours "
+                "above; staging skips events it already has, so a rerun creates no duplicates.",
+                "- If the GH Archive source is really missing data (no file, or a lost event "
+                "type), note it here and close the issue once the data hours are back to normal.",
             ]
         ),
     }
@@ -825,16 +824,16 @@ def build_issue(alerts: Sequence[Alert], template_text: str, run_url: str) -> tu
     if not alerts:
         raise QualityError("build_issue needs at least one alert")
     kinds = sorted({a.kind for a in alerts})
-    title = " + ".join(TITLES.get(k, f"[dq:{k}] Báo động chất lượng dữ liệu") for k in kinds)
+    title = " + ".join(TITLES.get(k, f"[dq:{k}] Data quality alert") for k in kinds)
     filled = _sections(alerts, run_url)
     parts = []
     for heading in template_headings(template_text):
-        parts.append(f"## {heading}\n\n{filled.get(heading, '(chưa điền)')}\n")
+        parts.append(f"## {heading}\n\n{filled.get(heading, '(not filled in)')}\n")
     return title, "\n".join(parts)
 
 
 def build_comment(alerts: Sequence[Alert], run_url: str) -> str:
-    return "\n".join(["Báo động mới.", "", _run_line(run_url), "", *_symptom_lines(alerts)]) + "\n"
+    return "\n".join(["New alert.", "", _run_line(run_url), "", *_symptom_lines(alerts)]) + "\n"
 
 
 def run_gh(args: Sequence[str], stdin: str | None = None) -> str:
