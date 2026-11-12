@@ -1026,3 +1026,23 @@ def test_required_checks_state_waits_until_required_checks_exist_and_finish():
     for bad in ("fail", "cancel"):
         red = req[:2] + [{"name": "dbt build (DuckDB)", "bucket": bad}]
         assert required_checks_state(red) == "fail"
+
+
+def test_duplicate_check_runs_all_must_pass():
+    # Regression 2026-11-12 03:58: release PR #64 had two "Unit Tests" runs (push on develop and
+    # pull_request); a name->bucket dict kept the passing one, the merge hit the pending one and
+    # branch protection refused it, which stopped the whole run.
+    from repopulse.orchestrator import merge_ready, required_checks_state
+
+    ok = [{"name": n, "bucket": "pass"} for n in ("Lint", "Unit Tests", "dbt build (DuckDB)")]
+    for order in (
+        ok + [{"name": "Unit Tests", "bucket": "pending"}],
+        [{"name": "Unit Tests", "bucket": "pending"}] + ok,
+    ):
+        assert required_checks_state(order) == "pending"
+        assert merge_ready(order)[0] is False
+    red = ok + [{"name": "Unit Tests", "bucket": "fail"}]
+    assert required_checks_state(red) == "fail"
+    assert merge_ready(red)[0] is False
+    assert required_checks_state(ok + ok) == "pass"
+    assert merge_ready(ok + ok)[0] is True
