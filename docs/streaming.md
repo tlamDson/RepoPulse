@@ -124,6 +124,11 @@ an existing backlog into Delta, not an end-to-end latency of a continuously runn
 `produce_events_per_s` is the rate of one Python producer into a 3-broker cluster on one runner
 (all three brokers share the runner's CPU and disk).
 
+**One run per N, no warm-up run.** Every N is measured once (not a median), in the listed order,
+in one Spark session. Whatever is initialised only once in that session (JIT, the first use of
+the Kafka connector and of the Delta sink) is paid by the first N in its `consume_seconds`, so
+compare the first N with the others with that in mind.
+
 ## Rows
 
 `variant` = `streaming-throughput-p1`, `-p3`, `-p6`; `data_date` = reference day;
