@@ -137,6 +137,8 @@ Not compared with `baseline`: either there is no baseline row with the same `dat
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | airflow-backfill-2d | 2026-10-25 | 88.716 | — | — | — | — | — | — | — | — | 105070 | 2026-11-12T02:32:40+00:00 | d1cc3f5 | engine=airflow-3.4.0 days=2 hours_per_day=1 last_hour=15 runs_success=2 runs_failed=0 sla_minutes=30 sla_missed=0 max_active_runs=1 target=ci run_id=43142141658 trigger=pull_request |
 | databricks-bronze-silver | 2026-10-25 | 107.948 | — | — | — | — | — | — | — | — | 206827 | 2026-11-12T01:32:05+00:00 | b965514 | source=gharchive last_hour=2026-10-25T23 hours=3 bronze_rows=206827 quarantined_total=0 duplicates_dropped=0 upload_s=3.79 setup_s=3.0 execution_s=88.0 cleanup_s=1.0 run_s=92.42 run_id=43134787015 trigger=push rerun_silver_inserted=0 |
+| format-delta | 2026-10-25 | 71.87834 | 7.64757 | 4.878722 | 13.089235 | 12.407299 | 2.199803 | 7.016043 | 9039.9 | 295319902 | 1670400 | 2026-11-12T02:13:36+00:00 | 39d76aa | format=delta runs=5 stat=median write_seconds=8.116 merge_seconds=8.259 merge_rerun_seconds=6.927 time_travel_seconds=1.105 load_seconds=15.958 startup_seconds=6.609 base_rows=1590485 merge_source_rows=161510 table_bytes=352367811 table_files=5 spark=3.5.9 delta=3.3.3 iceberg=1.9.2 cross_check=full |
+| format-iceberg | 2026-10-25 | 56.041629 | 7.251662 | 3.726932 | 10.22701 | 9.219515 | 1.486354 | 5.14486 | 8368.2 | 295319902 | 1670400 | 2026-11-12T02:13:36+00:00 | 39d76aa | format=iceberg runs=5 stat=median write_seconds=5.841 merge_seconds=6.147 merge_rerun_seconds=6.823 time_travel_seconds=0.068 load_seconds=16.217 startup_seconds=6.347 base_rows=1590485 merge_source_rows=161510 table_bytes=214203312 table_files=5 spark=3.5.9 delta=3.3.3 iceberg=1.9.2 cross_check=full |
 | path-a-runner | 2026-10-25 | 56.49300000000001 | 0.25826 | 0.059017 | 0.059248 | 0.05919 | 0.059446 | 0.059322 | — | — | 68488 | 2026-11-12T07:27:53+00:00 | 52c9d56 | status=success hour=23 hours=1 ingest_seconds=1.635 spark_seconds=24.605 export_seconds=11.017 dbt_seconds=17.795 queries_seconds=1.441 queue_seconds=2.0 setup_seconds=22.149878 missing_hours=0 bronze_rows=68488 run_id=43175427031 trigger=push |
 | path-b-databricks | 2026-10-25 | 162.142 | 0.822 | 0.758 | 0.833 | 0.76 | 0.724 | 0.778 | — | — | 0 | 2026-11-12T07:27:52+00:00 | 52c9d56 | status=success hour=23 hours=1 ingest_seconds=2.095 databricks_seconds=50.846 warehouse_seconds=0.206 dbt_seconds=104.253 queries_seconds=4.742 queue_seconds=2.0 setup_seconds=28.303435 job_setup_seconds=3.0 warehouse_start_seconds=0.0 missing_hours=0 bronze_rows=68488 run_id=43175427031 trigger=push |
 | sql-agent-qwen3-6-35b-a3b | 2026-04-07 | 354.638 | — | — | — | — | — | — | — | — | 16 | 2026-11-12T07:36:34+00:00 | 13adca6 | accuracy=14/16; p50_question_s=19.037; model=Qwen3.6-35B-A3B; hw=RTX4060-laptop-8GB llama.cpp -ngl99 --cpu-moe; dataset=ci-fixture |
@@ -189,7 +191,7 @@ Details are in [`docs/plan.md`](docs/plan.md) (Vietnamese). Progress is tracked 
 
 ## Documentation
 
-Most pages are in Vietnamese; the two benchmark pages are in English.
+Most pages are in Vietnamese; the benchmark pages are in English.
 
 | Page | Topic |
 |---|---|
@@ -203,6 +205,7 @@ Most pages are in Vietnamese; the two benchmark pages are in English.
 | [`docs/dashboard.md`](docs/dashboard.md) | The static site and the Tableau CSV export |
 | [`docs/query-optimization.md`](docs/query-optimization.md) | Partitioned and clustered layouts against the baseline |
 | [`docs/benchmark-scale.md`](docs/benchmark-scale.md) | Spark against DuckDB at 1, 7 and 30 days |
+| [`docs/iceberg-vs-delta.md`](docs/iceberg-vs-delta.md) | Delta Lake against Apache Iceberg: write, Q1–Q6, MERGE, time travel |
 | [`docs/engine-matrix.md`](docs/engine-matrix.md) | Q1–Q6 on the reference day on six engines, one README table |
 | [`docs/snowflake-port.md`](docs/snowflake-port.md) | Running the dbt project on Snowflake |
 | [`docs/databricks-job.md`](docs/databricks-job.md) | The same bronze/silver incremental batch as a serverless Databricks job (Plan v2, outside this deployment) |
