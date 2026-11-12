@@ -10,6 +10,7 @@
 | Test | `pytest` | `tests/`, xem `.claude/rules/tdd.md` |
 | Điều phối | GitHub Actions | Cron chỉ chạy trên `main`, có thể trễ, tự tắt sau 60 ngày repo không hoạt động |
 | Bronze/Silver | PySpark + Delta Lake | Databricks Free Edition (serverless, chỉ batch `availableNow`). Dự phòng: chạy trên runner Actions (4 CPU, 16 GB RAM, 14 GB đĩa) |
+| Streaming (giai đoạn 2) | Apache Kafka (`apache/kafka`, KRaft, 3 broker, docker compose) + Spark Structured Streaming + Delta | Chỉ trong workflow `streaming.yml` trên runner; client `confluent-kafka` (extra `streaming`, import lười); trigger `availableNow`; `docs/streaming.md` |
 | Gold | dbt | `transform/`; CI chạy trên DuckDB (`--target ci`); gold thật trên Databricks SQL warehouse hoặc MotherDuck |
 | Dashboard | Trang tĩnh trên GitHub Pages + Tableau Public (publish tay) | Databricks dashboard không chia sẻ công khai được |
 | Bảo mật | pre-commit (`ruff`, `gitleaks`), secret scanning + push protection, Dependabot (`pip`, `github-actions`) | |
