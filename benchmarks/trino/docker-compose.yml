@@ -1,0 +1,107 @@
+# Trino + Hive Metastore + MinIO for benchmarks/trino_bench.py (P2c). Runs only on the GitHub
+# runner (.github/workflows/trino-bench.yml), never on the owner's machine. Details:
+# docs/trino-hive.md.
+#
+#   docker compose -f benchmarks/trino/docker-compose.yml up -d --wait   # minio, metastore, trino
+#   docker compose -f benchmarks/trino/docker-compose.yml --profile upload run --rm upload
+#   docker compose -f benchmarks/trino/docker-compose.yml down -v
+#
+# MINIO_ACCESS_KEY / MINIO_SECRET_KEY below are THROWAWAY keys of this local, single-job stack
+# (no port of MinIO is published; the containers and the volume are removed after the job).
+# They are not secrets and no GitHub secret is used. Override them through the environment.
+#
+# Images are pinned to tags checked on Docker Hub on 2026-11-11. minio/minio and minio/mc are no
+# longer published on Docker Hub, so MinIO comes from pgsty/minio (community-maintained fork of
+# minio/minio, same server and API); the one-shot upload uses the AWS CLI.
+
+x-minio-keys: &minio-keys
+  MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-repopulse}
+  MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-repopulse-ci}
+
+services:
+  minio:
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
+    command: ["server", "/data"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-repopulse}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-repopulse-ci}
+    volumes:
+      - minio-data:/data
+
+  metastore:
+    image: apache/hive:4.0.1
+    depends_on:
+      minio:
+        condition: service_started
+    environment:
+      <<: *minio-keys
+      SERVICE_NAME: metastore
+      DB_DRIVER: derby
+      # hadoop-aws (S3A) and its AWS SDK ship in the image but are not on the classpath; the
+      # metastore needs them because it checks / creates the table path on create_table.
+      HADOOP_CLASSPATH: /opt/hadoop/share/hadoop/tools/lib/hadoop-aws-3.3.6.jar:/opt/hadoop/share/hadoop/tools/lib/aws-java-sdk-bundle-1.12.367.jar
+      HADOOP_OPTIONAL_TOOLS: hadoop-aws
+      HIVE_CUSTOM_CONF_DIR: /hive_custom_conf
+    # fs.s3a.* (endpoint, path style, keys): HIVE_CUSTOM_CONF_DIR is linked into the Hive conf
+    # dir by the image's entrypoint; the second mount covers HADOOP_CONF_DIR if it is not.
+    volumes:
+      - ./metastore/core-site.xml:/hive_custom_conf/core-site.xml:ro
+      - ./metastore/core-site.xml:/opt/hadoop/etc/hadoop/core-site.xml:ro
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/9083"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+
+  trino:
+    image: trinodb/trino:484
+    depends_on:
+      metastore:
+        condition: service_healthy
+    environment:
+      <<: *minio-keys
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./catalog/hive.properties:/etc/trino/catalog/hive.properties:ro
+    mem_limit: 8g
+    healthcheck:
+      # ready only when /v1/info says "starting": false (the image's own health-check script)
+      test: ["CMD", "/usr/lib/trino/bin/health-check"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+
+  # One-shot: copy the parquet layouts + repos seed (written by trino_bench.py) into the bucket.
+  # Not started by `up`; trino_bench.py runs it with `--profile upload run --rm upload` and sets
+  # TRINO_BENCH_WORK_DIR (absolute path) and TRINO_BENCH_BUCKET.
+  upload:
+    image: amazon/aws-cli:2.40.1
+    profiles: ["upload"]
+    restart: "no"
+    depends_on:
+      minio:
+        condition: service_started
+    environment:
+      AWS_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY:-repopulse}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY:-repopulse-ci}
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+      AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+      BUCKET: ${TRINO_BENCH_BUCKET:-repopulse-bench}
+    volumes:
+      - ${TRINO_BENCH_WORK_DIR:-../../data/tmp/trino-bench}:/data:ro
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - >-
+        set -euo pipefail;
+        s3() { aws --endpoint-url http://minio:9000 "$$@"; };
+        for i in $$(seq 1 60); do s3 s3api list-buckets > /dev/null 2>&1 && break; sleep 2; done;
+        s3 s3api head-bucket --bucket "$$BUCKET" > /dev/null 2>&1 || s3 s3 mb "s3://$$BUCKET";
+        s3 s3 sync /data "s3://$$BUCKET" --delete --only-show-errors;
+        s3 s3 ls "s3://$$BUCKET" --recursive --summarize | tail -n 2
+
+volumes:
+  minio-data:
