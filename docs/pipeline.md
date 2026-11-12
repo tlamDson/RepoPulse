@@ -1,8 +1,8 @@
-# Pipeline theo lịch: ingest → Spark → export → dbt → runs.csv
+# Scheduled pipeline: ingest → Spark → export → dbt → runs.csv
 
-`.github/workflows/pipeline.yml` nối các bước đã có thành một **incremental batch** chạy mỗi giờ
-(không phải streaming hay real-time). Đường dự phòng (`docs/probe-result.md`): Spark chạy trên
-runner, gold nằm trên MotherDuck. GH Archive là dữ liệu thật.
+`.github/workflows/pipeline.yml` chains the existing steps into an **incremental batch** that runs every hour
+(not streaming or real-time). Fallback path (`docs/probe-result.md`): Spark runs on the
+runner, gold lives on MotherDuck. GH Archive is real data.
 
 ```
 python -m repopulse.ingest            data/landing/gharchive   (docs: repopulse/ingest.py)
@@ -13,77 +13,77 @@ dbt build --vars silver_gharchive_parquet=...   MotherDuck (incremental)     doc
 python -m repopulse.pipeline row      out/pipeline-row.csv (artifact)
 ```
 
-Bốn bước nặng chạy qua `python -m repopulse.pipeline timed --name <bước> --timings out/timings.json
--- <lệnh>`, ghi thời gian tường của từng bước; dòng `runs.csv` lấy tổng các bước làm
+The four heavy steps run through `python -m repopulse.pipeline timed --name <step> --timings out/timings.json
+-- <command>`, which records the wall-clock time of each step; the `runs.csv` row takes the sum of the steps as
 `total_seconds`.
 
-## Trigger
+## Triggers
 
-| Trigger | Dữ liệu | Target dbt | Secret |
+| Trigger | Data | dbt target | Secret |
 |---|---|---|---|
-| `schedule` (phút 23 mỗi giờ) | 3 giờ kết thúc ở now − 2h | `motherduck`, database `repopulse` | `MOTHERDUCK_TOKEN`, `PII_HASH_SALT` (thiếu thì dừng ngay bước đầu) |
-| `workflow_dispatch` | input `date`/`hour`/`hours` (mặc định 3), `force`, `full_refresh` | như trên | như trên |
-| `pull_request` (lọc `paths:`) | 1 giờ thật (now − 2h) | `ci` (DuckDB local), salt giả cố định | không cần; có `MOTHERDUCK_TOKEN` thì thêm bước smoke |
+| `schedule` (minute 23 of every hour) | 3 hours ending at now − 2h | `motherduck`, database `repopulse` | `MOTHERDUCK_TOKEN`, `PII_HASH_SALT` (if missing, stops right at the first step) |
+| `workflow_dispatch` | inputs `date`/`hour`/`hours` (default 3), `force`, `full_refresh` | same as above | same as above |
+| `pull_request` (filtered by `paths:`) | 1 real hour (now − 2h) | `ci` (local DuckDB), fixed fake salt | not needed; with `MOTHERDUCK_TOKEN` a smoke step is added |
 
-`PII_HASH_SALT` vào cả bước Spark (băm PII ở silver) lẫn mọi bước `dbt build`: các model `public`
-che `user_key`/`actor_id`/`actor_login` bằng `mask_pii` với cùng salt (`docs/governance.md`), và
-ngoài target `ci` thiếu salt là lỗi compile. Bước chỉ chạy trên pull request dùng salt giả cố định,
-không nhận secret thật.
+`PII_HASH_SALT` goes into both the Spark step (PII hashing at silver) and every `dbt build` step: the `public` models
+mask `user_key`/`actor_id`/`actor_login` with `mask_pii` using the same salt (`docs/governance.md`), and
+outside the `ci` target a missing salt is a compile error. The step that runs only on pull requests uses a fixed fake salt
+and receives no real secret.
 
-`schedule` và `workflow_dispatch` chỉ chạy khi file đã có trên `main` (sau release). Hai trigger này
-chung một nhóm concurrency (`pipeline-motherduck`, xếp hàng, không huỷ): mỗi lúc chỉ một lần ghi
-MotherDuck. Mỗi PR một nhóm riêng.
+`schedule` and `workflow_dispatch` only run once the file is on `main` (after release). These two triggers
+share one concurrency group (`pipeline-motherduck`, queued, not cancelled): only one MotherDuck write at a time.
+Each PR has its own group.
 
-Mỗi lần chạy lấy 3 giờ dù cron chạy mỗi giờ: giờ GH Archive công bố muộn (lúc chạy còn `missing`)
-được lần sau nhặt lại. Giờ đã nạp thì staging bỏ qua theo `event_id`, nên chạy chồng không sinh
-trùng. Cron hourly của `ingest.yml` đã bỏ (nó chỉ còn `workflow_dispatch` và `pull_request`), để
-không tải mỗi giờ hai lần.
+Each run takes 3 hours even though the cron runs hourly: an hour that GH Archive publishes late (still `missing` at run time)
+is picked up by the next run. An hour already loaded is skipped by staging via `event_id`, so overlapping runs do not create
+duplicates. The hourly cron of `ingest.yml` was removed (it now only has `workflow_dispatch` and `pull_request`), so
+the same data is not downloaded twice an hour.
 
 ## Pull request
 
-Không đụng database `repopulse`. Chuỗi chạy trên `ci.duckdb` rồi:
+Does not touch the `repopulse` database. The chain runs on `ci.duckdb` and then:
 
-1. `dbt build` lần hai trên cùng parquet, so `python -m repopulse.pipeline counts` trước/sau bằng
-   `diff`: chạy lại không được đổi số dòng của staging và gold.
-2. Có `MOTHERDUCK_TOKEN`: `md-reset --database repopulse_smoke` (chỉ nhận tên `*_smoke`), build
-   target `motherduck` hai lần với `MOTHERDUCK_DATABASE=repopulse_smoke`, so số dòng.
+1. A second `dbt build` on the same parquet, comparing `python -m repopulse.pipeline counts` before/after with
+   `diff`: a re-run must not change the row counts of staging and gold.
+2. With `MOTHERDUCK_TOKEN`: `md-reset --database repopulse_smoke` (accepts only `*_smoke` names), build
+   the `motherduck` target twice with `MOTHERDUCK_DATABASE=repopulse_smoke`, compare row counts.
 
-Dòng `runs.csv` của PR có `variant=pipeline-pr-smoke`, của lịch/dispatch là `pipeline-incremental`.
+A PR's `runs.csv` row has `variant=pipeline-pr-smoke`; for schedule/dispatch it is `pipeline-incremental`.
 
 ## runs.csv
 
-Workflow chỉ đọc repo (`contents: read`), không commit. Dòng nằm ở artifact
-`pipeline-run-<run_id>` (`out/pipeline-row.csv`, cùng summary ingest/Spark/export và
-`timings.json`; không upload lake hay landing). Gộp vào `runs.csv` bằng:
+The workflow only reads the repo (`contents: read`) and does not commit. The row is in the artifact
+`pipeline-run-<run_id>` (`out/pipeline-row.csv`, together with the ingest/Spark/export summaries and
+`timings.json`; neither the lake nor landing is uploaded). Merge it into `runs.csv` with:
 
 ```bash
-python benchmarks/record_run.py <thư mục artifact>/pipeline-row.csv [<artifact khác>.csv ...]
+python benchmarks/record_run.py <artifact directory>/pipeline-row.csv [<other artifact>.csv ...]
 ```
 
-Mọi dòng của mọi artifact được kiểm trước; một artifact hỏng thì không dòng nào được ghi.
+Every row of every artifact is checked first; if one artifact is broken, no row is written.
 
-| Cột | Giá trị |
+| Column | Value |
 |---|---|
-| `data_date` | ngày của giờ dữ liệu cuối |
-| `total_seconds` | tổng thời gian các bước trong `timings.json` |
-| `row_count` | `silver_inserted` của job Spark (số event vào silver của lần chạy) |
-| `q1_seconds`…`q6_seconds`, `peak_rss_mb`, `bytes_read` | để trống (pipeline không đo query) |
-| `notes` | `key=value` cách nhau bởi dấu cách: `last_hour`, `hours`, `ingested`/`skipped`/`missing`, `<bước>_s`, `run_id`, `trigger`, `target`, `full_refresh` |
+| `data_date` | date of the last data hour |
+| `total_seconds` | sum of the step times in `timings.json` |
+| `row_count` | `silver_inserted` of the Spark job (number of events entering silver in the run) |
+| `q1_seconds`…`q6_seconds`, `peak_rss_mb`, `bytes_read` | left empty (the pipeline does not measure queries) |
+| `notes` | `key=value` pairs separated by spaces: `last_hour`, `hours`, `ingested`/`skipped`/`missing`, `<step>_s`, `run_id`, `trigger`, `target`, `full_refresh` |
 
-Tài liệu này không chứa số đo; số đo chỉ lấy từ `runs.csv`.
+This document contains no measurements; measurements come only from `runs.csv`.
 
-Sau mỗi lần chạy theo lịch, `.github/workflows/data-quality.yml` (`workflow_run`) kiểm khối lượng
-và độ tươi của staging và mở/cập nhật Issue `data-incident`: `docs/data-quality.md`.
+After each scheduled run, `.github/workflows/data-quality.yml` (`workflow_run`) checks the volume
+and freshness of staging and opens/updates the `data-incident` Issue: `docs/data-quality.md`.
 
-## Lệnh
+## Commands
 
 ```bash
 python -m repopulse.pipeline window --ingest-summary out/ingest-summary.json
-python -m repopulse.pipeline timed --name dbt --timings out/timings.json -- <lệnh>
+python -m repopulse.pipeline timed --name dbt --timings out/timings.json -- <command>
 python -m repopulse.pipeline counts --database ci.duckdb --out out/counts.json
-python -m repopulse.pipeline row --run-at <ISO có múi giờ> --git-sha <sha> --ingest-summary out/ingest-summary.json --spark-summary out/spark-summary.json --timings out/timings.json --run-id <id> --trigger <tên> --out out/pipeline-row.csv
-python -m repopulse.pipeline md-reset --database repopulse_smoke   # cần MOTHERDUCK_TOKEN
+python -m repopulse.pipeline row --run-at <ISO with time zone> --git-sha <sha> --ingest-summary out/ingest-summary.json --spark-summary out/spark-summary.json --timings out/timings.json --run-id <id> --trigger <name> --out out/pipeline-row.csv
+python -m repopulse.pipeline md-reset --database repopulse_smoke   # needs MOTHERDUCK_TOKEN
 ```
 
-Test: `tests/test_pipeline.py` (helper, không mạng, không Spark), `tests/test_pipeline_workflow.py`
-(kiểm tĩnh `pipeline.yml`), `tests/test_spark_export.py`, `tests/test_dbt_incremental.py`.
+Tests: `tests/test_pipeline.py` (helpers, no network, no Spark), `tests/test_pipeline_workflow.py`
+(static check of `pipeline.yml`), `tests/test_spark_export.py`, `tests/test_dbt_incremental.py`.
