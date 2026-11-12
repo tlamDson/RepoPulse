@@ -15,11 +15,17 @@ from pathlib import Path
 
 import pytest
 
-from benchmarks.record_run import read_artifact
+from benchmarks.record_run import _parse, read_artifact
 from repopulse import pathcompare as pc
 from repopulse import readme_results
 from repopulse.probe import HttpResponse
 from repopulse.runs_log import COLUMNS, validate_row
+
+
+def revalidated(row):
+    """``row`` (CSV strings) typed like record_run.py reads it, then through validate_row."""
+    return validate_row({c: _parse(c, v) for c, v in row.items()})
+
 
 FIXTURES = Path(__file__).parent / "fixtures" / "pathcompare"
 RUNS = FIXTURES / "runs.csv"
@@ -114,7 +120,7 @@ def test_percentile_rejects_p_outside_0_100(p):
 
 def test_build_row_success_path_a():
     row = pc.build_row(**a_success_kwargs())
-    assert row == validate_row(row)
+    assert row == revalidated(row)
     assert row["variant"] == "path-a-runner"
     assert row["data_date"] == "2026-11-20"
     assert float(row["total_seconds"]) == 100.0
@@ -157,7 +163,7 @@ def test_build_row_failed_run_still_gives_a_valid_row():
             row_count=None,
         )
     )
-    assert row == validate_row(row)
+    assert row == revalidated(row)
     notes = notes_of(row)
     assert notes["status"] == "failed"
     assert notes["failed_step"] == "dbt"
