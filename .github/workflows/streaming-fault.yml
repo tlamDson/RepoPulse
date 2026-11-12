@@ -1,0 +1,128 @@
+name: Streaming fault tolerance
+
+# Fault test on the reference day (benchmarks/reference.toml, real GH Archive data): Apache Kafka
+# 3 brokers in KRaft mode (benchmarks/kafka/docker-compose.yml) -> Spark Structured Streaming ->
+# bronze Delta. Case broker-kill SIGKILLs one broker while the producer runs; case consumer-kill
+# SIGKILLs the Spark consumer process mid-drain and restarts it on the same checkpoint. Each case
+# is reconciled by content (lost / duplicate events) and timed (docs/streaming-fault.md).
+# Output: artifact `streaming-fault` with out/streaming-fault-rows.csv (runs.csv format, one row
+# per valid case, variant streaming-fault-<case>) and out/streaming-fault-summary.md. Merge it
+# with `python benchmarks/record_run.py out/streaming-fault-rows.csv`; this workflow never
+# writes runs.csv. Not a required check, so `paths:` on pull_request is fine here.
+
+on:
+  workflow_dispatch:
+    inputs:
+      cases:
+        description: "comma-separated cases (broker-kill, consumer-kill)"
+        type: string
+        default: "broker-kill,consumer-kill"
+      max_hours:
+        description: "hours of the reference day to produce (1..24)"
+        type: string
+        default: "24"
+      kill_at_fraction:
+        description: "broker-kill: kill once this share of lines is acknowledged (0 < f < 1)"
+        type: string
+        default: "0.3"
+  pull_request:
+    branches: [develop, main]
+    paths:
+      - ".github/workflows/streaming-fault.yml"
+      - "benchmarks/streaming_fault.py"
+      - "benchmarks/kafka/**"
+      - "repopulse/streaming/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: streaming-fault-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  streaming-fault:
+    name: Streaming fault tolerance (Kafka + Spark)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      CASES: ${{ inputs.cases || 'broker-kill,consumer-kill' }}
+      MAX_HOURS: ${{ inputs.max_hours || '24' }}
+      KILL_AT_FRACTION: ${{ inputs.kill_at_fraction || '0.3' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - run: pip install -e ".[dev,spark,streaming]"
+
+      - name: Cache reference day
+        uses: actions/cache@v4
+        with:
+          path: data/raw/gharchive
+          key: gharchive-${{ hashFiles('benchmarks/reference.toml') }}
+
+      - name: Download and verify reference files (stops on any checksum mismatch)
+        run: python benchmarks/fetch_reference.py
+
+      - name: Start Kafka (3 brokers, KRaft)
+        run: docker compose -f benchmarks/kafka/docker-compose.yml up -d --wait --wait-timeout 300
+
+      - name: Disk and memory before
+        run: |
+          df -h .
+          free -m
+          docker compose -f benchmarks/kafka/docker-compose.yml ps
+
+      - name: Run fault cases
+        run: >-
+          python benchmarks/streaming_fault.py
+          --bootstrap localhost:19092,localhost:29092,localhost:39092
+          --compose-file benchmarks/kafka/docker-compose.yml
+          --cases "$CASES"
+          --max-hours "$MAX_HOURS"
+          --kill-at-fraction "$KILL_AT_FRACTION"
+          --git-sha "$GIT_SHA"
+          --out out/streaming-fault-rows.csv
+          --summary out/streaming-fault-summary.md
+
+      - name: Broker and consumer logs (on failure)
+        if: failure()
+        run: |
+          docker compose -f benchmarks/kafka/docker-compose.yml ps -a
+          docker compose -f benchmarks/kafka/docker-compose.yml logs --no-color --tail 300
+          tail -n 200 data/streaming-fault/logs/*.log || true
+
+      - name: Job summary
+        if: always()
+        run: |
+          df -h .
+          if [ -f out/streaming-fault-summary.md ]; then
+            cat out/streaming-fault-summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No fault summary (the run stopped before the driver)." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: streaming-fault
+          path: |
+            out/streaming-fault-rows.csv
+            out/streaming-fault-summary.md
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Stop Kafka
+        if: always()
+        run: docker compose -f benchmarks/kafka/docker-compose.yml down -v

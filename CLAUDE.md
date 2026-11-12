@@ -51,6 +51,7 @@ python benchmarks/scale_bench.py --git-sha <sha> --out out/scale-rows.csv   # Sp
 python benchmarks/query_opt.py --runs 10 --git-sha <sha> --out out/query-opt-rows.csv --summary out/query-opt-summary.md   # Q1-Q6 trên parquet phẳng/partition/clustering (ngày chuẩn); byte quét chỉ đo được trên Linux (docs/query-optimization.md)
 docker compose -f benchmarks/kafka/docker-compose.yml up -d --wait   # Kafka 3 broker KRaft (cần Docker; down -v để dọn)
 python benchmarks/streaming_bench.py --git-sha <sha> --partitions 1,3,6 --out out/streaming-rows.csv --summary out/streaming-summary.md   # Kafka -> Spark Structured Streaming (availableNow) -> Delta, đối chiếu đếm; cần extra spark,streaming + Java 17 (docs/streaming.md)
+python benchmarks/streaming_fault.py --git-sha <sha> --out out/streaming-fault-rows.csv --summary out/streaming-fault-summary.md   # kill broker / kill consumer giữa chừng: đối soát mất/trùng theo nội dung + thời gian phục hồi; phép đo vô hiệu thì không ghi dòng; cần cluster Kafka + Docker + Java 17 (docs/streaming-fault.md)
 python benchmarks/snowflake_port.py --engine duckdb --run-results transform/target/run_results.json --git-sha <sha> --out out/snowflake-port-rows.csv   # dòng runs.csv cho một dbt build (port Snowflake, docs/snowflake-port.md); target snowflake chỉ chạy trong workflow snowflake-port.yml
 
 python -m eventspec.generate                     # sinh lại eventspec/schemas/ từ catalog (docs/eventspec.md)
