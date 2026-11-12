@@ -1,0 +1,231 @@
+name: Airflow backfill
+
+# Airflow 3 alternative to the hourly cron of pipeline.yml (docs/airflow.md): `airflow standalone`
+# (SQLite, dev only) runs on this runner, the DAG `repopulse_pipeline` (dags/, spec in
+# repopulse/dagspec.py) is backfilled over N data days (one GH Archive hour per day by default,
+# runner disk is 14 GB), and one runs.csv row with variant `airflow-backfill-<N>d` is written to
+# the `airflow-backfill-<run_id>` artifact. Merge it with
+# `python benchmarks/record_run.py out/airflow-backfill-row.csv`.
+#
+# Incremental batch, not streaming. Real GH Archive data. dbt writes a local DuckDB file
+# (target ci) with a fixed fake salt: this workflow needs no secret and never touches MotherDuck.
+#
+# Triggers:
+# - workflow_dispatch: only once this file is on `main` (the default branch), i.e. after a release.
+# - pull_request (path-filtered; not a required check, so `paths:` is fine unlike ci.yml): a
+#   2-day smoke on a fixed past day, so it is repeatable.
+# The cron of pipeline.yml stays as it is: both orchestrations are measured side by side.
+
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "data days to backfill, 1..7"
+        type: string
+        default: "3"
+      last_data_date:
+        description: "last data day YYYY-MM-DD (UTC)"
+        type: string
+        default: "2026-10-25"
+      hour:
+        description: "last data hour of each day, 0..23 (UTC)"
+        type: string
+        default: "15"
+      hours_per_day:
+        description: "consecutive hours per day ending at hour, 1..6"
+        type: string
+        default: "1"
+  pull_request:
+    branches: [develop, main]
+    paths:
+      - ".github/workflows/airflow.yml"
+      - "dags/**"
+      - "repopulse/dagspec.py"
+      - "tests/test_airflow_dag.py"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: airflow-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backfill:
+    name: Airflow backfill (standalone)
+    runs-on: ubuntu-latest
+    timeout-minutes: 210
+    env:
+      GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      DAYS: ${{ inputs.days || '2' }}
+      LAST_DATA_DATE: ${{ inputs.last_data_date || '2026-10-25' }}
+      REPOPULSE_AIRFLOW_HOUR: ${{ inputs.hour || '15' }}
+      REPOPULSE_AIRFLOW_HOURS_PER_DAY: ${{ inputs.hours_per_day || '1' }}
+      PII_HASH_SALT: not-a-secret-pr-salt
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+      # Throwaway instance on localhost: no login, so no generated password in the uploaded log.
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: "True"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run timestamp
+        run: echo "RUN_AT=$(date -u +%Y-%m-%dT%H:%M:%S+00:00)" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      # PySpark 3.5 + Delta need Java 17.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install project
+        run: pip install -e ".[dev,spark,dbt]"
+
+      # Airflow lives in its own venv: its constraints clash with dbt/pyspark. The tasks run the
+      # project's python (REPOPULSE_PYTHON); the venv only needs repopulse.dagspec (stdlib only).
+      - name: Paths
+        run: |
+          {
+            echo "AIRFLOW_VENV=$RUNNER_TEMP/airflow-venv"
+            echo "AIRFLOW=$RUNNER_TEMP/airflow-venv/bin/airflow"
+            echo "AIRFLOW_HOME=$RUNNER_TEMP/airflow-home"
+            echo "AIRFLOW__CORE__DAGS_FOLDER=$GITHUB_WORKSPACE/dags"
+            echo "REPOPULSE_HOME=$GITHUB_WORKSPACE"
+            echo "REPOPULSE_PYTHON=$(command -v python)"
+            echo "REPOPULSE_SLA_MISS_FILE=$GITHUB_WORKSPACE/out/airflow/sla-miss.jsonl"
+          } >> "$GITHUB_ENV"
+
+      - name: Install Airflow 3.4.0
+        run: |
+          python -m venv "$AIRFLOW_VENV"
+          "$AIRFLOW_VENV/bin/pip" install --upgrade pip
+          "$AIRFLOW_VENV/bin/pip" install "apache-airflow==3.4.0" pytest \
+            --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-3.4.0/constraints-3.11.txt"
+          "$AIRFLOW_VENV/bin/pip" install --no-deps -e .
+          mkdir -p "$AIRFLOW_HOME"
+          "$AIRFLOW" version
+
+      - name: DAG loads (DagBag)
+        env:
+          REPOPULSE_REQUIRE_AIRFLOW: "1"
+        run: |
+          "$AIRFLOW_VENV/bin/python" -m pytest tests/test_airflow_dag.py -rs
+
+      # Sets BACKFILL_FROM/TO and REPOPULSE_AIRFLOW_END_DATE (the DAG's end_date: no scheduled
+      # run of its own once unpaused), before the scheduler parses the DAG.
+      - name: Backfill window
+        run: python -m repopulse.dagspec window --last-data-date "$LAST_DATA_DATE" --days "$DAYS" >> "$GITHUB_ENV"
+
+      - name: Airflow database
+        run: '"$AIRFLOW" db migrate'
+
+      # `airflow standalone` starts its components with the bare command `airflow`, so the venv
+      # must be on PATH; appended, so `python` stays the project's interpreter for the tasks.
+      # Fails early when the components do not come up (not after a long backfill wait).
+      - name: Start Airflow in the background
+        run: |
+          PATH="$PATH:$AIRFLOW_VENV/bin" nohup "$AIRFLOW" standalone > "$AIRFLOW_HOME/standalone.log" 2>&1 &
+          for i in $(seq 1 60); do
+            if grep -q "Airflow is ready" "$AIRFLOW_HOME/standalone.log"; then
+              echo "Airflow is ready (try $i)"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::Airflow standalone was not ready after 5 minutes"
+          tail -n 80 "$AIRFLOW_HOME/standalone.log"
+          exit 1
+
+      - name: Wait for the DAG to be registered
+        run: |
+          "$AIRFLOW" dags reserialize || echo "::warning::dags reserialize failed"
+          found=""
+          for i in $(seq 1 60); do
+            if "$AIRFLOW" dags list -o plain 2>/dev/null | grep -q repopulse_pipeline; then
+              found="yes"
+              echo "repopulse_pipeline registered (try $i)"
+              break
+            fi
+            sleep 5
+          done
+          "$AIRFLOW" dags list-import-errors -o json || true
+          if [ -z "$found" ]; then
+            echo "::error::repopulse_pipeline was not registered after 5 minutes"
+            exit 1
+          fi
+
+      - name: Unpause the DAG
+        run: '"$AIRFLOW" dags unpause -y repopulse_pipeline'
+
+      - name: Create the backfill
+        run: |
+          echo "BACKFILL_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%S+00:00)" >> "$GITHUB_ENV"
+          "$AIRFLOW" backfill create --dag-id repopulse_pipeline \
+            --from-date "$BACKFILL_FROM" --to-date "$BACKFILL_TO" \
+            --max-active-runs 1
+
+      - name: Wait for the backfill runs
+        run: |
+          python -m repopulse.dagspec wait \
+            --last-data-date "$LAST_DATA_DATE" --days "$DAYS" \
+            --started-at "$BACKFILL_STARTED_AT" \
+            --timeout-minutes "$((DAYS * 25))" --interval-seconds 30 \
+            --airflow "$AIRFLOW" --max-active-runs 1 \
+            --summary out/airflow/backfill-summary.json \
+            --raw out/airflow/list-runs.json
+
+      - name: runs.csv row
+        run: |
+          python -m repopulse.dagspec row \
+            --summary out/airflow/backfill-summary.json \
+            --run-at "$RUN_AT" \
+            --git-sha "$GIT_SHA" \
+            --run-id "$GITHUB_RUN_ID" \
+            --trigger "$GITHUB_EVENT_NAME" \
+            --summaries-dir out/airflow \
+            --out out/airflow-backfill-row.csv
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "### Airflow backfill (incremental batch, $DAYS day(s), target: \`ci\`)"
+            echo
+            for f in out/airflow-backfill-row.csv out/airflow/backfill-summary.json \
+                     out/airflow/list-runs.json out/airflow/sla-miss.jsonl; do
+              if [ -f "$f" ]; then
+                echo "\`$f\`"
+                echo
+                echo '```'
+                cat "$f"
+                echo '```'
+              else
+                echo "\`$f\`: not written."
+              fi
+              echo
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Airflow task log paths hold ':' (run_id=backfill__<ISO time>), which upload-artifact
+      # rejects: the logs go into one tar file under out/.
+      - name: Pack Airflow logs
+        if: always()
+        run: |
+          mkdir -p out/airflow
+          if [ -d "$AIRFLOW_HOME" ]; then
+            tar -czf out/airflow/airflow-logs.tar.gz -C "$AIRFLOW_HOME" standalone.log logs \
+              || echo "::warning::could not pack every Airflow log"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: airflow-backfill-${{ github.run_id }}
+          path: out/
+          if-no-files-found: warn
+          retention-days: 30
