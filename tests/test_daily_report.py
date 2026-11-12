@@ -61,7 +61,7 @@ def test_run_metrics_without_result_event_is_empty_not_zero():
 
 def test_metrics_row_has_every_field_in_order():
     row = metrics_row(
-        "2026-11-11 22:01:00", "6", "review", "fail", "mutation sống", run_metrics([_result()])
+        "2026-11-11 22:01:00", "6", "review", "fail", "live mutant", run_metrics([_result()])
     )
     assert list(row) == METRIC_FIELDS
     assert row["task"] == "6" and row["phase"] == "review" and row["outcome"] == "fail"
@@ -126,13 +126,13 @@ def test_propose_rules_groups_repeated_denials_by_command_prefix():
     rules = propose_rules(denials)
     assert len(rules) == 1
     assert "`git stash`" in rules[0]
-    assert "2 lần" in rules[0] and "6, 12" in rules[0]
+    assert "2 times" in rules[0] and "6, 12" in rules[0]
 
 
 def test_propose_rules_respects_threshold():
     denials = [_denial("6", "rm -rf a"), _denial("7", "rm -rf b"), _denial("8", "rm -rf c")]
     assert propose_rules(denials, min_count=4) == []
-    assert "3 lần" in propose_rules(denials, min_count=3)[0]
+    assert "3 times" in propose_rules(denials, min_count=3)[0]
 
 
 def test_denials_between_filters_utc_window_and_skips_garbage():
@@ -148,11 +148,11 @@ def test_denials_between_filters_utc_window_and_skips_garbage():
 
 def test_needs_lam_reads_unticked_items_of_its_section():
     md = (
-        "# Orchestrator run\n\n## Việc cần Lam\n- [ ] develop-ci: CI đỏ\n- [ ] 9: cần secret\n\n"
-        "## Kết quả từng việc\n- [ ] not this\n"
+        "# Orchestrator run\n\n## Needs Lam\n- [ ] develop-ci: CI red\n- [ ] 9: needs secret\n\n"
+        "## Results per task\n- [ ] not this\n"
     )
-    assert needs_lam(md) == ["develop-ci: CI đỏ", "9: cần secret"]
-    assert needs_lam("## Việc cần Lam\n- Không có\n") == []
+    assert needs_lam(md) == ["develop-ci: CI red", "9: needs secret"]
+    assert needs_lam("## Needs Lam\n- None\n") == []
     assert needs_lam("") == []
 
 
@@ -164,24 +164,25 @@ def test_build_daily_report_summarises_the_day():
     rows = [
         metrics_row("2026-11-11 09:00:00", "6", "build", "ready", "23", m),
         metrics_row("2026-11-11 10:00:00", "6", "review", "merged", "23", m),
-        metrics_row("2026-11-11 11:00:00", "12", "review", "fail", "mutation sống", m),
-        metrics_row("2026-11-11 12:00:00", "7", "build", "failed", "treo 30 phút", m),
+        metrics_row("2026-11-11 11:00:00", "12", "review", "fail", "live mutant", m),
+        metrics_row("2026-11-11 12:00:00", "7", "build", "failed", "hung for 30 minutes", m),
     ]
     denials = [_denial("6", "git stash"), _denial("12", "git stash pop")]
-    subject, body = build_daily_report(date(2026, 11, 11), rows, denials, ["9: cần secret"])
-    assert subject == "RepoPulse 2026-11-11: 1 merged, 2 thất bại, $54.60"
-    assert "PR #23 (việc 6)" in body
-    assert "12 [review]: fail — mutation sống" in body
-    assert "7 [build]: failed — treo 30 phút" in body
+    subject, body = build_daily_report(date(2026, 11, 11), rows, denials, ["9: needs secret"])
+    assert subject == "RepoPulse 2026-11-11: 1 merged, 2 failed, $54.60"
+    assert "PR #23 (task 6)" in body
+    assert "12 [review]: fail — live mutant" in body
+    assert "7 [build]: failed — hung for 30 minutes" in body
     assert "`git stash`" in body
-    assert "- [ ] 9: cần secret" in body
+    assert "- [ ] 9: needs secret" in body
+    assert "## Needs Lam" in body and "## Merged" in body
     assert "| 6 | 2 | 138 |" in body  # per task: sessions, turns
 
 
 def test_build_daily_report_on_an_empty_day():
     subject, body = build_daily_report(date(2026, 11, 11), [], [], [])
-    assert subject == "RepoPulse 2026-11-11: 0 merged, 0 thất bại, $0.00"
-    assert "Không có phiên nào" in body
+    assert subject == "RepoPulse 2026-11-11: 0 merged, 0 failed, $0.00"
+    assert "No sessions ran" in body
 
 
 # ---------- e-mail ----------
@@ -247,7 +248,7 @@ def test_build_daily_report_names_its_window_when_given():
     _, body = build_daily_report(
         date(2026, 11, 11), [], [], [], window="2026-11-10 22:00 → 2026-11-11 22:00"
     )
-    assert "Khoảng: 2026-11-10 22:00 → 2026-11-11 22:00" in body
+    assert "Window: 2026-11-10 22:00 → 2026-11-11 22:00" in body
 
 
 def test_daily_due_once_per_day_after_the_hour():
