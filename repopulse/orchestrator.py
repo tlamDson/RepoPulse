@@ -490,7 +490,9 @@ Quy trình:
 1. Viết kế hoạch ngắn (5-10 dòng) có mục "test phải đỏ".
 2. Giao agent `{task.agent}` (subagent, KHÔNG dùng isolation worktree, làm ngay trong thư mục này)
    viết test đỏ, commit riêng, rồi code tới khi xanh. Dán nguyên văn .claude/rules/command-style.md
-   vào brief của agent.
+   vào brief của agent. Gọi agent ở foreground: KHÔNG đặt `run_in_background`, chờ nó trả kết
+   quả rồi mới đi tiếp. Phiên này thoát thì mọi việc chạy nền chết theo, nên không kết thúc lượt
+   khi còn agent hay lệnh nào đang chạy.
 3. Push, mở PR vào `develop` theo .github/pull_request_template.md (có ## RED và ## Giả định).
 4. Chờ CI: `gh pr checks <số> --watch --interval 30` (foreground), lặp tới khi xong.
    CI đỏ thì sửa và push lại.
