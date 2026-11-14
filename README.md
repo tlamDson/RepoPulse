@@ -48,7 +48,7 @@ flowchart LR
 - **Layers:** Spark writes bronze (raw lines kept), silver (typed, deduplicated, late events accepted inside a window, PII hashed) and quarantine (events that fail the schema, with a reason). dbt builds staging, the star schema, the six marts for Q1–Q6 and a `public` schema whose identifier columns are masked.
 - **Rows for `runs.csv`:** the benchmark, pipeline and quality workflows upload a row as an artifact. `benchmarks/record_run.py` checks its schema and appends it to `runs.csv`.
 
-**The scheduled pipeline runs on a GitHub Actions runner, with gold in MotherDuck.** PySpark and Delta Lake run on the runner and dbt builds the gold layer in MotherDuck: this is path A, and the diagram above draws it. Databricks is measured next to it as path B: the same bronze/silver job runs as a serverless Databricks job and dbt builds on a Databricks SQL warehouse. A first cloud probe was rejected by Databricks, because the token then stored as a secret was of the wrong kind; a second probe, with a personal access token, showed that Databricks can be driven from GitHub Actions, and both paths now have rows in `runs.csv`. Which path becomes the primary one is decided by a rule fixed before measuring, applied to scheduled runs only by `python -m repopulse.pathdecision`. Until scheduled runs of both paths cover enough days the rule keeps path A: that is a lack of data, not a result against Databricks. The rule, the outcome and when to apply it again are in [`docs/probe-result.md`](docs/probe-result.md). The pipeline is an incremental batch that runs every hour, not a stream.
+**The scheduled pipeline runs on a GitHub Actions runner, with gold in MotherDuck.** PySpark and Delta Lake run on the runner and dbt builds the gold layer in MotherDuck: this is path A, and the diagram above draws it. Databricks is measured next to it as path B: the same bronze/silver job runs as a serverless Databricks job ([`docs/databricks-job.md`](docs/databricks-job.md)) and dbt builds on a Databricks SQL warehouse. A first cloud probe was rejected by Databricks, because the token then stored as a secret was of the wrong kind; a second probe, with a personal access token, showed that Databricks can be driven from GitHub Actions, and both paths now have rows in `runs.csv`. Which path becomes the primary one is decided by a rule fixed before measuring, applied to scheduled runs only by `python -m repopulse.pathdecision`. Until scheduled runs of both paths cover enough days the rule keeps path A: that is a lack of data, not a result against Databricks. The rule, the outcome and when to apply it again are in [`docs/probe-result.md`](docs/probe-result.md). The pipeline is an incremental batch that runs every hour, not a stream.
 
 ## Results
 
@@ -214,18 +214,6 @@ Not compared with `baseline`: either there is no baseline row with the same `dat
 The full log, with every run and not only the newest, is [`runs.csv`](runs.csv).
 <!-- results:end -->
 
-### Not measured yet
-
-Nothing in this list has a row in `runs.csv`, so this README gives no number for it:
-
-- Event counts and sizes at bronze, silver and gold, the time to add one day of data compared with a full refresh, and the share of events rejected for schema or duplicates (measures M1, M2 and M9 of [`docs/plan.md`](docs/plan.md)).
-- Data freshness at p50 and p95 (M3). It needs many scheduled runs to accumulate.
-- Which path wins under the primary-path rule. The rule needs scheduled runs of both paths on several UTC days, and the generated table in [`docs/probe-result.md`](docs/probe-result.md) shows where the count stands.
-- The daily quota of Databricks Free Edition and the capacity of its Volumes. The probe checks that they can be used, not how large they are.
-- The Tableau Public workbook. The dashboard build writes the CSV files; publishing is a manual step by the repo owner.
-
-The scheduled pipeline uploads its `pipeline-incremental` rows as workflow artifacts. They reach `runs.csv` only when someone merges them with `record_run.py`; a merged row then appears above under "Other runs". The rows of the two paths are merged the same way and appear in the two-paths table.
-
 ## Design decisions
 
 - **Path A on the schedule, Databricks measured as path B.** The first probe reached MotherDuck from GitHub Actions but was rejected by Databricks, so Spark and Delta run on the runner and gold goes to MotherDuck. Once a second probe showed that Databricks can be driven from Actions, the choice became a measurement: both paths run the same incremental batch on the same window of data, and a rule fixed before measuring picks the primary one from the scheduled runs. Until there are enough of them the rule keeps path A. See [`docs/probe-result.md`](docs/probe-result.md) and [`docs/path-comparison.md`](docs/path-comparison.md).
@@ -239,15 +227,6 @@ The scheduled pipeline uploads its `pipeline-incremental` rows as workflow artif
 - **A static dashboard on GitHub Pages.** Databricks dashboards cannot be shared publicly, and the gold layer of the scheduled pipeline is in MotherDuck. The site reads only the `public` schema, and the same data is exported as CSV for Tableau. See [`docs/dashboard.md`](docs/dashboard.md).
 - **Application events are simulated.** There is no app with real users, so `simkit` generates events from the catalog with a fixed seed and injects faults that are known in advance. That is what makes fault detection measurable. Wherever these events are reported they are labelled simulated. See [`docs/simkit.md`](docs/simkit.md).
 - **One dbt project for two engines.** The SQL avoids DuckDB-only syntax outside a small macro file, and a test enforces it, so the same project also builds on Snowflake. See [`docs/snowflake-port.md`](docs/snowflake-port.md).
-
-## Method pages
-
-Each measurement has a page with its method and limits. The full documentation index is in [`docs/developer-guide.md`](docs/developer-guide.md#documentation-index); the plan (in Vietnamese) is [`docs/plan.md`](docs/plan.md).
-
-- Two paths and the primary-path rule: [`docs/probe-result.md`](docs/probe-result.md), [`docs/path-comparison.md`](docs/path-comparison.md), [`docs/databricks-job.md`](docs/databricks-job.md), [`docs/dbt-databricks.md`](docs/dbt-databricks.md)
-- Engines and formats: [`docs/engine-matrix.md`](docs/engine-matrix.md), [`docs/iceberg-vs-delta.md`](docs/iceberg-vs-delta.md), [`docs/trino-hive.md`](docs/trino-hive.md), [`docs/benchmark-scale.md`](docs/benchmark-scale.md), [`docs/query-optimization.md`](docs/query-optimization.md)
-- Kafka benchmark and fault tests: [`docs/streaming.md`](docs/streaming.md), [`docs/streaming-fault.md`](docs/streaming-fault.md)
-- Orchestration, metrics and the SQL agent: [`docs/airflow.md`](docs/airflow.md), [`docs/semantic-layer.md`](docs/semantic-layer.md), [`docs/sql-agent.md`](docs/sql-agent.md)
 
 ## Q6 health score
 
