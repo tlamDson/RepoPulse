@@ -6,11 +6,13 @@ with ordered as (
         actor_id,
         actor_login,
         created_at,
-        coalesce(
-            actor_login is distinct from lag(actor_login) over (
+        -- the first event of an actor always starts version 1, even when its login is null
+        -- (null is not distinct from the null lag() returns on the first row)
+        (
+            row_number() over (partition by actor_id order by created_at, event_id) = 1
+            or actor_login is distinct from lag(actor_login) over (
                 partition by actor_id order by created_at, event_id
-            ),
-            true
+            )
         ) as starts_version,
         event_id
     from {{ ref('stg_gharchive_events') }}

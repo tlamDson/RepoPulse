@@ -240,7 +240,7 @@ def test_incremental_row_counts_equal_full_refresh(incremental, reference, step,
     counts = {m: len(rows) for m, (_, rows) in snap.items()}
     expected = {m: len(rows) for m, (_, rows) in reference[ref].items()}
     assert counts == expected
-    assert counts[STAGING] == {"b2": 34, "b3": 41}[step]  # 33 + 1, then + 3 + 3 + 1
+    assert counts[STAGING] == {"b2": 34, "b3": 42}[step]  # 33 + 1, then + 3 + 4 + 1
 
 
 def test_staging_marks_each_load(incremental):
@@ -302,7 +302,7 @@ def test_seed_repo_late_event_shifts_versions_of_existing_facts(incremental):
 
 def test_full_refresh_keeps_accumulated_staging(incremental, reference):
     snap = _snap(incremental, "full_refresh_b3", keep_load_marker=False)
-    assert len(snap[STAGING][1]) == len(reference["union_all"][STAGING][1]) == 41
+    assert len(snap[STAGING][1]) == len(reference["union_all"][STAGING][1]) == 42
     for model in MODELS:
         assert_same_rows(model, snap[model], reference["union_all"][model])
 
