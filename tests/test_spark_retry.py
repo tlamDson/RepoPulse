@@ -75,25 +75,52 @@ class _FakeBuilder:
         return self.build()
 
 
-def test_create_session_gets_the_session_after_a_gateway_exit():
-    builder = _FakeBuilder(failures=1)
+def test_create_session_gets_the_session_on_the_third_attempt():
+    """Two gateway exits still give a session: the fixture keeps all 3 attempts."""
+    builder = _FakeBuilder(failures=2)
+    sleeps: list[float] = []
 
-    assert create_session(builder, sleep=lambda _s: None) == "session"
-    assert builder.calls["n"] == 2
+    assert create_session(builder, sleep=sleeps.append) == "session"
+    assert builder.calls["n"] == 3
+    assert sleeps == [10.0, 10.0]
 
 
-def test_spark_fixture_starts_the_session_through_create_session():
-    """Guard the wiring: the ``spark`` fixture must not call ``getOrCreate`` itself."""
+def test_create_session_gives_up_after_the_third_attempt():
+    builder = _FakeBuilder(failures=3)
+
+    with pytest.raises(RuntimeError, match="JAVA_GATEWAY_EXITED"):
+        create_session(builder, sleep=lambda _s: None)
+    assert builder.calls["n"] == 3
+
+
+def _fixture_calls() -> list[ast.Call]:
     tree = ast.parse((Path(__file__).parent / "conftest.py").read_text(encoding="utf-8"))
     fixture = next(
         node
         for node in ast.walk(tree)
         if isinstance(node, ast.FunctionDef) and node.name == "spark"
     )
-    called = {
-        call.func.id if isinstance(call.func, ast.Name) else call.func.attr
+    return [
+        call
         for call in ast.walk(fixture)
         if isinstance(call, ast.Call) and isinstance(call.func, (ast.Name, ast.Attribute))
-    }
+    ]
+
+
+def _name(call: ast.Call) -> str:
+    return call.func.id if isinstance(call.func, ast.Name) else call.func.attr
+
+
+def test_spark_fixture_starts_the_session_through_create_session():
+    """Guard the wiring: the ``spark`` fixture must not call ``getOrCreate`` itself."""
+    called = {_name(call) for call in _fixture_calls()}
     assert "create_session" in called
     assert "getOrCreate" not in called
+
+
+def test_spark_fixture_keeps_the_default_retry_settings():
+    """The fixture passes only the builder, so it gets the 3 attempts tested above."""
+    calls = [call for call in _fixture_calls() if _name(call) == "create_session"]
+    assert len(calls) == 1
+    assert len(calls[0].args) == 1
+    assert calls[0].keywords == []
