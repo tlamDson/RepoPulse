@@ -66,6 +66,16 @@ Every path run by trigger. Rows whose trigger is not `schedule` are not used by 
 
 To turn off the `path-comparison.yml` cron once there are enough runs: see [`path-comparison.md`](path-comparison.md), section "Turning off the cron once D4 has enough runs".
 
+## When Databricks refuses new runs
+
+The Free Edition can switch off new job runs for the whole organization: `runs/submit` answers `HTTP 404 FEATURE_DISABLED` ("Triggering new runs for organization ... is currently disabled temporarily"). This is a platform state, not a pipeline bug, so the hourly `path-comparison.yml` cron uses a circuit breaker instead of going red every hour:
+
+- `python -m repopulse.databricks_job run` exits 3 on `FEATURE_DISABLED` at `runs/submit` (`repopulse/databricks_gate.py`).
+- The `databricks` step of path B turns that into a `::notice::`, skips the remaining B steps (warehouse, dbt, queries, row) and the workflow stays green. **No `path-b-databricks` row is written**, so `runs.csv` never holds a failed B row caused by the platform state.
+- Any other Databricks error, including `FEATURE_DISABLED` outside `runs/submit`, still fails the job.
+
+Effect on the rule: an hour skipped this way adds no B run, so a full UTC day on which Databricks refused runs has fewer than 24 B runs and rule 1 drops B for that window. That is intended: a path that cannot run the full 24 times/day is not eligible. The cron does not need pausing; B rows come back by themselves once Databricks re-enables job runs. Workflow details: [`path-comparison.md`](path-comparison.md).
+
 ## Probe runs
 
 The probe's path-selection rule (`repopulse.probe.decide_path`): `primary` when all four Databricks checks (auth, Volume, serverless job, SQL warehouse) pass and `dbt debug --target databricks` does not fail; otherwise `fallback` when MotherDuck connects and `dbt debug --target motherduck` does not fail; otherwise `blocked`. The probe report only has pass/fail/skipped and no measurements (measurements come only from `runs.csv`). The probe only answers "can it be controlled from outside"; which path to run is decided by the Plan v2 rule above.

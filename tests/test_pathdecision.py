@@ -452,5 +452,5 @@ def test_repo_probe_result_documents_the_feature_disabled_circuit_breaker():
     body = section[1].split("\n## ", 1)[0]
     assert "FEATURE_DISABLED" in body
     assert f"exits {EXIT_FEATURE_DISABLED}" in body
-    assert "no `path-b-databricks` row" in body
+    assert "no `path-b-databricks` row" in body.lower()
     assert "path-comparison.md" in body
