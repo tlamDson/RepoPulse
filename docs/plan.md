@@ -194,7 +194,7 @@ Call A runner + MotherDuck (the current path), and B Databricks serverless + SQL
 
 D4 records the data table, the rule and the conclusion in `docs/probe-result.md`. The table only uses numbers in `runs.csv`. D4 changes `pipeline.yml` only when the rule says to switch.
 
-### Tasks (DAG in `scripts/prs.toml`)
+### Tasks (DAG in conductor's `projects/repopulse/tasks.toml`)
 
 | Task | Branch | Content | Red test written first | Measurement into `runs.csv` |
 |---|---|---|---|---|
@@ -242,7 +242,7 @@ Plan v2 is an extension. Dropping it would not affect the results of phase 1.
 
 ## How to run
 
-**Updated 2026-11-11:** run headless with `scripts/orchestrate.py` (DAG in `scripts/prs.toml`, one `claude -p` session per PR in its own worktree, up to 5 in parallel (previously 2), specialist agents per area, automatic quota waiting, automatic release). Usage: `docs/kickoff.md`. The old description below is kept for reference on the roles.
+**Updated 2026-11-17:** run headless with conductor (`D:\Desktop\Conductor`, DAG in `projects/repopulse/tasks.toml`, one `claude -p` session per PR in its own worktree, up to 5 in parallel (previously 2), specialist agents per area, automatic quota waiting, automatic release). Usage: `docs/kickoff.md`. The old description below is kept for reference on the roles.
 
 - **Main Fable session (effort high):** writes a short plan for each PR with a section for tests that must be red, assigns the work, decides merges, writes `docs/progress.md`.
 - **Opus subagent (effort medium):** one agent per PR in its own worktree, writing the red test then the code; a different Opus agent reviews with evidence.
