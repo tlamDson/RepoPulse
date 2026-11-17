@@ -24,6 +24,7 @@ window_hours = 24     # N: median of up to N hours right before the evaluated ho
 min_history = 3       # fewer history hours: no conclusion (no alert)
 min_ratio = 0.3       # hour total < min_ratio * median total -> volume_drop
 evaluate_hours = 3    # newest hours evaluated per run
+ingest_lag_hours = 2  # the newest hour expected in the table is now - this (as ingest --lag-hours)
 type_min_median = 100 # event type with median >= this and 0 in the evaluated hour -> type missing
 
 [volume.reference]
