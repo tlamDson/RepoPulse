@@ -2,7 +2,7 @@
   "autoMode": {
     "environment": [
       "This is the RepoPulse repository (github.com/tlamDson/RepoPulse), a personal open-source data engineering project owned by the user. Its git remote origin and the GitHub repo tlamDson/RepoPulse are trusted.",
-      "Sessions run unattended through scripts/orchestrate.py: each PR runs in its own git worktree under .claude/worktrees/pr-<id> inside this repository, branched from origin/develop.",
+      "Sessions run unattended through the conductor orchestrator (D:/Desktop/Conductor): each task runs in its own git worktree under .claude/worktrees/cd-<id> inside this repository, branched from origin/develop.",
       "Downloading public hourly files from https://data.gharchive.org/ (GH Archive) and installing pinned Python packages from PyPI are normal parts of this project."
     ],
     "allow": [
