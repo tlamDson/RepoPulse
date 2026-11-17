@@ -575,6 +575,78 @@ def test_min_ratio_comes_from_the_config_file(tmp_path, cfg):
     assert [a.check for a in q.check_volume(counts, stricter)] == ["volume_drop"]
 
 
+# ---- known upstream gap hours (issue #77): an allowlist in quality.toml
+
+
+def gap_cfg(cfg, hours, **overrides) -> dict:
+    out = vol_cfg(cfg, **overrides)
+    out["volume"]["known_gaps"] = {"hours": list(hours)}
+    return out
+
+
+def test_default_config_lists_the_issue_77_gap_hours(cfg):
+    hours = cfg["volume"]["known_gaps"]["hours"]
+    for label in (
+        "2026-11-15T16",
+        "2026-11-15T21",
+        "2026-11-16T06",
+        "2026-11-17T03",
+        "2026-11-17T13",
+    ):
+        assert label in hours  # each counted with 0 PushEvent in the raw GH Archive file
+    for label in ("2026-11-16T08", "2026-11-16T15", "2026-11-17T14"):
+        assert label not in hours  # healthy (or unverified) hours are not allowlisted
+
+
+def test_config_without_known_gaps_table_still_loads(tmp_path):
+    data = tomllib.loads(CONFIG.read_text(encoding="utf-8"))
+    del data["volume"]["known_gaps"]  # a custom config written before the table existed
+    path = tmp_path / "quality.toml"
+    path.write_text(_to_toml(data), encoding="utf-8")
+    assert q.load_config(path)["volume"]["known_gaps"] == {"hours": []}
+
+
+def test_known_gap_hours_must_be_valid_hours(tmp_path):
+    data = tomllib.loads(CONFIG.read_text(encoding="utf-8"))
+    data["volume"].setdefault("known_gaps", {})["hours"] = ["2026-11-15 16:00"]
+    path = tmp_path / "quality.toml"
+    path.write_text(_to_toml(data), encoding="utf-8")
+    with pytest.raises(q.ConfigError, match=r"volume\.known_gaps\.hours"):
+        q.load_config(path)
+
+
+def test_known_gap_hour_raises_no_alert_and_is_reported(cfg):
+    counts = series([1000] * 30)
+    counts[hour(29)] = {"WatchEvent": 200}  # PushEvent gone and the total collapsed
+    assert {a.check for a in q.check_volume(counts, cfg)} == {"volume_drop", "volume_type_missing"}
+    allowed = gap_cfg(cfg, ["2026-11-02T05"])
+    assert q.check_volume(counts, allowed) == []
+    assert q.volume_status(counts, allowed)[-1]["status"] == "known_gap"
+
+
+def test_an_hour_next_to_a_known_gap_still_alerts(cfg):
+    counts = series([1000] * 30)
+    counts[hour(29)] = {"WatchEvent": 1000}
+    other = gap_cfg(cfg, ["2026-11-02T04"])
+    assert [a.check for a in q.check_volume(counts, other)] == ["volume_type_missing"]
+
+
+def test_known_gap_hours_are_left_out_of_the_history(cfg):
+    counts = series([1000] * 29)
+    for n in range(23, 28):  # 5 gap hours without PushEvent: they would drag the median to 0
+        counts[hour(n)] = {"WatchEvent": 400}
+    counts[hour(28)] = {"WatchEvent": 400}  # not allowlisted, no PushEvent
+    gaps = [hour(n).strftime("%Y-%m-%dT%H") for n in range(23, 28)]
+    small = vol_cfg(cfg, window_hours=8, evaluate_hours=1)
+    assert q.check_volume(counts, small) == []  # the gap hours hide the loss: the bug
+    guarded = gap_cfg(cfg, gaps, window_hours=8, evaluate_hours=1)
+    alerts = q.check_volume(counts, guarded)
+    assert [(a.check, a.details["event_type"]) for a in alerts] == [
+        ("volume_type_missing", "PushEvent")
+    ]
+    assert q.volume_status(counts, guarded)[-1]["history_hours"] == 3
+
+
 NOW_OUTAGE = hour(17) + timedelta(minutes=30)  # data stops after hour(11), 6 h ago
 
 
