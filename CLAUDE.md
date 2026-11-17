@@ -25,6 +25,7 @@ The detailed rules below always apply, not only when asked:
 - **Never read or print secret values** (`DATABRICKS_*`, `MOTHERDUCK_TOKEN`, `SNOWFLAKE_*`, the `.env` file). The repo owner adds secrets themselves.
 - **Update `CLAUDE.md` + `.claude/rules/*`** when a task changes a convention, tooling or process.
 - **Do not create new `.md` files in the root directory** — only `README.md` and `CLAUDE.md`. Other documentation goes in `docs/`.
+- **Orchestrator rules** (`D:\Desktop\Conductor\docs\authority.md` on the owner's machine): approved work runs through to the end without "continue?" stops; by day report to the owner every 30 minutes, at night only on a blocker. Ask for every permission a task needs once, before starting. Release versions follow SemVer from the commit types (`feat:` minor, only `fix:` patch, breaking change major, minor while 0.x); before a release, run the pipeline and dashboard as a real user 2-3 times on real data and file each problem as its own PR.
 
 ## Common commands
 
