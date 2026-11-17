@@ -625,7 +625,7 @@ def test_ingest_lag_comes_from_the_config_file(tmp_path, cfg):
 
 
 def test_now_must_have_a_time_zone_for_volume(cfg):
-    with pytest.raises(ValueError, match="time zone"):
+    with pytest.raises(ValueError, match="timezone-aware"):
         q.check_volume(series([1000] * 12), cfg, now=datetime(2026, 11, 1, 17))
 
 

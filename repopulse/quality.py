@@ -132,6 +132,7 @@ _SCHEMA: dict[str, dict[str, Callable[[object], bool]]] = {
         "min_history": _int(1),
         "min_ratio": _ratio,
         "evaluate_hours": _int(1),
+        "ingest_lag_hours": _int(0),
         "type_min_median": _int(1),
     },
     "volume.reference": {"history": _hours, "evaluate": _hours},
@@ -586,8 +587,13 @@ def compare_hour(
 
 
 def _evaluate_volume(
-    hourly_counts: Mapping[datetime, Mapping[str, int]], cfg: Mapping, table: str | None
+    hourly_counts: Mapping[datetime, Mapping[str, int]],
+    cfg: Mapping,
+    table: str | None,
+    now: datetime | None = None,
 ) -> tuple[list[Alert], list[dict]]:
+    if now is not None and (now.tzinfo is None or now.utcoffset() is None):
+        raise ValueError("now must be timezone-aware")
     if not hourly_counts:
         return [], []
     vol = cfg["volume"]
@@ -596,6 +602,8 @@ def _evaluate_volume(
     for moment, counts in hourly_counts.items():
         series[_floor_hour(_utc(moment))] = counts
     first, last = min(series), max(series)
+    if now is not None:  # the newest hour that should have landed: missing hours count as 0
+        last = max(last, _floor_hour(_utc(now)) - timedelta(hours=vol["ingest_lag_hours"]))
     hours = []
     cursor = first
     while cursor <= last:  # continuous: an hour without rows counts as 0
@@ -612,17 +620,29 @@ def _evaluate_volume(
 
 
 def check_volume(
-    hourly_counts: Mapping[datetime, Mapping[str, int]], cfg: Mapping, *, table: str | None = None
+    hourly_counts: Mapping[datetime, Mapping[str, int]],
+    cfg: Mapping,
+    *,
+    table: str | None = None,
+    now: datetime | None = None,
 ) -> list[Alert]:
-    """Volume alerts of the ``evaluate_hours`` newest hours of ``{hour: {event_type: count}}``."""
-    return _evaluate_volume(hourly_counts, cfg, table)[0]
+    """Volume alerts of the ``evaluate_hours`` newest hours of ``{hour: {event_type: count}}``.
+
+    With an aware ``now`` the newest hour is ``now - ingest_lag_hours`` (floored), so an outage
+    after the last populated hour is evaluated as 0 events; without it, the last populated hour.
+    """
+    return _evaluate_volume(hourly_counts, cfg, table, now)[0]
 
 
 def volume_status(
-    hourly_counts: Mapping[datetime, Mapping[str, int]], cfg: Mapping, *, table: str | None = None
+    hourly_counts: Mapping[datetime, Mapping[str, int]],
+    cfg: Mapping,
+    *,
+    table: str | None = None,
+    now: datetime | None = None,
 ) -> list[dict]:
     """Status line (ok / alert / insufficient_history) of every evaluated hour."""
-    return _evaluate_volume(hourly_counts, cfg, table)[1]
+    return _evaluate_volume(hourly_counts, cfg, table, now)[1]
 
 
 def check_freshness(latest_event_at: object, now: datetime, cfg: Mapping) -> list[Alert]:
@@ -1259,7 +1279,7 @@ def _cmd_check(args: argparse.Namespace, cfg: dict) -> int:
         raise QualityError(f"cannot read {cfg['volume']['table']}: {exc}") from None
     finally:
         con.close()
-    volume_alerts, statuses = _evaluate_volume(counts, cfg, None)
+    volume_alerts, statuses = _evaluate_volume(counts, cfg, None, now)
     freshness_alerts = check_freshness(latest, now, cfg)
     alerts = volume_alerts + freshness_alerts
     report = {

@@ -23,7 +23,7 @@ with different thresholds: `python -m repopulse.quality --config <file.toml> <co
 |---|---|---|
 | `[faults]` | `late_threshold_seconds`, `bot_events_per_window`, `bot_window_seconds` | thresholds of the fault checks |
 | `[faults.inject]` | `duplicate`, `null`, `wrong_type`, `late`, `schema_drift`, `bot` | number of faults of each type the harness injects |
-| `[volume]` | `table`, `window_hours`, `min_history`, `min_ratio`, `evaluate_hours`, `type_min_median` | volume check |
+| `[volume]` | `table`, `window_hours`, `min_history`, `min_ratio`, `evaluate_hours`, `ingest_lag_hours`, `type_min_median` | volume check |
 | `[volume.reference]` | `history`, `evaluate` | reference GH Archive hours (complete data) and the known-missing hours |
 | `[freshness]` | `table`, `column`, `max_lag_hours` | freshness check |
 | `[alert]` | `label`, `template` | Issue label, Issue template file |
@@ -101,7 +101,11 @@ python benchmarks/record_run.py <artifact directory>/dq-fault-row.csv
 `check_volume(hourly_counts, cfg)` with `{UTC hour: {event_type: event count}}` (counted by the staging table's
 `landing_date`/`landing_hour`):
 
-- Build a **continuous** series of hours from the first hour to the last; an hour with no rows = 0.
+- Build a **continuous** series of hours from the first hour to the last; an hour with no rows = 0. The last hour
+  is the later of the last populated hour and `now - ingest_lag_hours` (floored to the hour; `check` passes
+  `--now`), so a full ingestion outage after the last populated hour is evaluated as 0 events and raises
+  `volume_drop`. Without `now` (library call) the series ends at the last populated hour. An outage longer than
+  `window_hours` leaves a median of 0 and no volume alarm; `freshness_stale` covers that case.
 - Each hour among the newest `evaluate_hours` is compared with the **median** of up to `window_hours` hours
   immediately before it:
   - total < `min_ratio` × median total → `volume_drop`;
