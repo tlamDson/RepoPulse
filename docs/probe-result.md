@@ -68,7 +68,11 @@ To turn off the `path-comparison.yml` cron once there are enough runs: see [`pat
 
 ## When Databricks refuses new runs
 
-The Free Edition can switch off new job runs for the whole organization: `runs/submit` answers `HTTP 404 FEATURE_DISABLED` ("Triggering new runs for organization ... is currently disabled temporarily"). This is a platform state, not a pipeline bug, so the hourly `path-comparison.yml` cron uses a circuit breaker instead of going red every hour:
+The Free Edition can switch off new job runs for the whole organization: `runs/submit` answers `HTTP 404 FEATURE_DISABLED` ("Triggering new runs for organization ... is currently disabled temporarily"). This is a platform state, not a pipeline bug, so `path-comparison.yml` on `develop` has a circuit breaker so that it does not go red every hour.
+
+**Status: on `develop` only, not yet active for the cron.** The circuit breaker came in with #80 (`22891f9`), which is on `develop` but not on `main`. Scheduled workflows only run from `main`, so until the next `develop` → `main` release the hourly cron still runs the old workflow. Each hour Databricks refuses runs, that cron run is red. The release is the repo owner's decision. After it, the cron behaves as below.
+
+What the circuit breaker does once `main` has it:
 
 - `python -m repopulse.databricks_job run` exits 3 on `FEATURE_DISABLED` at `runs/submit` (`repopulse/databricks_gate.py`).
 - The `databricks` step of path B turns that into a `::notice::`, skips the remaining B steps (warehouse, dbt, queries, row) and the workflow stays green. **No `path-b-databricks` row is written**, so `runs.csv` never holds a failed B row caused by the platform state.

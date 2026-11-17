@@ -454,3 +454,6 @@ def test_repo_probe_result_documents_the_feature_disabled_circuit_breaker():
     assert f"exits {EXIT_FEATURE_DISABLED}" in body
     assert "no `path-b-databricks` row" in body.lower()
     assert "path-comparison.md" in body
+    # The cron runs from main only: the doc must not present the breaker as live before release.
+    assert "not yet active for the cron" in body
+    assert "release" in body
