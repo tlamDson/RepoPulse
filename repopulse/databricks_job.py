@@ -35,6 +35,7 @@ from typing import Any
 from urllib.parse import urlencode, urlsplit
 
 from repopulse import ingest
+from repopulse.databricks_gate import EXIT_FEATURE_DISABLED, FeatureDisabled, is_feature_disabled
 from repopulse.pipeline import write_row
 from repopulse.probe import (
     ApiError,
@@ -334,7 +335,12 @@ class RunOutcome:
 
 def submit_run(client: Client, payload: Mapping[str, Any]) -> int:
     """Submit once; a retried request carries the same idempotency token, so one run."""
-    data = client.json("POST", "/api/2.1/jobs/runs/submit", json_body=dict(payload))
+    try:
+        data = client.json("POST", "/api/2.1/jobs/runs/submit", json_body=dict(payload))
+    except ApiError as exc:
+        if is_feature_disabled(exc):
+            raise FeatureDisabled(str(exc)) from exc
+        raise
     run_id = data.get("run_id")
     if isinstance(run_id, bool) or not isinstance(run_id, int):
         raise JobError("runs/submit answered without a run_id")
@@ -685,6 +691,9 @@ def main(
             if not Path(path).exists():
                 raise JobError(f"{what} does not exist: {path}")
         return _run(ctx, env, salt, hours)
+    except FeatureDisabled as exc:
+        print(f"skipped: {redact(str(exc))}", file=sys.stderr)
+        return EXIT_FEATURE_DISABLED
     except Exception as exc:
         print(f"error: {redact(f'{type(exc).__name__}: {exc}')}", file=sys.stderr)
         return 1

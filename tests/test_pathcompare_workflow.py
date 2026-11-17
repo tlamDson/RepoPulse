@@ -192,7 +192,7 @@ def test_missing_secrets_skip_at_step_level_with_a_notice(key):
     j = job(load(), key)
     detect = [s for s in runs(j) if "HAS_SECRETS=true" in s["run"]]
     assert len(detect) == 1
-    notices = [s for s in runs(j) if "::notice::" in s["run"]]
+    notices = [s for s in runs(j) if "::notice::" in s["run"] and s.get("id") != "databricks"]
     assert len(notices) == 1 and NO_GATE.search(str(notices[0].get("if", "")))
     for step_name in STEPS[PATH_OF_JOB[key]]:
         assert GATE.search(str(step_by_id(j, step_name).get("if", ""))), step_name
@@ -281,6 +281,29 @@ def test_path_a_gold_goes_to_its_own_motherduck_database():
     installs = [s["run"] for s in runs(j) if "pip install" in s["run"]]
     assert installs and all('"duckdb==1.5.6"' in r for r in installs)
     assert "--full-refresh" not in WORKFLOW.read_text(encoding="utf-8")
+
+
+def test_path_b_feature_disabled_skips_the_rest_of_b_and_stays_green():
+    from repopulse.databricks_gate import EXIT_FEATURE_DISABLED
+
+    j = job(load(), JOB_B)
+    databricks = step_by_id(j, "databricks")
+    run = databricks["run"]
+    assert f"-eq {EXIT_FEATURE_DISABLED}" in run
+    assert "::notice::" in run and "FEATURE_DISABLED" in run
+    assert "DATABRICKS_DISABLED=true" in run and "GITHUB_ENV" in run
+    assert re.search(r"exit \$code|exit \"\$code\"", run), "any other exit code still fails"
+    disabled = re.compile(r"env\.DATABRICKS_DISABLED\s*!=\s*'true'")
+    order = j["steps"]
+    later = order[order.index(databricks) + 1 :]
+    for step in later:
+        if step.get("id") in ("warehouse", "dbt", "queries") or "pathcompare row" in step.get(
+            "run", ""
+        ):
+            assert GATE.search(str(step.get("if", ""))), step
+            assert disabled.search(str(step.get("if", ""))), step
+    # the earlier steps are not gated by the flag (it is only set by the databricks step)
+    assert "DATABRICKS_DISABLED" not in str(step_by_id(j, "ingest").get("if", ""))
 
 
 def test_path_b_runs_d1_and_d2_on_databricks():

@@ -43,6 +43,11 @@ success rate only from `runs.csv`. The path-selection rule is applied by D4; thi
   `::notice::`, the workflow stays green, and **no row is written**. A needs `MOTHERDUCK_TOKEN`, `PII_HASH_SALT`; B
   needs `DATABRICKS_HOST`, `DATABRICKS_TOKEN`, `PII_HASH_SALT` (`DATABRICKS_HTTP_PATH` optional). The warehouse
   http path is resolved and masked by `python -m repopulse.probe http-path --github-env` as in D2.
+- **Databricks refuses new runs:** when `runs/submit` answers `HTTP 404 FEATURE_DISABLED` (a platform state of the Free
+  Edition, not a pipeline bug), `databricks_job run` exits 3 (`repopulse/databricks_gate.py`). The `databricks` step turns that
+  into a `::notice::`, sets `DATABRICKS_DISABLED=true`, the warehouse/dbt/queries/row steps of B are skipped, **no B row is
+  written** and the workflow stays green. Any other Databricks error (including `FEATURE_DISABLED` outside `runs/submit`) still
+  fails the job.
 - **Permissions:** `contents: read`; the two path jobs add `actions: read` to read the job's own queue time through the
   GitHub API (`GH_TOKEN` is `github.token`, not a repo secret).
 - **Runner disk:** each run handles 1 hour of data (at most 6); ingest filters event types before storing and deletes
@@ -84,7 +89,8 @@ takes a fresh hour so both paths really insert.
 not yet on the server), `run_id`, `trigger`. The `run_at` time is when the job started (UTC).
 
 **A failed run still writes a row** (a step with `if: always()`), so the success rate can be computed from
-`runs.csv` alone. No row is written when: secrets are missing (a deliberate skip), the job is cancelled before it runs (concurrency
+`runs.csv` alone. No row is written when: secrets are missing (a deliberate skip), Databricks answers `FEATURE_DISABLED` on submit
+(path B only, a deliberate skip), the job is cancelled before it runs (concurrency
 group), or an error before the row-writing step makes Python/the package unusable (a broken install). These
 cases also leave no row on the other path if the cause is shared (for example a cancelled pending run).
 

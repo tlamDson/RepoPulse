@@ -31,7 +31,10 @@ name: Path comparison (A runner + MotherDuck vs B Databricks)
 # newest pending run). Job B also shares the group of databricks-bronze-silver.yml (D1), so two
 # writers never MERGE into the same silver Delta table at once.
 # Missing secrets: the steps of that path are skipped at step level (notice), the workflow stays
-# green and that path writes no row. Secrets enter only through the `env:` of the step that needs
+# green and that path writes no row. Same for path B when Databricks answers FEATURE_DISABLED on
+# runs/submit (databricks_job exits 3, repopulse/databricks_gate.py): notice, the later B steps
+# are skipped through DATABRICKS_DISABLED, no B row; any other Databricks error still fails.
+# Secrets enter only through the `env:` of the step that needs
 # them; no step prints them; hostnames and the warehouse path are masked.
 
 on:
@@ -361,16 +364,26 @@ jobs:
           DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
           PII_HASH_SALT: ${{ secrets.PII_HASH_SALT }}
         run: |
+          set +e
           python -m repopulse.pipeline timed --name databricks --timings out/timings.json -- \
             python -m repopulse.databricks_job run --source gharchive \
             --date "$DATA_DATE" --hour "$DATA_HOUR" --hours "$DATA_HOURS" \
             --landing-dir data/landing/gharchive --wheel "$WHEEL" --git-sha "$GITHUB_SHA" \
             --job-timeout 1800 --add-mask \
             --summary out/databricks-summary.json --out out/databricks-row.csv
+          code=$?
+          set -e
+          # Exit code 3 = Databricks answered FEATURE_DISABLED on runs/submit (repopulse.databricks_gate).
+          if [ "$code" -eq 3 ]; then
+            echo "::notice::Databricks refused new runs (FEATURE_DISABLED); skipped the rest of path B (no path-b-databricks row)."
+            echo "DATABRICKS_DISABLED=true" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          exit "$code"
 
       - name: SQL warehouse start
         id: warehouse
-        if: env.HAS_SECRETS == 'true'
+        if: env.HAS_SECRETS == 'true' && env.DATABRICKS_DISABLED != 'true'
         env:
           DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
           DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
@@ -381,7 +394,7 @@ jobs:
 
       - name: dbt build (Databricks SQL warehouse)
         id: dbt
-        if: env.HAS_SECRETS == 'true'
+        if: env.HAS_SECRETS == 'true' && env.DATABRICKS_DISABLED != 'true'
         env:
           DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
           DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
@@ -394,7 +407,7 @@ jobs:
 
       - name: Q1-Q6 on the SQL warehouse
         id: queries
-        if: env.HAS_SECRETS == 'true'
+        if: env.HAS_SECRETS == 'true' && env.DATABRICKS_DISABLED != 'true'
         env:
           DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
           DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
@@ -405,7 +418,7 @@ jobs:
             --schema workspace.repopulse_dbt_gold --out out/queries.json
 
       - name: runs.csv row (path-b-databricks)
-        if: always() && env.HAS_SECRETS == 'true'
+        if: always() && env.HAS_SECRETS == 'true' && env.DATABRICKS_DISABLED != 'true'
         env:
           OUTCOME_INGEST: ${{ steps.ingest.outcome }}
           OUTCOME_DATABRICKS: ${{ steps.databricks.outcome }}
