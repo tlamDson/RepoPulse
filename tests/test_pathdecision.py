@@ -441,3 +441,16 @@ def test_repo_probe_result_cites_rerun_and_rule_thresholds():
     assert "95%" in doc
     assert "10%" in doc
     assert "python -m repopulse.pathdecision" in doc
+
+
+def test_repo_probe_result_documents_the_feature_disabled_circuit_breaker():
+    from repopulse.databricks_gate import EXIT_FEATURE_DISABLED
+
+    doc = (ROOT / "docs" / "probe-result.md").read_text(encoding="utf-8")
+    section = doc.split("## When Databricks refuses new runs", 1)
+    assert len(section) == 2, "probe-result.md lacks the FEATURE_DISABLED section"
+    body = section[1].split("\n## ", 1)[0]
+    assert "FEATURE_DISABLED" in body
+    assert f"exits {EXIT_FEATURE_DISABLED}" in body
+    assert "no `path-b-databricks` row" in body
+    assert "path-comparison.md" in body
