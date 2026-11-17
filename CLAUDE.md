@@ -4,7 +4,7 @@ RepoPulse: a small data platform that measures the "health" of open source proje
 
 **Path currently running: A (fallback)** — PySpark + Delta on a GitHub Actions runner, gold on MotherDuck (the DuckDB version is pinned to the one MotherDuck supports). The probe rerun with the correct personal access token (2026-11-11) came out `primary`: Databricks can be controlled from GitHub Actions. Path A still runs, per the Plan v2 path-selection rule (`python -m repopulse.pathdecision`), because `runs.csv` does not yet have enough scheduled runs to apply the rule. Details and when to reapply it: `docs/probe-result.md`.
 
-Plan: `docs/plan.md`. Progress: `python scripts/orchestrate.py report` (the source of truth is merged PRs). Items waiting on the repo owner: `docs/lam-checklist.md`, `logs/run-<date>.md` and the daily report email (`logs/daily-<date>.md`; operational measurements are in `logs/orchestrator-metrics.csv`, not `runs.csv`).
+Plan: `docs/plan.md`. Progress: merged PRs (`gh pr list --state merged`), orchestrated by conductor (`D:\Desktop\Conductor`). Items waiting on the repo owner: `docs/lam-checklist.md`.
 
 The detailed rules below always apply, not only when asked:
 
@@ -14,9 +14,9 @@ The detailed rules below always apply, not only when asked:
 ## Mandatory rules (must not be violated)
 
 - **Git flow:** feature → `develop` (squash), release `develop` → `main` (merge commit). No direct push to `develop`/`main`, no force push, no `--admin`. `main` is the default branch (cron only runs there).
-- **One PR, one task.** Each feature/fix/docs PR does exactly one thing: one task in `scripts/prs.toml` (always counted as one task, exactly as described), or one improvement/bug fix outside `prs.toml`. Other things found along the way are not merged in: a manual session opens a separate PR, a headless session records them under Technical debt or `## Assumptions`. Release PRs and Dependabot PRs are exempt. Details: `.claude/rules/developer-guide.md`.
+- **One PR, one task.** Each feature/fix/docs PR does exactly one thing: one task in conductor's `projects/repopulse/tasks.toml` (always counted as one task, exactly as described), or one improvement/bug fix outside `tasks.toml`. Other things found along the way are not merged in: a manual session opens a separate PR, a headless session records them under Technical debt or `## Assumptions`. Release PRs and Dependabot PRs are exempt. Details: `.claude/rules/developer-guide.md`.
 - **Merge a feature into `develop` when CI is green on all 3 jobs** (`Lint`, `Unit Tests`, `dbt build (DuckDB)`) **and `code-reviewer` is PASS**. When both hold, merge immediately without asking again.
-- **Release `develop` → `main`** at the `release_after` milestones in `scripts/prs.toml`, once the release PR's CI is green.
+- **Release `develop` → `main`** with a release PR (merge commit) once its CI is green. Conductor's `projects/repopulse/tasks.toml` defines no release milestones, so the repo owner decides when to release.
 - **A PR that changes `.claude/settings.json`, `.claude/auto-mode.json` or a hook is reviewed by the repo owner**, never self-merged.
 - **Command style follows `.claude/rules/command-style.md`** — a headless session immediately refuses any command that would normally have to ask.
 - **TDD is mandatory** (Red → Green → Refactor): the failing test must be seen for real, and the red output pasted into the `## RED` section of the PR description. Details: `.claude/rules/tdd.md`.
@@ -87,21 +87,15 @@ python -m http.server 8000 --bind 127.0.0.1 --directory _site                # p
 
 python -m repopulse.readme_results               # regenerate the Results section of README.md (between the results:start/end markers) from runs.csv; --check exits 1 on a mismatch. If a required variant of the phase 2 sections is missing (both paths, format-delta/iceberg, streaming-throughput-p<N>, streaming-fault-*, trino-*, airflow-backfill-<N>d, sql-agent-*; the list is in `REQUIRED_VARIANTS`), it exits 2, prints an `error:` naming each missing variant and does not write the README (even with --check). A missing engine in the Engine matrix table still only prints a warning to stderr and does not change the exit code. Rerun after every time record_run.py adds rows (tests/test_readme_content.py goes red if forgotten); never edit that table by hand
 
-python scripts/orchestrate.py run --dry-run      # see which tasks would run
-python scripts/orchestrate.py run                # run headless, no human needed (default 5 sessions)
-python scripts/orchestrate.py report             # progress by merged PRs
-python scripts/orchestrate.py daily              # daily report: logs/daily-<date>.md + email (sent automatically at 22:00 while running)
-python scripts/orchestrate.py quota              # latest quota read from the logs
-python scripts/orchestrate.py clean --dry-run    # which worktrees would be cleaned
 ```
 
-Stop the orchestrator: create the file `.claude/state/STOP` (running tasks finish, then it stops).
+Headless runs are driven by conductor (`D:\Desktop\Conductor`, task DAG `projects/repopulse/tasks.toml`); its commands, including how to stop a run, are in that repo's README.
 
 ## Roles and models
 
 | Role | Model / effort | What it does |
 |---|---|---|
-| `scripts/orchestrate.py` | (Python, not an agent) | Reads the DAG `scripts/prs.toml`, checks gates (secrets, harness), creates worktrees, runs up to 5 `claude -p` sessions in parallel (stops opening tasks when `develop` CI is red), waits for the quota reset then `--resume`, stops hung sessions, retries with the previous reason, runs an independent review session then auto-merges on PASS, releases, cleans worktrees, writes reports |
+| conductor (`D:\Desktop\Conductor`) | (Python, not an agent) | The only orchestrator: reads `projects/repopulse/tasks.toml`, creates worktrees, runs the `claude -p` PR and review sessions, merges on PASS, releases |
 | PR session (headless) | Fable, high | One session per PR, in the PR's worktree: a short plan with a test that must be red, delegates to the specialist agent, waits for green CI, ends with `RESULT: ready <PR number>`. Does not self-review and does not merge |
 | Review session (headless) | Opus, medium | A fresh `claude -p --agent code-reviewer` for each review, not seeing the PR session's context; posts a comment, ends with `REVIEW: PASS` or `REVIEW: FAIL <finding>` |
 | Specialist agents | Opus, medium | `pipeline-ops`, `event-schema-engineer`, `spark-engineer`, `analytics-engineer`, `data-quality-governance`, `dashboard-builder` — see `.claude/agents/README.md` |
@@ -111,7 +105,7 @@ Stop the orchestrator: create the file `.claude/state/STOP` (running tasks finis
 ## Gates that need the repo owner
 
 - Add the repo secrets (Databricks and/or MotherDuck) — if missing, the orchestrator does all the work that needs no cloud, then stops at `probe`.
-- Approve `docs/harness-check.md` (the line `Lam đã duyệt`, a literal Vietnamese marker that the script greps for; it means "Lam approved") before PR B, or run with `--auto-approve-harness`.
+- Approve `docs/harness-check.md` (the line `Lam đã duyệt`, a literal Vietnamese marker that the script greps for; it means "Lam approved") before PR B.
 - Approve and merge PRs that change `.claude/settings.json` / `.claude/auto-mode.json` / hooks.
 - Sign up for the Snowflake trial when PR 13 is wanted (the 30-day clock starts immediately); if missing, PR 13 is skipped.
 - Publish the dashboard to Tableau Public.
