@@ -135,6 +135,11 @@ jobs:
           python -m repopulse.pipeline timed --name ingest --timings out/timings.json -- \
             python -m repopulse.ingest "${args[@]}"
 
+      # repopulse.ingest exits 0 for an hour GH Archive has not published ("missing"). Fail here,
+      # before Spark gets empty input; the hour has no manifest, so a later run picks it up again.
+      - name: Check every requested hour was ingested
+        run: python -m repopulse.dagspec check-ingest --summary out/ingest-summary.json
+
       - name: Data window
         run: python -m repopulse.pipeline window --ingest-summary out/ingest-summary.json >> "$GITHUB_ENV"
 
