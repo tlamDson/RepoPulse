@@ -187,7 +187,12 @@ def test_missing_ingest_hours_fail_the_run_before_spark():
     assert "--summary out/ingest-summary.json" in steps(data)[check]["run"]
     assert step_index(data, "python -m repopulse.ingest") < check
     assert check < step_index(data, "python -m repopulse.spark.job --source gharchive")
-    assert "if" not in steps(data)[check]  # runs on schedule, dispatch and pull request alike
+    step = steps(data)[check]
+    assert "if" not in step  # runs on schedule, dispatch and pull request alike
+    # The check only protects the run if its failure fails the job.
+    assert not step.get("continue-on-error"), "continue-on-error would swallow the failure"
+    assert "||" not in step["run"], "`|| true` would swallow the failure"
+    assert ";" not in step["run"], "a trailing command would hide the exit code"
 
 
 def test_spark_job_uses_the_window_of_the_ingest_summary():
