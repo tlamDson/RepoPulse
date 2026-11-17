@@ -15,8 +15,7 @@
 | `qa-testing` | sonnet / high | write/run additional tests | when assigned |
 | `researcher` | sonnet / high | read code/docs, no code writing | when assigned |
 
-The task → agent table lives in `scripts/prs.toml` (the `agent` column); `tests/test_orchestrator.py`
-checks that every agent listed there has a file here. Every agent follows `.claude/rules/command-style.md`.
+Tasks are listed in conductor's `projects/repopulse/tasks.toml` (D:/Desktop/Conductor). Every agent follows `.claude/rules/command-style.md`.
 
 ## Convention
 
