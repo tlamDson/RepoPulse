@@ -283,6 +283,29 @@ def test_path_a_gold_goes_to_its_own_motherduck_database():
     assert "--full-refresh" not in WORKFLOW.read_text(encoding="utf-8")
 
 
+def test_path_b_feature_disabled_skips_the_rest_of_b_and_stays_green():
+    from repopulse.databricks_gate import EXIT_FEATURE_DISABLED
+
+    j = job(load(), JOB_B)
+    databricks = step_by_id(j, "databricks")
+    run = databricks["run"]
+    assert f"-eq {EXIT_FEATURE_DISABLED}" in run
+    assert "::notice::" in run and "FEATURE_DISABLED" in run
+    assert "DATABRICKS_DISABLED=true" in run and "GITHUB_ENV" in run
+    assert re.search(r"exit \$code|exit \"\$code\"", run), "any other exit code still fails"
+    disabled = re.compile(r"env\.DATABRICKS_DISABLED\s*!=\s*'true'")
+    order = j["steps"]
+    later = order[order.index(databricks) + 1 :]
+    for step in later:
+        if step.get("id") in ("warehouse", "dbt", "queries") or "pathcompare row" in step.get(
+            "run", ""
+        ):
+            assert GATE.search(str(step.get("if", ""))), step
+            assert disabled.search(str(step.get("if", ""))), step
+    # the earlier steps are not gated by the flag (it is only set by the databricks step)
+    assert "DATABRICKS_DISABLED" not in str(step_by_id(j, "ingest").get("if", ""))
+
+
 def test_path_b_runs_d1_and_d2_on_databricks():
     j = job(load(), JOB_B)
     databricks = step_by_id(j, "databricks")
