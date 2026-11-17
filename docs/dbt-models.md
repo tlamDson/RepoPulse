@@ -71,8 +71,8 @@ The seed `fixture_silver_gharchive_events` is a **CI fixture, not a measurement*
 columns of `silver/gharchive_events` (`docs/spark-jobs.md`). Regenerate it from JSON with
 `silver_select_sql` in `tests/dbt_helpers.py`; the test
 `test_ci_seed_equals_silver_built_from_fixture_json` asserts the seed equals exactly that data (every
-`event_id`, every column). The parquet pytest creates additionally includes `tests/fixtures/gharchive_parquet_only` (3
-events not in the seed, including a same-second login-change case), so tests can tell the parquet read path
+`event_id`, every column). The parquet pytest creates additionally includes `tests/fixtures/gharchive_parquet_only` (4
+events not in the seed, including a same-second login-change case and a first event with a null `actor_login`), so tests can tell the parquet read path
 from the seed read path; the baseline runs on the same raw rows as the parquet.
 
 The scheduled pipeline does not let dbt read the Delta directory: `python -m repopulse.spark.export` reads the
