@@ -31,3 +31,8 @@ def start_with_retry(
                 raise
             sleep(delay)
     raise AssertionError("unreachable: attempts must be at least 1")
+
+
+def create_session(configured, **retry_kwargs):
+    """``configured.getOrCreate()`` of a configured ``SparkSession.Builder``, with the retry."""
+    return start_with_retry(configured.getOrCreate, **retry_kwargs)

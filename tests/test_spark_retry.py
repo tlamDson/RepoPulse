@@ -66,7 +66,7 @@ def test_does_not_retry_an_error_that_is_not_a_gateway_exit():
 
 
 class _FakeBuilder:
-    """Stands in for the configured ``SparkSession.Builder``: ``getOrCreate`` fails ``failures`` times."""
+    """A configured ``SparkSession.Builder`` whose ``getOrCreate`` fails ``failures`` times."""
 
     def __init__(self, failures: int):
         self.build, self.calls = _flaky(failures)
@@ -86,7 +86,9 @@ def test_spark_fixture_starts_the_session_through_create_session():
     """Guard the wiring: the ``spark`` fixture must not call ``getOrCreate`` itself."""
     tree = ast.parse((Path(__file__).parent / "conftest.py").read_text(encoding="utf-8"))
     fixture = next(
-        node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == "spark"
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "spark"
     )
     called = {
         call.func.id if isinstance(call.func, ast.Name) else call.func.attr

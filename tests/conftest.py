@@ -115,12 +115,12 @@ def spark(tmp_path_factory):
         # Managed tables by name (test_spark_catalog_tables.py) live in tmp, not ./spark-warehouse.
         .config("spark.sql.warehouse.dir", str(tmp_path_factory.mktemp("spark-warehouse")))
     )
-    from spark_retry import start_with_retry
+    from spark_retry import create_session
 
     configured = configure_spark_with_delta_pip(builder, extra_packages=[ICEBERG_PACKAGE])
     # The jars come from Maven Central on every JVM start; one failed download must not error
-    # every Spark test of the run (CI run 44064181198).
-    session = start_with_retry(configured.getOrCreate)
+    # every Spark test of the run (CI run 44064181198). test_spark_retry.py guards this call.
+    session = create_session(configured)
     yield session
     session.stop()
 
