@@ -13,8 +13,8 @@ Workflow `.github/workflows/snowflake-port.yml` (run manually):
   `feature/snowflake-port` (so it can run within the PR, before release). There is no `pull_request`;
   Snowflake is only written to in this workflow.
 - Step 1: `dbt build --target ci` (DuckDB), then build the `dbt-build-duckdb` row.
-- Step 2 (step-level gate, only when the secret `SNOWFLAKE_ACCOUNT` exists): `dbt debug --target snowflake`,
-  `dbt build --target snowflake`, build the `dbt-build-snowflake` row. If the secret is missing there is a notice,
+- Step 2 (step-level gate, only when the secrets `SNOWFLAKE_ACCOUNT` and `PII_HASH_SALT` exist): `dbt debug --target snowflake`,
+  `dbt build --target snowflake`, build the `dbt-build-snowflake` row. If either secret is missing there is a notice,
   the workflow stays green, and only the DuckDB row exists.
 - Artifact `snowflake-port`: `out/snowflake-port-rows.csv` (`runs.csv` format) and
   `out/snowflake-port-summary.md` (also written to the Job summary).
@@ -31,6 +31,7 @@ Do not run the `snowflake` target on a local machine (no credentials; the comman
 | `SNOWFLAKE_ROLE` | role of the CI user |
 | `SNOWFLAKE_WAREHOUSE` | `REPOPULSE_WH` (XSMALL, auto-suspend 60s) |
 | `SNOWFLAKE_DATABASE` | `REPOPULSE` |
+| `PII_HASH_SALT` | salt for `mask_pii` (same secret as silver); required on every target but `ci` |
 
 The `snowflake` profile in `transform/profiles.yml` reads all 6 values with `env_var(...)`; the schema is fixed
 as `repopulse` (dbt combines it into `repopulse_staging`, `repopulse_intermediate`, `repopulse_gold`).
