@@ -192,7 +192,7 @@ def test_missing_secrets_skip_at_step_level_with_a_notice(key):
     j = job(load(), key)
     detect = [s for s in runs(j) if "HAS_SECRETS=true" in s["run"]]
     assert len(detect) == 1
-    notices = [s for s in runs(j) if "::notice::" in s["run"]]
+    notices = [s for s in runs(j) if "::notice::" in s["run"] and s.get("id") != "databricks"]
     assert len(notices) == 1 and NO_GATE.search(str(notices[0].get("if", "")))
     for step_name in STEPS[PATH_OF_JOB[key]]:
         assert GATE.search(str(step_by_id(j, step_name).get("if", ""))), step_name

@@ -1,4 +1,4 @@
-"""Path B skips cleanly when Databricks refuses new runs (FEATURE_DISABLED); no cloud, no network."""
+"""Path B skips cleanly when Databricks refuses new runs (FEATURE_DISABLED); no network."""
 
 import pytest
 
