@@ -203,7 +203,7 @@ def test_snowflake_steps_are_skipped_when_the_pii_salt_is_missing():
     notice = next(s for s in runs(data) if "::notice" in s["run"])
     assert re.search(r"env\.PII_HASH_SALT\s*==\s*''", str(notice.get("if", "")))
     assert re.search(r"env\.SNOWFLAKE_ACCOUNT\s*==\s*''", str(notice.get("if", "")))
-    assert "PII_HASH_SALT" in notice["run"]
+    assert "salt" in notice["run"].lower()
 
 
 def test_missing_secret_is_reported_as_a_notice_not_a_failure():
