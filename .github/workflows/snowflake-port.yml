@@ -12,7 +12,7 @@ name: Snowflake port
 #   `pull_request`: Snowflake is written only by this manually started workflow. After the merge
 #   the branch is deleted and the push trigger no longer fires.
 #
-# Missing SNOWFLAKE_ACCOUNT: the Snowflake steps are skipped at step level (notice), the workflow
+# Missing SNOWFLAKE_ACCOUNT or PII_HASH_SALT: the Snowflake steps are skipped at step level (notice), the workflow
 # stays green and only the DuckDB row is written. Secrets enter only through `env:`; no step
 # prints them. dbt logs stay in the job log so Snowflake SQL errors can be fixed.
 
@@ -47,6 +47,8 @@ jobs:
       SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
       SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
       SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE }}
+      # mask_pii (transform/macros/mask_pii.sql) fails on every target but `ci` without it.
+      PII_HASH_SALT: ${{ secrets.PII_HASH_SALT }}
     steps:
       # Full history: the line count diffs base_sha (benchmarks/snowflake_port.toml) against HEAD.
       - uses: actions/checkout@v4
@@ -74,20 +76,20 @@ jobs:
           --summary out/snowflake-port-summary.md
 
       - name: Snowflake secrets missing
-        if: env.SNOWFLAKE_ACCOUNT == ''
-        run: echo "::notice::Snowflake secrets are not set; skipped the Snowflake build (no dbt-build-snowflake row)."
+        if: env.SNOWFLAKE_ACCOUNT == '' || env.PII_HASH_SALT == ''
+        run: echo "::notice::Snowflake secrets or the PII salt are not set; skipped the Snowflake build (no dbt-build-snowflake row)."
 
       - name: dbt debug (Snowflake)
-        if: env.SNOWFLAKE_ACCOUNT != ''
+        if: env.SNOWFLAKE_ACCOUNT != '' && env.PII_HASH_SALT != ''
         run: dbt debug --project-dir transform --profiles-dir transform --target snowflake
 
       - name: dbt build (Snowflake)
-        if: env.SNOWFLAKE_ACCOUNT != ''
+        if: env.SNOWFLAKE_ACCOUNT != '' && env.PII_HASH_SALT != ''
         run: dbt build --project-dir transform --profiles-dir transform --target snowflake
 
       # always(): a failed build still reports its failing nodes in the summary (no row written).
       - name: Row dbt-build-snowflake
-        if: always() && env.SNOWFLAKE_ACCOUNT != ''
+        if: always() && env.SNOWFLAKE_ACCOUNT != '' && env.PII_HASH_SALT != ''
         run: >-
           python benchmarks/snowflake_port.py --engine snowflake
           --run-results transform/target/run_results.json
