@@ -6,8 +6,11 @@ PySpark raised ``JAVA_GATEWAY_EXITED`` and every ``@pytest.mark.spark`` test err
 ``spark_retry.start_with_retry`` is what the fixture wraps ``getOrCreate`` in.
 """
 
+import ast
+from pathlib import Path
+
 import pytest
-from spark_retry import start_with_retry
+from spark_retry import create_session, start_with_retry
 
 GATEWAY_EXITED = RuntimeError(
     "[JAVA_GATEWAY_EXITED] Java gateway process exited before sending its port number."
@@ -60,3 +63,35 @@ def test_does_not_retry_an_error_that_is_not_a_gateway_exit():
         start_with_retry(build, sleep=sleeps.append)
     assert calls["n"] == 1
     assert sleeps == []
+
+
+class _FakeBuilder:
+    """Stands in for the configured ``SparkSession.Builder``: ``getOrCreate`` fails ``failures`` times."""
+
+    def __init__(self, failures: int):
+        self.build, self.calls = _flaky(failures)
+
+    def getOrCreate(self):  # noqa: N802 - the PySpark method name
+        return self.build()
+
+
+def test_create_session_gets_the_session_after_a_gateway_exit():
+    builder = _FakeBuilder(failures=1)
+
+    assert create_session(builder, sleep=lambda _s: None) == "session"
+    assert builder.calls["n"] == 2
+
+
+def test_spark_fixture_starts_the_session_through_create_session():
+    """Guard the wiring: the ``spark`` fixture must not call ``getOrCreate`` itself."""
+    tree = ast.parse((Path(__file__).parent / "conftest.py").read_text(encoding="utf-8"))
+    fixture = next(
+        node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == "spark"
+    )
+    called = {
+        call.func.id if isinstance(call.func, ast.Name) else call.func.attr
+        for call in ast.walk(fixture)
+        if isinstance(call, ast.Call) and isinstance(call.func, (ast.Name, ast.Attribute))
+    }
+    assert "create_session" in called
+    assert "getOrCreate" not in called
