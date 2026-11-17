@@ -177,6 +177,35 @@ def test_snowflake_debug_and_build_are_gated_at_step_level_on_the_secret():
         assert "--project-dir transform" in found[0]["run"]
 
 
+def effective_env(data, step):
+    job = next(j for j in jobs(data).values() if step in j.get("steps", []))
+    return {**job.get("env", {}), **step.get("env", {})}
+
+
+def test_snowflake_build_gets_the_pii_salt_secret():
+    # mask_pii.sql raises 'PII_HASH_SALT is not set' on every target except `ci`.
+    data = load()
+    (build,) = dbt_steps(data, "build", "snowflake")
+    value = str(effective_env(data, build).get("PII_HASH_SALT", ""))
+    assert SECRET_EXPR_NAME.match(value.strip()), value
+    assert SECRET_EXPR_NAME.match(value.strip()).group(1) == "PII_HASH_SALT"
+
+
+def test_snowflake_steps_are_skipped_when_the_pii_salt_is_missing():
+    data = load()
+    gated = [
+        dbt_steps(data, "debug", "snowflake")[0],
+        dbt_steps(data, "build", "snowflake")[0],
+        next(s for s in runs(data) if re.search(r"--engine\s+snowflake\b", s["run"])),
+    ]
+    for step in gated:
+        assert re.search(r"env\.PII_HASH_SALT\s*!=\s*''", str(step.get("if", ""))), step
+    notice = next(s for s in runs(data) if "::notice" in s["run"])
+    assert re.search(r"env\.PII_HASH_SALT\s*==\s*''", str(notice.get("if", "")))
+    assert re.search(r"env\.SNOWFLAKE_ACCOUNT\s*==\s*''", str(notice.get("if", "")))
+    assert "PII_HASH_SALT" in notice["run"]
+
+
 def test_missing_secret_is_reported_as_a_notice_not_a_failure():
     data = load()
     notices = [
