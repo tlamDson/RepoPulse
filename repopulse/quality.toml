@@ -37,15 +37,20 @@ evaluate = ["2026-11-03T12"]
 # Allowlist of GH Archive hours whose source file lost event types (no PushEvent at all) or most of
 # its events: confirmed upstream gaps, not pipeline faults. The check raises no alert for these
 # hours and leaves them out of the baseline of the hours after them. Add an hour here only after
-# checking the landing _manifest.json counts_by_type; remove entries older than the window.
-# Seen in issue #77 (data-incident, 2026-11-15 .. 2026-11-17).
+# checking the landing _manifest.json counts_by_type (or counting types in the raw
+# data.gharchive.org file); remove entries older than the window. Optional table: a config without
+# it has no allowed hours.
+# Issue #77: every hour below was counted in the raw GH Archive file on 2026-11-17 and has 0
+# PushEvent (3.0k-4.7k events against ~9k-19k in normal hours); 2026-11-17T14 is back to normal.
 hours = [
   "2026-11-15T16", "2026-11-15T17", "2026-11-15T18", "2026-11-15T19", "2026-11-15T20",
   "2026-11-15T21",
   "2026-11-16T06", "2026-11-16T07",
   "2026-11-16T17", "2026-11-16T18", "2026-11-16T19", "2026-11-16T20", "2026-11-16T21",
   "2026-11-16T22", "2026-11-16T23",
-  "2026-11-17T00", "2026-11-17T01", "2026-11-17T02", "2026-11-17T03",
+  "2026-11-17T00", "2026-11-17T01", "2026-11-17T02", "2026-11-17T03", "2026-11-17T04",
+  "2026-11-17T05", "2026-11-17T06", "2026-11-17T07", "2026-11-17T08", "2026-11-17T09",
+  "2026-11-17T10", "2026-11-17T11", "2026-11-17T12", "2026-11-17T13",
 ]
 
 [freshness]

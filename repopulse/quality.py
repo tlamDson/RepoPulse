@@ -156,6 +156,11 @@ def load_config(path: str | Path | None = None) -> dict:
         raise ConfigError(f"cannot read config {path}: {exc}") from None
     except tomllib.TOMLDecodeError as exc:
         raise ConfigError(f"config {path} is not valid TOML: {exc}") from None
+    volume = data.get("volume")
+    if isinstance(volume, dict):  # optional table: configs written before it existed still load
+        gaps = volume.setdefault("known_gaps", {})
+        if isinstance(gaps, dict):
+            gaps.setdefault("hours", [])
     out: dict = {}
     for section, keys in _SCHEMA.items():
         node: object = data

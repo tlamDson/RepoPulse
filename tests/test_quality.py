@@ -586,9 +586,24 @@ def gap_cfg(cfg, hours, **overrides) -> dict:
 
 def test_default_config_lists_the_issue_77_gap_hours(cfg):
     hours = cfg["volume"]["known_gaps"]["hours"]
-    for label in ("2026-11-15T16", "2026-11-15T21", "2026-11-16T06", "2026-11-17T03"):
-        assert label in hours
-    assert "2026-11-16T08" not in hours  # a healthy hour is not allowlisted
+    for label in (
+        "2026-11-15T16",
+        "2026-11-15T21",
+        "2026-11-16T06",
+        "2026-11-17T03",
+        "2026-11-17T13",
+    ):
+        assert label in hours  # each counted with 0 PushEvent in the raw GH Archive file
+    for label in ("2026-11-16T08", "2026-11-16T15", "2026-11-17T14"):
+        assert label not in hours  # healthy (or unverified) hours are not allowlisted
+
+
+def test_config_without_known_gaps_table_still_loads(tmp_path):
+    data = tomllib.loads(CONFIG.read_text(encoding="utf-8"))
+    del data["volume"]["known_gaps"]  # a custom config written before the table existed
+    path = tmp_path / "quality.toml"
+    path.write_text(_to_toml(data), encoding="utf-8")
+    assert q.load_config(path)["volume"]["known_gaps"] == {"hours": []}
 
 
 def test_known_gap_hours_must_be_valid_hours(tmp_path):
