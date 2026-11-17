@@ -119,6 +119,11 @@ def _hours(v: object) -> bool:
     return True
 
 
+def _hours_or_empty(v: object) -> bool:
+    """a list (possibly empty) of YYYY-MM-DDTHH hours"""
+    return v == [] or _hours(v)
+
+
 _SCHEMA: dict[str, dict[str, Callable[[object], bool]]] = {
     "faults": {
         "late_threshold_seconds": _positive_number,
@@ -136,6 +141,7 @@ _SCHEMA: dict[str, dict[str, Callable[[object], bool]]] = {
         "type_min_median": _int(1),
     },
     "volume.reference": {"history": _hours, "evaluate": _hours},
+    "volume.known_gaps": {"hours": _hours_or_empty},
     "freshness": {"table": _identifier, "column": _identifier, "max_lag_hours": _positive_number},
     "alert": {"label": _text, "template": _text},
 }
@@ -609,10 +615,24 @@ def _evaluate_volume(
     while cursor <= last:  # continuous: an hour without rows counts as 0
         hours.append(cursor)
         cursor += timedelta(hours=1)
+    gaps = {parse_hour(h) for h in vol["known_gaps"]["hours"]}  # upstream source gaps (allowlist)
     alerts: list[Alert] = []
     statuses: list[dict] = []
     for i in range(max(0, len(hours) - vol["evaluate_hours"]), len(hours)):
-        history = [series.get(h, {}) for h in hours[max(0, i - vol["window_hours"]) : i]]
+        if hours[i] in gaps:  # the source lost data here: no alert, and not a baseline either
+            total = sum(series.get(hours[i], {}).values())
+            statuses.append(
+                {
+                    "hour": hour_label(hours[i]),
+                    "total": total,
+                    "history_hours": 0,
+                    "median_total": None,
+                    "status": "known_gap",
+                }
+            )
+            continue
+        window = hours[max(0, i - vol["window_hours"]) : i]
+        history = [series.get(h, {}) for h in window if h not in gaps]
         found, status = compare_hour(history, series.get(hours[i], {}), hours[i], cfg, table=table)
         alerts += found
         statuses.append(status)

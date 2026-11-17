@@ -33,6 +33,21 @@ type_min_median = 100 # event type with median >= this and 0 in the evaluated ho
 history = ["2026-10-25T10", "2026-10-25T11", "2026-10-25T12"]
 evaluate = ["2026-11-03T12"]
 
+[volume.known_gaps]
+# Allowlist of GH Archive hours whose source file lost event types (no PushEvent at all) or most of
+# its events: confirmed upstream gaps, not pipeline faults. The check raises no alert for these
+# hours and leaves them out of the baseline of the hours after them. Add an hour here only after
+# checking the landing _manifest.json counts_by_type; remove entries older than the window.
+# Seen in issue #77 (data-incident, 2026-11-15 .. 2026-11-17).
+hours = [
+  "2026-11-15T16", "2026-11-15T17", "2026-11-15T18", "2026-11-15T19", "2026-11-15T20",
+  "2026-11-15T21",
+  "2026-11-16T06", "2026-11-16T07",
+  "2026-11-16T17", "2026-11-16T18", "2026-11-16T19", "2026-11-16T20", "2026-11-16T21",
+  "2026-11-16T22", "2026-11-16T23",
+  "2026-11-17T00", "2026-11-17T01", "2026-11-17T02", "2026-11-17T03",
+]
+
 [freshness]
 table = "main_staging.stg_gharchive_events"
 column = "created_at"

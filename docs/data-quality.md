@@ -25,6 +25,7 @@ with different thresholds: `python -m repopulse.quality --config <file.toml> <co
 | `[faults.inject]` | `duplicate`, `null`, `wrong_type`, `late`, `schema_drift`, `bot` | number of faults of each type the harness injects |
 | `[volume]` | `table`, `window_hours`, `min_history`, `min_ratio`, `evaluate_hours`, `ingest_lag_hours`, `type_min_median` | volume check |
 | `[volume.reference]` | `history`, `evaluate` | reference GH Archive hours (complete data) and the known-missing hours |
+| `[volume.known_gaps]` | `hours` | allowlist of upstream-gap hours (source file lost event types): no alert for them, and they are left out of the baseline of later hours; add one only after checking the landing `_manifest.json` |
 | `[freshness]` | `table`, `column`, `max_lag_hours` | freshness check |
 | `[alert]` | `label`, `template` | Issue label, Issue template file |
 
