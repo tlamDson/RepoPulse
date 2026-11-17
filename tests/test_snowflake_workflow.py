@@ -206,6 +206,33 @@ def test_snowflake_steps_are_skipped_when_the_pii_salt_is_missing():
     assert "salt" in notice["run"].lower()
 
 
+def eval_if(cond: str, account: str, salt: str) -> bool:
+    """Evaluate a step `if:` made of env.X ==/!= '' terms, &&, ||, always()."""
+    expr = cond.replace("always()", "True").replace("&&", " and ").replace("||", " or ")
+    values = {"SNOWFLAKE_ACCOUNT": account, "PII_HASH_SALT": salt}
+    expr = re.sub(
+        r"env\.(\w+)\s*(==|!=)\s*''", lambda m: f"({values[m.group(1)]!r} {m.group(2)} '')", expr
+    )
+    assert re.fullmatch(r"[\w\s()'=!]*", expr), expr
+    return bool(eval(expr, {"__builtins__": {}}))  # noqa: S307 - own workflow file, checked above
+
+
+@pytest.mark.parametrize("account", ["acct", ""])
+@pytest.mark.parametrize("salt", ["salt", ""])
+def test_snowflake_steps_run_only_when_account_and_salt_are_both_set(account, salt):
+    data = load()
+    both = bool(account) and bool(salt)
+    gated = [
+        dbt_steps(data, "debug", "snowflake")[0],
+        dbt_steps(data, "build", "snowflake")[0],
+        next(s for s in runs(data) if re.search(r"--engine\s+snowflake\b", s["run"])),
+    ]
+    for step in gated:
+        assert eval_if(str(step["if"]), account, salt) is both, step["name"]
+    notice = next(s for s in runs(data) if "::notice" in s["run"])
+    assert eval_if(str(notice["if"]), account, salt) is (not both)
+
+
 def test_missing_secret_is_reported_as_a_notice_not_a_failure():
     data = load()
     notices = [
