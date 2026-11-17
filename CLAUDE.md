@@ -16,7 +16,7 @@ The detailed rules below always apply, not only when asked:
 - **Git flow:** feature → `develop` (squash), release `develop` → `main` (merge commit). No direct push to `develop`/`main`, no force push, no `--admin`. `main` is the default branch (cron only runs there).
 - **One PR, one task.** Each feature/fix/docs PR does exactly one thing: one task in conductor's `projects/repopulse/tasks.toml` (always counted as one task, exactly as described), or one improvement/bug fix outside `tasks.toml`. Other things found along the way are not merged in: a manual session opens a separate PR, a headless session records them under Technical debt or `## Assumptions`. Release PRs and Dependabot PRs are exempt. Details: `.claude/rules/developer-guide.md`.
 - **Merge a feature into `develop` when CI is green on all 3 jobs** (`Lint`, `Unit Tests`, `dbt build (DuckDB)`) **and `code-reviewer` is PASS**. When both hold, merge immediately without asking again.
-- **Release `develop` → `main`** at the `release_after` milestones in conductor's `projects/repopulse/tasks.toml`, once the release PR's CI is green.
+- **Release `develop` → `main`** with a release PR (merge commit) once its CI is green. Conductor's `projects/repopulse/tasks.toml` defines no release milestones, so the repo owner decides when to release.
 - **A PR that changes `.claude/settings.json`, `.claude/auto-mode.json` or a hook is reviewed by the repo owner**, never self-merged.
 - **Command style follows `.claude/rules/command-style.md`** — a headless session immediately refuses any command that would normally have to ask.
 - **TDD is mandatory** (Red → Green → Refactor): the failing test must be seen for real, and the red output pasted into the `## RED` section of the PR description. Details: `.claude/rules/tdd.md`.
@@ -105,7 +105,7 @@ Headless runs are driven by conductor (`D:\Desktop\Conductor`, task DAG `project
 ## Gates that need the repo owner
 
 - Add the repo secrets (Databricks and/or MotherDuck) — if missing, the orchestrator does all the work that needs no cloud, then stops at `probe`.
-- Approve `docs/harness-check.md` (the line `Lam đã duyệt`, a literal Vietnamese marker that the script greps for; it means "Lam approved") before PR B, or run with `--auto-approve-harness`.
+- Approve `docs/harness-check.md` (the line `Lam đã duyệt`, a literal Vietnamese marker that the script greps for; it means "Lam approved") before PR B.
 - Approve and merge PRs that change `.claude/settings.json` / `.claude/auto-mode.json` / hooks.
 - Sign up for the Snowflake trial when PR 13 is wanted (the 30-day clock starts immediately); if missing, PR 13 is skipped.
 - Publish the dashboard to Tableau Public.
