@@ -63,6 +63,7 @@ Local environment variables for the SQL agent (`python -m repopulse.sql_agent`, 
 - **Snowflake 30-day trial**: only sign up when PR 13 is reached.
 - **Windows**: open sessions with an uppercase `D:` (see `developer-guide.md`). The `ruff format` hook needs `ruff` installed in the Python that the `python` command points to; if it is not installed, the hook silently skips.
 - **Spark on Windows**: PySpark needs JDK 17 (the machine has Java 24, unsupported) and writing Delta needs `winutils`. Spark tests are marked `@pytest.mark.spark`, skip themselves locally when these are missing, and always run on Linux CI.
+- **Spark test session on CI**: every JVM start downloads the Delta/Iceberg jars from Maven Central; one failed download makes PySpark raise `JAVA_GATEWAY_EXITED` and errors every Spark test (push run 44064181198 on develop, green on the PR). The `spark` fixture starts the session through `tests/spark_retry.py` (3 attempts, only that error). If it still fails on all 3, read the `unresolved dependency` lines in the log before blaming a test.
 - **Hard-killing a PySpark process**: the JVM is a child process of Python; a SIGKILL of Python alone makes the JVM see stdin closed and exit through a shutdown hook (not a crash). For a real crash: run the child process with `start_new_session=True`, then `os.killpg(pid, SIGKILL)` (POSIX only; see `ConsumerProcess` in `benchmarks/streaming_fault.py`, `docs/streaming-fault.md`).
 - **Auto mode ignores broad allow rules** (`Bash(python *)`, `npm *`, `npx *`, allowing `Agent`/`Monitor`); allow rules must be specific. `autoMode` is not read from `.claude/settings*.json` — it lives in `.claude/auto-mode.json`, loaded with `--settings`.
 - **Writing into `.claude/` (outside `worktrees/`) is a protected path**: allow rules cannot open it, and auto mode blocks self-editing configuration. Harness changes are approved by the repo owner.
@@ -73,4 +74,7 @@ Local environment variables for the SQL agent (`python -m repopulse.sql_agent`, 
 
 (each item has three parts: Symptom, Cause with `file:line`, Trigger condition — see `workflow.md`)
 
-- None.
+- **Spark test hang kills `Unit Tests` at the 30-minute job limit.**
+  - Symptom: PR run 44199475752 (commit 690e332, same Spark code as the green run 44196454284) printed nothing after `[ 76%]` until the job was cancelled ("exceeded the maximum execution time of 30m0s"), with no failing test named.
+  - Cause: not located. The stuck test is one of tests 2233-2304 in collection order (`tests/test_spark_app_events.py` through `tests/test_spark_pii.py`), all sharing the session `spark` fixture (`tests/conftest.py:123`); the orphans killed at cleanup were pytest, one `java` and two `python` (PySpark worker) processes. No per-test timeout exists, so the hang has no traceback.
+  - Trigger condition: intermittent on the Linux runner; not reproducible locally (Spark tests skip on Windows).
