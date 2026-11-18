@@ -179,3 +179,22 @@ def test_hand_written_readme_text_quotes_no_decimal_that_runs_csv_lacks():
 
     for token in re.findall(r"\d+\.\d+", outside):
         assert token in FORMULA_NUMBERS or token in source, f"{token} in README.md has no source"
+
+
+DASHBOARD_URL = "https://tlamdson.github.io/RepoPulse/"
+SCREENSHOT = "docs/images/dashboard.png"
+
+
+def test_readme_links_the_live_dashboard_near_the_top():
+    readme = read_text("README.md")
+    head = readme[: readme.index("## What it does")]
+
+    assert DASHBOARD_URL in head
+
+
+def test_readme_shows_a_dashboard_screenshot_near_the_top():
+    readme = read_text("README.md")
+    head = readme[: readme.index("## What it does")]
+
+    assert re.search(r"!\[[^\]]+\]\(" + re.escape(SCREENSHOT) + r"\)", head)
+    assert (ROOT / SCREENSHOT).is_file()
