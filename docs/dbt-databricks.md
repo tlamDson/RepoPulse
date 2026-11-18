@@ -149,7 +149,7 @@ This document does not copy numbers; measurements are read only from `runs.csv`.
 ## Results
 
 The workflow run on the branch `feature/dbt-databricks-target` (commit `4553df1`,
-[run 43166502216](https://github.com/tlamDson/RepoPulse/actions/runs/43166502216)) built green on the
+[run 43166502216](https://github.com/tlamDson/github-analytics-data-pipeline/actions/runs/43166502216)) built green on the
 SQL warehouse: the same seeds, models, data tests and unit tests as target `ci`, with no node failed or
 skipped. The input is D1's silver Delta (real GH Archive, not simulated). The row from that
 run was merged into `runs.csv` with `variant=dbt-build-databricks`.

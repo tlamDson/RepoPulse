@@ -1,6 +1,6 @@
 # Dashboard: static GitHub Pages site + CSVs for Tableau
 
-The public site `https://tlamdson.github.io/RepoPulse/` shows the 6 marts Q1–Q6 and `runs.csv`. The site
+The public site `https://tlamdson.github.io/github-analytics-data-pipeline/` shows the 6 marts Q1–Q6 and `runs.csv`. The site
 is plain HTML + CSS + JS in `site/` (no build tool, no npm, no CDN, no external fonts/analytics).
 The data is GH Archive (real data); the site currently has **no** simulated data; any part that later
 comes from the simulated app event stream must be labeled "simulated" (and recorded in
@@ -97,7 +97,7 @@ environment itself; the exporter does not read or print the token.
 - Permissions: default `contents: read`; only `pages-deploy` has `pages: write` + `id-token: write`, environment
   `github-pages`. Deploys queue in the `pages-deploy` group and do not cancel the running one.
 - DuckDB is pinned to the same version as `pipeline.yml` (MotherDuck rejects newer clients).
-- Paths in the site are all relative (Pages serves under `/RepoPulse/`).
+- Paths in the site are all relative (Pages serves under `/github-analytics-data-pipeline/`).
 
 The `runs.csv` on the site is the version committed on `main`: pipeline rows sit in the artifact and only reach the
 site after being merged with `benchmarks/record_run.py` and merged into the repo (`docs/pipeline.md`).

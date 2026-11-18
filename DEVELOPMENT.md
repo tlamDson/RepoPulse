@@ -1,4 +1,4 @@
-# Developing RepoPulse
+# Developing GitHub Analytics Data Pipeline
 
 These sections moved here from the [README](README.md), which now gives the short overview. Installing, running the pipeline and the benchmarks, environment variables, the test and lint commands, git flow and the TDD rule are in the [developer guide](docs/developer-guide.md); each part of the platform has its own page in [`docs/`](docs/).
 

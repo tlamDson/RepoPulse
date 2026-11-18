@@ -1,6 +1,6 @@
 # Governance: PII labels, roles, column masking
 
-RepoPulse governance lives in the dbt + Python layer, because the chosen path is the **fallback**
+GitHub Analytics Data Pipeline governance lives in the dbt + Python layer, because the chosen path is the **fallback**
 (`docs/probe-result.md`): there is no Unity Catalog, and gold runs on DuckDB (CI) and MotherDuck. Databricks
 tags and `GRANT`s are not used.
 

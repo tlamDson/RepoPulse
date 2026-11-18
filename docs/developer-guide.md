@@ -1,6 +1,6 @@
 # Developer guide
 
-How to install, run and develop RepoPulse. The project overview, architecture and measured results are in the [README](../README.md).
+How to install, run and develop GitHub Analytics Data Pipeline. The project overview, architecture and measured results are in the [README](../README.md).
 
 ## Prerequisites
 

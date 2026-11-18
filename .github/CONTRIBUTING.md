@@ -1,4 +1,4 @@
-# Contributing to RepoPulse
+# Contributing to GitHub Analytics Data Pipeline
 
 Thanks for helping. Keep changes small: one pull request does one thing.
 
