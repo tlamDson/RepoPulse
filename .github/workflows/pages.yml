@@ -101,7 +101,7 @@ jobs:
       - uses: actions/configure-pages@v5
 
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
 
   pages-preview:
     name: Pages preview (fixture, no deploy)
