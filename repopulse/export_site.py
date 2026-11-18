@@ -254,6 +254,11 @@ def _latest_data_date(q1_rows: list[dict[str, object]]) -> str | None:
     return max(days) if days else None
 
 
+def _first_data_date(q1_rows: list[dict[str, object]]) -> str | None:
+    days = [r["period_start"] for r in q1_rows if r["period"] == "day" and r["period_start"]]
+    return min(days) if days else None
+
+
 def _json_bytes(doc: object) -> bytes:
     text = json.dumps(doc, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
     return (text + "\n").encode("utf-8")
@@ -309,6 +314,7 @@ def build_files(
             "schema": schema,
             "source": SOURCE,
             "simulated_sections": [],
+            "first_data_date": _first_data_date(marts["mart_daily_active_contributors"]),
             "latest_data_date": _latest_data_date(marts["mart_daily_active_contributors"]),
             "marts": meta_marts,
             "runs": {"rows": len(runs_rows), "json": "data/runs.json", "csv": "tableau/runs.csv"},

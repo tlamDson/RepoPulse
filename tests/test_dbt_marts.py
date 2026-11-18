@@ -153,8 +153,12 @@ def test_mart_matches_baseline_query(q, connect_gold, baseline):
     assert expected, f"{q} baseline is empty on the fixture: comparison would be vacuous"
     assert len(actual) == len(expected), (actual, expected)
     for a_row, e_row in zip(actual, expected, strict=True):
-        for a, e in zip(a_row, e_row, strict=True):
-            if isinstance(e, float):
+        for col, a, e in zip(expected_cols, a_row, e_row, strict=True):
+            if q == "q2" and col.endswith("_pct") and a is None:
+                # The only difference from q2.sql: the mart says NULL ("not yet measurable") where
+                # the retention week is after the latest loaded day; the baseline reports 0.0.
+                assert e == 0.0, (a_row, e_row)
+            elif isinstance(e, float):
                 assert a == pytest.approx(e, abs=1e-9), (a_row, e_row)
             else:
                 assert a == e, (a_row, e_row)

@@ -440,6 +440,7 @@ def test_meta_comes_from_the_data_not_from_hand_typed_values(inputs, tmp_path, s
     assert meta["git_sha"] == "abc1234"
     assert meta["schema"] == "main_public"
     assert meta["latest_data_date"] == "2026-01-06"  # max day of Q1, not the week row
+    assert meta["first_data_date"] == "2026-01-05"  # min day of Q1, the start of the data window
     assert meta["source"]["name"] == "GH Archive"
     assert meta["source"]["real_data"] is True
     assert meta["simulated_sections"] == []
@@ -474,6 +475,7 @@ def test_empty_mart_exports_zero_rows_and_null_latest_date(tmp_path, site_dir):
     assert load_json(out / "data" / "mart_daily_active_contributors.json")["rows"] == []
     meta = load_json(out / "data" / "meta.json")
     assert meta["latest_data_date"] is None
+    assert meta["first_data_date"] is None
     assert meta["marts"]["mart_daily_active_contributors"]["rows"] == 0
 
 
