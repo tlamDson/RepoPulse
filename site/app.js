@@ -307,19 +307,23 @@
       const partial = new Set(spec.partial || []);
       let d = "";
       let dashed = "";
-      let open = false;
+      let solid = false; // the solid path already ends at the previous point
       s.values.forEach((v, i) => {
-        if (isMissing(v)) {
-          open = false;
+        const prevDrawn = i > 0 && !isMissing(s.values[i - 1]);
+        if (isMissing(v) || !prevDrawn) {
+          solid = false;
           return;
         }
-        if (open && (partial.has(i - 1) || partial.has(i))) {
+        const prev = `${xs(i - 1)},${ys(s.values[i - 1])}`;
+        const cur = `${xs(i)},${ys(v)}`;
+        if (partial.has(i - 1) || partial.has(i)) {
           // A segment that touches a partial day is dashed: it is not a full-day value.
-          dashed += `M${xs(i - 1)},${ys(s.values[i - 1])}L${xs(i)},${ys(v)}`;
+          dashed += `M${prev}L${cur}`;
+          solid = false;
         } else {
-          d += `${open ? "L" : "M"}${xs(i)},${ys(v)}`;
+          d += solid ? `L${cur}` : `M${prev}L${cur}`;
+          solid = true;
         }
-        open = true;
       });
       if (d) root.append(svg("path", { class: `mark-line ${cls}`, d }));
       if (dashed) root.append(svg("path", { class: `mark-line partial ${cls}`, d: dashed }));

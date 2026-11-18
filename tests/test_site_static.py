@@ -8,7 +8,10 @@ rule, and give every Q1-Q6 section a chart and a table.
 
 from __future__ import annotations
 
+import json
 import re
+import shutil
+import subprocess
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -278,3 +281,62 @@ def test_line_chart_draws_partial_segments_dashed_and_says_so():
 
 def test_q1_table_labels_the_partial_days():
     assert "(partial)" in q1_function()
+
+
+# ---- Q1 partial days, behaviour: app.js runs in node against a fake DOM (tests/fixtures)
+
+HARNESS = ROOT / "tests" / "fixtures" / "site_q1_harness.js"
+needs_node = pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+
+
+def draw_q1(values_by_day: dict[str, int]) -> dict:
+    rows = [
+        {
+            "period": "day",
+            "scope": "category",
+            "scope_key": "cat",
+            "period_start": day,
+            "active_contributors": n,
+        }
+        for day, n in values_by_day.items()
+    ]
+    done = subprocess.run(
+        ["node", str(HARNESS), str(SITE / "app.js"), json.dumps(rows)],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=True,
+    )
+    return json.loads(done.stdout)
+
+
+def points(d: str) -> list[str]:
+    return re.findall(r"[ML]([-\d.e]+,[-\d.e]+)", d)
+
+
+@needs_node
+def test_q1_solid_path_starts_at_the_first_complete_day_and_partial_ends_are_dashed():
+    out = draw_q1({"2026-11-11": 7, "2026-11-12": 5, "2026-11-13": 6, "2026-11-14": 1})
+    paths = [n["attrs"] for n in out["chart"] if n["tag"] == "path"]
+    solid = [a["d"] for a in paths if a["class"] == "mark-line s1"]
+    dashed = [a["d"] for a in paths if a["class"] == "mark-line partial s1"]
+    assert len(dashed) == 1
+    p0, p1, p2, p3 = points(dashed[0])  # day0->day1 and day2->day3
+    assert solid == [f"M{p1}L{p2}"]  # day1->day2 only; day 1 is not skipped
+    hollow = [n for n in out["chart"] if n["attrs"].get("class") == "mark-dot partial s1"]
+    assert len(hollow) == 2  # the first and the last day, nothing else
+    assert "partial day" in " ".join(n["text"] for n in out["chart"]).lower()
+
+
+@needs_node
+def test_q1_table_marks_exactly_the_first_and_last_day_partial():
+    out = draw_q1({"2026-11-11": 7, "2026-11-12": 5, "2026-11-13": 6, "2026-11-14": 1})
+    days = [n["text"] for n in out["table"] if n["tag"] == "td" and n["text"].startswith("2026-")]
+    assert days == ["2026-11-11 (partial)", "2026-11-12", "2026-11-13", "2026-11-14 (partial)"]
+
+
+@needs_node
+def test_q1_with_two_days_has_no_solid_path():
+    out = draw_q1({"2026-11-11": 7, "2026-11-12": 1})
+    classes = [n["attrs"].get("class") for n in out["chart"] if n["tag"] == "path"]
+    assert classes == ["mark-line partial s1"]
