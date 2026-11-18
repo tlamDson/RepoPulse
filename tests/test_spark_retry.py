@@ -93,16 +93,19 @@ def test_create_session_gives_up_after_the_third_attempt():
     assert builder.calls["n"] == 3
 
 
-def _fixture_calls() -> list[ast.Call]:
+def _fixture() -> ast.FunctionDef:
     tree = ast.parse((Path(__file__).parent / "conftest.py").read_text(encoding="utf-8"))
-    fixture = next(
+    return next(
         node
         for node in ast.walk(tree)
         if isinstance(node, ast.FunctionDef) and node.name == "spark"
     )
+
+
+def _fixture_calls() -> list[ast.Call]:
     return [
         call
-        for call in ast.walk(fixture)
+        for call in ast.walk(_fixture())
         if isinstance(call, ast.Call) and isinstance(call.func, (ast.Name, ast.Attribute))
     ]
 
@@ -124,3 +127,33 @@ def test_spark_fixture_keeps_the_default_retry_settings():
     assert len(calls) == 1
     assert len(calls[0].args) == 1
     assert calls[0].keywords == []
+
+
+def test_spark_fixture_retries_the_builder_configured_with_delta():
+    """The one argument is the unchanged result of ``configure_spark_with_delta_pip``.
+
+    Handing ``create_session`` the bare builder, a started session or a call result would drop
+    the Delta/Iceberg jars or start Spark outside the retry.
+    """
+    configured = {
+        target.id
+        for node in ast.walk(_fixture())
+        if isinstance(node, ast.Assign)
+        and isinstance(node.value, ast.Call)
+        and _name(node.value) == "configure_spark_with_delta_pip"
+        for target in node.targets
+        if isinstance(target, ast.Name)
+    }
+    assert len(configured) == 1
+    reassigned = [
+        target.id
+        for node in ast.walk(_fixture())
+        if isinstance(node, (ast.Assign, ast.AugAssign, ast.AnnAssign))
+        for target in (node.targets if isinstance(node, ast.Assign) else [node.target])
+        if isinstance(target, ast.Name) and target.id in configured
+    ]
+    assert len(reassigned) == 1
+    (call,) = [call for call in _fixture_calls() if _name(call) == "create_session"]
+    (arg,) = call.args
+    assert isinstance(arg, ast.Name)
+    assert arg.id in configured
