@@ -314,6 +314,31 @@ unit_tests:
         - {cohort_week: "2026-01-12", cohort_size: 1, retained_w4: 0, retained_w12: 0,
            retention_w4_pct: 0.0, retention_w12_pct: 0.0}
 
+  - name: retention_is_null_until_the_w4_w12_week_has_started
+    description: >
+      Latest loaded day is 2026-02-10. A retention pct is NULL while cohort_week + 28 (or 84)
+      days is later than that day (the window has no data yet), never 0.0; the retained counts stay
+      plain counts. 2026-01-05: W+4 week 2026-02-02 started (50.0), W+12 not (NULL).
+      2026-01-12: W+4 week 2026-02-09 started (0.0, nobody active), W+12 NULL.
+      2026-02-02: both windows are in the future (NULL, NULL).
+    model: mart_cohort_retention
+    given:
+      - input: ref('int_events_enriched')
+        rows:
+          - {actor_login: alice, is_bot: false, event_type: PullRequestEvent, action: opened, event_week: "2026-01-05", event_date: "2026-01-05"}
+          - {actor_login: alice, is_bot: false, event_type: IssueCommentEvent, action: created, event_week: "2026-02-02", event_date: "2026-02-03"}
+          - {actor_login: bob, is_bot: false, event_type: PullRequestEvent, action: opened, event_week: "2026-01-05", event_date: "2026-01-06"}
+          - {actor_login: carol, is_bot: false, event_type: PullRequestEvent, action: opened, event_week: "2026-01-12", event_date: "2026-01-13"}
+          - {actor_login: dave, is_bot: false, event_type: PullRequestEvent, action: opened, event_week: "2026-02-02", event_date: "2026-02-10"}
+    expect:
+      rows:
+        - {cohort_week: "2026-01-05", cohort_size: 2, retained_w4: 1, retained_w12: 0,
+           retention_w4_pct: 50.0, retention_w12_pct: null}
+        - {cohort_week: "2026-01-12", cohort_size: 1, retained_w4: 0, retained_w12: 0,
+           retention_w4_pct: 0.0, retention_w12_pct: null}
+        - {cohort_week: "2026-02-02", cohort_size: 1, retained_w4: 0, retained_w12: 0,
+           retention_w4_pct: null, retention_w12_pct: null}
+
   - name: funnel_counts_forkers_prs_and_merge_hours
     description: >
       u1 forks then opens #1 (merged 2 h later via action merged); u2 opened #2 before forking
