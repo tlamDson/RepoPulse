@@ -1,8 +1,8 @@
-# RepoPulse — implementation plan
+# GitHub Analytics Data Pipeline — implementation plan
 
-## What RepoPulse does
+## What GitHub Analytics Data Pipeline does
 
-RepoPulse is a small data platform that measures the "health" of open-source projects from public GitHub event data (GH Archive), together with an application event stream following a logging spec.
+GitHub Analytics Data Pipeline is a small data platform that measures the "health" of open-source projects from public GitHub event data (GH Archive), together with an application event stream following a logging spec.
 
 - **Input:** real hourly GitHub events; simulated app events generated from an event catalog with a schema.
 - **Processing:** a scheduled batch ELT pipeline: cleaning and PII hashing with PySpark + Delta Lake, a star schema built with dbt, with tests, contracts and anomaly alerts.
@@ -95,11 +95,11 @@ The workflow that runs the scheduled pipeline and the workflow that deploys Page
 
 ### S0.3 Install the `.claude` harness from TravelPlan
 
-| From TravelPlan | To RepoPulse | Adjustment |
+| From TravelPlan | To GitHub Analytics Data Pipeline | Adjustment |
 |---|---|---|
 | `.claude/rules/tdd.md` | Keep | Switch to pytest and dbt tests; keep Red → Green → Refactor and the requirement to see a real red |
 | `.claude/rules/workflow.md`, `developer-guide.md` | Keep | The base branch is `main`; a new worktree cut from `origin/main` is the correct default, no `reset --hard origin/develop` step needed; merge when CI is green and review PASSes; update branches with `gh pr update-branch`, not rebase |
-| `.claude/rules/tech-defaults.md` | Write new | RepoPulse's stack; the rule "measurements come only from `runs.csv`"; the rule to label simulated data; the technical debt section |
+| `.claude/rules/tech-defaults.md` | Write new | GitHub Analytics Data Pipeline's stack; the rule "measurements come only from `runs.csv`"; the rule to label simulated data; the technical debt section |
 | `.claude/agents/code-reviewer.md` | Keep | Add: re-run tests and copy the output, check that the first commit contains only tests, try mutations, verdict PASS or FAIL |
 | `.claude/agents/qa-testing.md`, `researcher.md` | Keep | Switch test commands to Python and dbt |
 | Format-after-edit hook | Keep the idea | Replace `prettier` with `ruff format` for `.py` files |
@@ -165,7 +165,7 @@ One PR in the **TravelPlan repo** (optional, done separately there) to get real 
 
 | Branch | Content |
 |---|---|
-| `feature/product-event-logging` | An SDK that logs events on client and server following the `eventspec` catalog; an endpoint that receives events with schema validation; storage in a capped Mongo collection; measuring coverage of key actions. Afterwards a workflow in RepoPulse exports the real events daily (needs Lam to add a read-only secret) |
+| `feature/product-event-logging` | An SDK that logs events on client and server following the `eventspec` catalog; an endpoint that receives events with schema validation; storage in a capped Mongo collection; measuring coverage of key actions. Afterwards a workflow in GitHub Analytics Data Pipeline exports the real events daily (needs Lam to add a read-only secret) |
 
 ### Phase 1 measurements
 
@@ -182,7 +182,7 @@ One PR in the **TravelPlan repo** (optional, done separately there) to get real 
 
 ## Plan v2 (2026-11-11): comparing two paths, widening engines, phase 2, AI
 
-Phase 1 is done (16/16 tasks, release #45). Re-running the probe with the correct token ([run 43104609971](https://github.com/tlamDson/RepoPulse/actions/runs/43104609971), 2026-11-11) gave `primary`: all 9 steps pass. `docs/probe-result.md` still recorded the first attempt (`fallback`, 401 error); task D4 updates that file together with the comparison table. Plan v2 measures the two paths against each other, then chooses the primary path by a rule written down **before measuring**. It also adds an engine matrix, Iceberg versus Delta, phase 2 and a SQL agent running a local model. The repo owner settled on 2026-11-11: everything must be free, phase 2 runs on GitHub Actions runners, and the orchestrator runs until the quota is exhausted.
+Phase 1 is done (16/16 tasks, release #45). Re-running the probe with the correct token ([run 43104609971](https://github.com/tlamDson/github-analytics-data-pipeline/actions/runs/43104609971), 2026-11-11) gave `primary`: all 9 steps pass. `docs/probe-result.md` still recorded the first attempt (`fallback`, 401 error); task D4 updates that file together with the comparison table. Plan v2 measures the two paths against each other, then chooses the primary path by a rule written down **before measuring**. It also adds an engine matrix, Iceberg versus Delta, phase 2 and a SQL agent running a local model. The repo owner settled on 2026-11-11: everything must be free, phase 2 runs on GitHub Actions runners, and the orchestrator runs until the quota is exhausted.
 
 ### Primary-path selection rule (fixed before measuring, applied exactly as is by PR D4)
 

@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="880" height="440" viewBox="0 0 880 440" role="img" aria-label="RepoPulse architecture: GH Archive hourly ingest, PySpark and Delta Lake bronze and silver, dbt gold marts, GitHub Pages dashboard, data quality checks, CI gates and the DuckDB vs Spark benchmark path">
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="440" viewBox="0 0 880 440" role="img" aria-label="GitHub Analytics Data Pipeline architecture: GH Archive hourly ingest, PySpark and Delta Lake bronze and silver, dbt gold marts, GitHub Pages dashboard, data quality checks, CI gates and the DuckDB vs Spark benchmark path">
   <rect x="0" y="0" width="880" height="440" rx="16" fill="#ffffff" stroke="#d0d7de"/>
-  <title>RepoPulse architecture</title>
+  <title>GitHub Analytics Data Pipeline architecture</title>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M0,0 L10,5 L0,10 z" fill="#57606a"/>

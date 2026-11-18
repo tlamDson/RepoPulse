@@ -1,10 +1,10 @@
-# RepoPulse
+# GitHub Analytics Data Pipeline
 
-[![CI](https://github.com/tlamDson/RepoPulse/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/tlamDson/RepoPulse/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![CI](https://github.com/tlamDson/github-analytics-data-pipeline/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/tlamDson/github-analytics-data-pipeline/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-RepoPulse is a small data platform that measures the health of open-source data projects (Spark, dbt, DuckDB, Airflow, Kafka and others) from real public GitHub activity, with every result recorded run by run.
+GitHub Analytics Data Pipeline is a small data platform that measures the health of open-source data projects (Spark, dbt, DuckDB, Airflow, Kafka and others) from real public GitHub activity, with every result recorded run by run.
 
-**Live dashboard: <https://tlamdson.github.io/RepoPulse/>**
+**Live dashboard: <https://tlamdson.github.io/github-analytics-data-pipeline/>**
 
 ![Architecture: GH Archive hourly files go through an hourly ingest into PySpark and Delta Lake (bronze, then silver with PII hashed), dbt builds the gold star schema and the Q1-Q6 marts in MotherDuck, and a static dashboard on GitHub Pages reads the public schema. Data quality checks watch the gold layer and raise GitHub Issues; CI gates every pull request; a benchmark path runs the same questions on DuckDB, Spark and other engines and records each run in runs.csv.](.github/readme/architecture.svg)
 

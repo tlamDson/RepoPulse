@@ -1,4 +1,4 @@
-# RepoPulse · Progress
+# GitHub Analytics Data Pipeline · Progress
 
 Plan: [`plan.md`](plan.md). The orchestrating session updates this file after every PR, so a new session can read it and continue.
 

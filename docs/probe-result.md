@@ -1,4 +1,4 @@
-# RepoPulse · Result of probe step 1 (cloud probe) and the primary-path selection rule
+# GitHub Analytics Data Pipeline · Result of probe step 1 (cloud probe) and the primary-path selection rule
 
 The probe step in [`plan.md`](plan.md) (the "probe step" row of the PR list): can Databricks Free Edition be controlled from GitHub Actions, or do we use the fallback path (PySpark + Delta on the runner, gold on MotherDuck). Plan v2 adds a primary-path selection rule, fixed before measuring, applied to the measurements of [`path-comparison.md`](path-comparison.md) (D3); this file records both.
 
@@ -90,7 +90,7 @@ The probe's path-selection rule (`repopulse.probe.decide_path`): `primary` when 
 |---|---|
 | Date | 2026-11-11 |
 | Workflow | `Cloud probe` (`.github/workflows/probe.yml`), `workflow_dispatch` on `main` |
-| Run | <https://github.com/tlamDson/RepoPulse/actions/runs/43104609971> |
+| Run | <https://github.com/tlamDson/github-analytics-data-pipeline/actions/runs/43104609971> |
 | Commit | `2cc978d` on `main` |
 | Artifact | `probe-result` (`probe-result.json`, `probe-result.md`) |
 
@@ -114,7 +114,7 @@ The table below is copied from the `probe-result.md` of that run.
 |---|---|
 | Date | 2026-11-11 |
 | Workflow | `Cloud probe` (`.github/workflows/probe.yml`), runner `ubuntu-latest` |
-| Run | <https://github.com/tlamDson/RepoPulse/actions/runs/42980750248> |
+| Run | <https://github.com/tlamDson/github-analytics-data-pipeline/actions/runs/42980750248> |
 | Commit | `2d1df17` on the branch `docs/probe-result` |
 | Artifact | `probe-result` (`probe-result.json`, `probe-result.md`) |
 
@@ -150,7 +150,7 @@ The Free Edition daily quota (when exceeded, compute is off until the end of the
 
 ## Pitfalls found
 
-- **MotherDuck rejects a DuckDB client that is too new.** The first run (<https://github.com/tlamDson/RepoPulse/actions/runs/42980241119>) installed the latest DuckDB and MotherDuck reported: `Your DuckDB version (v2.0.0) is not yet supported by MotherDuck. The latest supported version is v1.5.6.` After pinning `duckdb==1.5.6` in the workflow it passed. Every workflow connecting to MotherDuck must pin the DuckDB version to the one MotherDuck currently supports; CI on local DuckDB is not affected.
+- **MotherDuck rejects a DuckDB client that is too new.** The first run (<https://github.com/tlamDson/github-analytics-data-pipeline/actions/runs/42980241119>) installed the latest DuckDB and MotherDuck reported: `Your DuckDB version (v2.0.0) is not yet supported by MotherDuck. The latest supported version is v1.5.6.` After pinning `duckdb==1.5.6` in the workflow it passed. Every workflow connecting to MotherDuck must pin the DuckDB version to the one MotherDuck currently supports; CI on local DuckDB is not affected.
 - **GitHub masks only the exact verbatim value of a secret.** `dbt debug` prints the hostname without `https://`, so the workflow additionally registers `::add-mask::` for the bare hostname, user, http path and warehouse id before running `dbt debug`. The log of the public repo was checked: `host` and `http_path` show `***`.
 - **`workflow_dispatch` only sees workflows already on `main`.** Attempt 1 ran thanks to a `push` trigger limited to the branch `docs/probe-result`; attempt 2 ran by `workflow_dispatch` after release. For the same reason, the cron of `path-comparison.yml` only starts after release.
 
