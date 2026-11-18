@@ -3,12 +3,16 @@
 --   activity   human contributors / max human contributors over the scored repos   (Q1)
 --   retention  share of human contributors active in >= 2 distinct ISO weeks; Q6-only,
 --              from Q1 activity data (not the Q2 W+4/W+12 cohort retention)         (Q1)
---   merge      PRs merged / human PRs opened (Q3 definitions; 0 when none opened)    (Q3)
+--   merge      PRs merged / human PRs opened (Q3 definitions)                       (Q3)
 --   response   items with a first response / items opened, issues + PRs           (Q4)
 --   close      items closed / items opened, issues + PRs                           (Q4)
 --   diversity  1 - top-1 human share of human contributions (0 when no humans)     (Q5)
+-- merge / response / close are NULL (n/a) when the repo has no item to rate (no PR / no item
+-- opened), or when no scored repo has a single matched merge / response / close in the loaded
+-- data (the window is too short to see follow-ups).
 -- health_score = 100 * (0.25 activity + 0.15 retention + 0.15 merge + 0.20 response
---                       + 0.10 close + 0.15 diversity), rounded to 2 decimals.
+--                       + 0.10 close + 0.15 diversity) / (sum of the weights of the non-NULL
+-- components), rounded to 2 decimals.
 -- Rank: score desc, then repo_name. Definitions of seed repo, contribution, bot: q1.sql.
 WITH ev AS (
     SELECT
@@ -114,9 +118,15 @@ components AS (
             p.contributors::DOUBLE / nullif(max(p.contributors) OVER (), 0), 0
         ) AS activity,
         coalesce(p.multi_week::DOUBLE / p.contributors, 0) AS retention,
-        coalesce(i.prs_merged::DOUBLE / nullif(i.prs_opened, 0), 0) AS merge,
-        coalesce(i.responded::DOUBLE / nullif(i.opened, 0), 0) AS response,
-        coalesce(i.closed::DOUBLE / nullif(i.opened, 0), 0) AS close,
+        CASE WHEN sum(i.prs_merged) OVER () > 0
+            THEN i.prs_merged::DOUBLE / nullif(i.prs_opened, 0)
+        END AS merge,
+        CASE WHEN sum(i.responded) OVER () > 0
+            THEN i.responded::DOUBLE / nullif(i.opened, 0)
+        END AS response,
+        CASE WHEN sum(i.closed) OVER () > 0
+            THEN i.closed::DOUBLE / nullif(i.opened, 0)
+        END AS close,
         coalesce(1 - p.top1_share, 0) AS diversity
     FROM scored_repos AS s
     LEFT JOIN people AS p USING (repo_name)
@@ -126,8 +136,12 @@ scores AS (
     SELECT
         *,
         100 * (
-            0.25 * activity + 0.15 * retention + 0.15 * merge + 0.20 * response
-            + 0.10 * close + 0.15 * diversity
+            0.25 * activity + 0.15 * retention + coalesce(0.15 * merge, 0)
+            + coalesce(0.20 * response, 0) + coalesce(0.10 * close, 0) + 0.15 * diversity
+        ) / (
+            0.55 + CASE WHEN merge IS NULL THEN 0 ELSE 0.15 END
+            + CASE WHEN response IS NULL THEN 0 ELSE 0.20 END
+            + CASE WHEN close IS NULL THEN 0 ELSE 0.10 END
         ) AS score
     FROM components
 )

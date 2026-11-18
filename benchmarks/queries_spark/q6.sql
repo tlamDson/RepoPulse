@@ -103,9 +103,15 @@ components AS (
             CAST(p.contributors AS DOUBLE) / nullif(max(p.contributors) OVER (), 0), 0
         ) AS activity,
         coalesce(CAST(p.multi_week AS DOUBLE) / p.contributors, 0) AS retention,
-        coalesce(CAST(i.prs_merged AS DOUBLE) / nullif(i.prs_opened, 0), 0) AS `merge`,
-        coalesce(CAST(i.responded AS DOUBLE) / nullif(i.opened, 0), 0) AS response,
-        coalesce(CAST(i.closed AS DOUBLE) / nullif(i.opened, 0), 0) AS `close`,
+        CASE WHEN sum(i.prs_merged) OVER () > 0
+            THEN CAST(i.prs_merged AS DOUBLE) / nullif(i.prs_opened, 0)
+        END AS `merge`,
+        CASE WHEN sum(i.responded) OVER () > 0
+            THEN CAST(i.responded AS DOUBLE) / nullif(i.opened, 0)
+        END AS response,
+        CASE WHEN sum(i.closed) OVER () > 0
+            THEN CAST(i.closed AS DOUBLE) / nullif(i.opened, 0)
+        END AS `close`,
         coalesce(1 - p.top1_share, 0) AS diversity
     FROM scored_repos AS s
     LEFT JOIN people AS p ON p.repo_name = s.repo_name
@@ -115,8 +121,12 @@ scores AS (
     SELECT
         *,
         100 * (
-            0.25 * activity + 0.15 * retention + 0.15 * `merge` + 0.20 * response
-            + 0.10 * `close` + 0.15 * diversity
+            0.25 * activity + 0.15 * retention + coalesce(0.15 * `merge`, 0)
+            + coalesce(0.20 * response, 0) + coalesce(0.10 * `close`, 0) + 0.15 * diversity
+        ) / (
+            0.55 + CASE WHEN `merge` IS NULL THEN 0 ELSE 0.15 END
+            + CASE WHEN response IS NULL THEN 0 ELSE 0.20 END
+            + CASE WHEN `close` IS NULL THEN 0 ELSE 0.10 END
         ) AS score
     FROM components
 )
