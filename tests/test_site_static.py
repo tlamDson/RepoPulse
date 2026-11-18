@@ -232,6 +232,15 @@ def test_every_section_has_a_chart_a_table_and_a_status_slot(name):
     assert {"chart", "table", "status"} <= roles, (name, roles)
 
 
+def test_q2_says_not_yet_measurable_and_states_the_data_window_start():
+    assert "not yet measurable" in js_text()
+    assert "first_data_date" in js_text()  # the window start comes from meta.json, not hand-typed
+    q2 = [a for t, a, _ in page().tags if t == "section" and a.get("id") == "q2"]
+    inside = [a for _, a, anc in page().tags if any(x.get("id") == "q2" for x in anc)]
+    assert len(q2) == 1
+    assert "q2-window" in {a.get("data-role") for a in inside}
+
+
 @pytest.mark.parametrize("q", ["Q1", "Q2", "Q3", "Q4", "Q5", "Q6"])
 def test_sections_are_labelled_q1_to_q6(q):
     assert q in visible_text()
