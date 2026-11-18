@@ -167,7 +167,10 @@ match the baseline even when an actor is renamed.
 | `mart_repo_health_score` | `q6.sql` | Composite health score and ranking |
 
 The health score formula (components, weights, rounding, ranking order) is written at the top of
-`benchmarks/queries/q6.sql`; `mart_repo_health_score` uses that formula verbatim.
+`benchmarks/queries/q6.sql`; `mart_repo_health_score` uses that formula verbatim. A repo is scored
+and ranked only with at least 5 human contributions (dbt var `q6_min_human_contributions`, default 5;
+`params.min_human_contributions` in the `q6.sql` variants). The others stay in the mart with NULL
+`health_rank` and `health_score` (not enough data), after the ranked repos.
 
 Semantic layer (MetricFlow): each public mart has one semantic model and each numeric column a metric of the same
 name, declared in `transform/models/public/_semantic.yml`; grain, non-additive metrics, the time spine

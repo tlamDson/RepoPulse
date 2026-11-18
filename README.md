@@ -234,7 +234,7 @@ The full log, with every run and not only the newest, is [`runs.csv`](runs.csv).
 
 ## Q6 health score
 
-For each seed repo with at least one contribution in the data, six components in [0, 1]:
+For each seed repo with at least 5 human contributions in the data, six components in [0, 1]. A repo with fewer (including a bot-only repo) is not scored: it is listed after the ranked repos with no rank and no score (not enough data), because one or two contributions say nothing about health.
 
 | Component | Definition | From |
 |---|---|---|

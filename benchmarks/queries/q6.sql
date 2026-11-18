@@ -1,4 +1,5 @@
--- Q6: health score per seed repo with >= 1 contribution event, built from Q1-Q5 components
+-- Q6: health score per seed repo with >= 5 human contribution events (otherwise health_rank
+-- and health_score are NULL: not enough data), built from Q1-Q5 components
 -- (each in [0, 1]; formula also documented in README.md):
 --   activity   human contributors / max human contributors over the scored repos   (Q1)
 --   retention  share of human contributors active in >= 2 distinct ISO weeks; Q6-only,
@@ -14,8 +15,13 @@
 -- health_score = 100 * (0.25 activity + 0.15 retention + 0.15 merge + 0.20 response
 --                       + 0.10 close + 0.15 diversity) / (sum of the weights of the non-NULL
 -- components), rounded to 2 decimals.
+-- Minimum: params.min_human_contributions (5; the dbt var q6_min_human_contributions). Repos
+-- below it are still listed, after the ranked ones, with NULL health_rank and health_score.
 -- Rank: score desc, then repo_name. Definitions of seed repo, contribution, bot: q1.sql.
-WITH ev AS (
+WITH params AS (
+    SELECT 5 AS min_human_contributions
+),
+ev AS (
     SELECT
         e.actor.login AS actor_login,
         ends_with(lower(e.actor.login), '[bot]') OR ends_with(lower(e.actor.login), '-bot') AS is_bot,
@@ -51,6 +57,7 @@ people AS (
         repo_name,
         count(*) AS contributors,
         count(*) FILTER (WHERE weeks >= 2) AS multi_week,
+        sum(n) AS human_contributions,
         max(n)::DOUBLE / sum(n) AS top1_share
     FROM per_actor
     GROUP BY repo_name
@@ -117,6 +124,7 @@ scored_repos AS (
 components AS (
     SELECT
         s.repo_name,
+        coalesce(p.human_contributions, 0) AS human_contributions,
         coalesce(
             p.contributors::DOUBLE / nullif(max(p.contributors) OVER (), 0), 0
         ) AS activity,
@@ -138,6 +146,7 @@ components AS (
 scores AS (
     SELECT
         *,
+        human_contributions >= (SELECT min_human_contributions FROM params) AS is_scored,
         100 * (
             0.25 * activity + 0.15 * retention + coalesce(0.15 * merge, 0)
             + coalesce(0.20 * response, 0) + coalesce(0.10 * close, 0) + 0.15 * diversity
@@ -149,7 +158,9 @@ scores AS (
     FROM components
 )
 SELECT
-    row_number() OVER (ORDER BY s.score DESC, s.repo_name) AS health_rank,
+    CASE WHEN s.is_scored
+        THEN row_number() OVER (PARTITION BY s.is_scored ORDER BY s.score DESC, s.repo_name)
+    END AS health_rank,
     s.repo_name,
     r.category,
     round(s.activity, 4) AS activity_score,
@@ -158,7 +169,7 @@ SELECT
     round(s.response, 4) AS response_score,
     round(s.close, 4) AS close_score,
     round(s.diversity, 4) AS diversity_score,
-    round(s.score, 2) AS health_score
+    CASE WHEN s.is_scored THEN round(s.score, 2) END AS health_score
 FROM scores AS s
 JOIN repos AS r USING (repo_name)
-ORDER BY health_rank
+ORDER BY health_rank NULLS LAST, s.repo_name

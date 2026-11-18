@@ -241,7 +241,9 @@ models:
   - name: mart_repo_health_score
     description: >
       Q6 (q6.sql). Health score per repo from Q1-Q5 components; the formula is documented in
-      benchmarks/queries/q6.sql and docs/dbt-models.md.
+      benchmarks/queries/q6.sql and docs/dbt-models.md. health_rank and health_score are NULL
+      (not enough data) for a repo with fewer than q6_min_human_contributions (5) human
+      contributions.
     config:
       contract:
         enforced: true
@@ -249,8 +251,6 @@ models:
       - name: health_rank
         config: {meta: {pii: none}}
         data_type: bigint
-        constraints:
-          - type: not_null
         data_tests:
           - unique
       - name: repo_name

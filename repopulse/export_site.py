@@ -111,7 +111,8 @@ ORDER_BY: dict[str, tuple[str, ...]] = {
     "mart_contribution_funnel": ("repo_name",),
     "mart_responsiveness": ("repo_name", "item_type"),
     "mart_repo_concentration": ("repo_name",),
-    "mart_repo_health_score": ("health_rank",),
+    # repos with too few human contributions have a NULL rank (DuckDB sorts NULL last)
+    "mart_repo_health_score": ("health_rank", "repo_name"),
 }
 SOURCE = {
     "name": "GH Archive",

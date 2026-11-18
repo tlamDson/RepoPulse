@@ -277,10 +277,11 @@ def test_merge_response_close_sections_warn_they_need_more_days_of_data(section)
 def test_q6_says_repos_with_too_few_human_contributions_are_not_enough_data():
     # UX-6: a repo needs >= 5 human contributions to be ranked; the page lists the others as
     # "not enough data" instead of ranking them, and the chart only draws the ranked ones.
+    # The number is spelled out: the page may not carry hand-typed digits.
     parser = Caveats()
     parser.feed(INDEX.read_text(encoding="utf-8"))
     text = " ".join(parser.found.get("q6", "").split()).lower()
-    assert "not enough data" in text and "5 human contributions" in text, text
+    assert "not enough data" in text and "five human contributions" in text, text
     js = js_text()
     assert "health_rank" in js and "not enough data" in js.lower()
 
