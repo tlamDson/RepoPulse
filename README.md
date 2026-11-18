@@ -2,6 +2,10 @@
 
 RepoPulse is a small data platform that measures the health of open-source projects from public GitHub event data.
 
+**Live dashboard: <https://tlamdson.github.io/RepoPulse/>**
+
+[![RepoPulse dashboard: daily active contributors per repo category, from real GH Archive data](docs/images/dashboard.png)](https://tlamdson.github.io/RepoPulse/)
+
 **Status:** both phases are built. The first phase is ingest, Spark and Delta Lake, dbt, data quality checks, governance, a static dashboard and the benchmarks. The second adds a comparison of two end-to-end paths, Delta Lake against Apache Iceberg, a Kafka benchmark with fault injection, Trino on Hive-partitioned tables, an Airflow backfill and an SQL agent. These are measured on GitHub Actions runners, except the SQL agent, whose model runs on the repo owner's machine. Measured results are in [Results](#results), taken from `runs.csv`, the run log this repo keeps. To run or change the code, see the [developer guide](docs/developer-guide.md).
 
 ## What it does
