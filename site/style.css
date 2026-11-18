@@ -244,6 +244,25 @@ section {
   stroke-width: 2;
 }
 
+/* A partial day (the data window starts or ends mid-day): dashed line, hollow dot. */
+.mark-line.partial {
+  stroke-dasharray: 5 4;
+}
+
+.mark-dot.partial {
+  fill: var(--surface-1);
+  stroke-width: 2;
+}
+
+.mark-dot.partial.s1 { fill: var(--surface-1); stroke: var(--series-1); }
+.mark-dot.partial.s2 { fill: var(--surface-1); stroke: var(--series-2); }
+.mark-dot.partial.s3 { fill: var(--surface-1); stroke: var(--series-3); }
+.mark-dot.partial.s4 { fill: var(--surface-1); stroke: var(--series-4); }
+.mark-dot.partial.s5 { fill: var(--surface-1); stroke: var(--series-5); }
+.mark-dot.partial.s6 { fill: var(--surface-1); stroke: var(--series-6); }
+.mark-dot.partial.s7 { fill: var(--surface-1); stroke: var(--series-7); }
+.mark-dot.partial.s8 { fill: var(--surface-1); stroke: var(--series-8); }
+
 .mark-bar:hover,
 .mark-bar:focus {
   opacity: 0.8;

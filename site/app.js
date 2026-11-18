@@ -304,21 +304,32 @@
 
     series.forEach((s, j) => {
       const cls = `s${j + 1}`;
+      const partial = new Set(spec.partial || []);
       let d = "";
+      let dashed = "";
       let open = false;
       s.values.forEach((v, i) => {
         if (isMissing(v)) {
           open = false;
           return;
         }
-        d += `${open ? "L" : "M"}${xs(i)},${ys(v)}`;
+        if (open && (partial.has(i - 1) || partial.has(i))) {
+          // A segment that touches a partial day is dashed: it is not a full-day value.
+          dashed += `M${xs(i - 1)},${ys(s.values[i - 1])}L${xs(i)},${ys(v)}`;
+        } else {
+          d += `${open ? "L" : "M"}${xs(i)},${ys(v)}`;
+        }
         open = true;
       });
       if (d) root.append(svg("path", { class: `mark-line ${cls}`, d }));
+      if (dashed) root.append(svg("path", { class: `mark-line partial ${cls}`, d: dashed }));
       s.values.forEach((v, i) => {
         const before = i > 0 && !isMissing(s.values[i - 1]);
         const after = i < s.values.length - 1 && !isMissing(s.values[i + 1]);
-        if (!isMissing(v) && !before && !after) {
+        if (isMissing(v)) return;
+        if (partial.has(i)) {
+          root.append(svg("circle", { class: `mark-dot partial ${cls}`, cx: xs(i), cy: ys(v), r: 4 }));
+        } else if (!before && !after) {
           root.append(svg("circle", { class: `mark-dot ${cls}`, cx: xs(i), cy: ys(v), r: 4 }));
         }
       });
@@ -351,7 +362,8 @@
         if (!isMissing(v)) hover.append(svg("circle", { class: `mark-dot s${j + 1}`, cx, cy: ys(v), r: 4 }));
         return { value: show(v, kind), name: s.name, cls: `s${j + 1}`, shape: "line" };
       });
-      showTip(point, xLabel(x[i]) + (longRange ? "" : ` (${x[i]})`), rows);
+      const isPartial = (spec.partial || []).includes(i);
+      showTip(point, xLabel(x[i]) + (longRange ? "" : ` (${x[i]})`) + (isPartial ? " · partial day" : ""), rows);
     }
 
     function clear() {
@@ -466,6 +478,13 @@
     // A missing (category, day) pair means no active contributor that day.
     const value = (name, day) => index.get(`${name}|${day}`) ?? 0;
     const all = [...totals.keys()].sort();
+    // The run window starts mid-day and ends at the newest ingested hour, so the first and last
+    // day hold only a fraction of a day; the chart draws them dashed and says so.
+    const partialDays = new Set([days[0], days[days.length - 1]]);
+    const partialIdx = days.map((d, i) => (partialDays.has(d) ? i : -1)).filter((i) => i >= 0);
+    const partialNote =
+      `Dashed segments and hollow dots mark a partial day (${partialIdx.map((i) => days[i]).join(", ")}): ` +
+      "the data window starts and ends mid-day, so those values are not comparable with full days.";
     return {
       chart: (host) =>
         lineChart(host, {
@@ -473,13 +492,14 @@
           x: days,
           series: names.map((name) => ({ name, values: days.map((d) => value(name, d)) })),
           kind: "int",
-          note,
+          partial: partialIdx,
+          note: note ? `${note} ${partialNote}` : partialNote,
         }),
       table: (host) =>
         renderTable(
           host,
           [{ key: "day", label: "day", kind: "text" }, ...all.map((name) => ({ key: name, label: name, kind: "int" }))],
-          days.map((d) => Object.fromEntries([["day", d], ...all.map((n) => [n, value(n, d)])])),
+          days.map((d) => Object.fromEntries([["day", partialDays.has(d) ? `${d} (partial)` : d], ...all.map((n) => [n, value(n, d)])])),
           "Active contributors per day and category (scope = category, period = day).",
         ),
     };
