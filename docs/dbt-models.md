@@ -160,7 +160,7 @@ match the baseline even when an actor is renamed.
 | Mart | Query | Question |
 |---|---|---|
 | `mart_daily_active_contributors` | `q1.sql` | Active contributors per day/week, by repo and category, new vs returning |
-| `mart_cohort_retention` | `q2.sql` | Cohort retention at exactly W+4, W+12 |
+| `mart_cohort_retention` | `q2.sql` | Cohort retention at exactly W+4, W+12; `retention_w4_pct` / `retention_w12_pct` are NULL while cohort_week + 28 / 84 days is after the latest loaded day (q2.sql reports 0.0 there) |
 | `mart_contribution_funnel` | `q3.sql` | Fork → PR → merge funnel, hours to merge p50/p90 |
 | `mart_responsiveness` | `q4.sql` | First response time p50/p90, close rate |
 | `mart_repo_concentration` | `q5.sql` | Bus factor (top-N share) and bot share |

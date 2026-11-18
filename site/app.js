@@ -411,7 +411,8 @@
           const classes = [];
           if (NUMERIC.has(c.kind) || c.numeric) classes.push("num");
           if (isMissing(v)) classes.push("null");
-          tr.append(el("td", classes.length ? { class: classes.join(" ") } : null, show(v, c.kind)));
+          const text = isMissing(v) && c.missing ? c.missing : show(v, c.kind);
+          tr.append(el("td", classes.length ? { class: classes.join(" ") } : null, text));
         }
         body.append(tr);
       }
@@ -487,6 +488,15 @@
 
   function q2(doc) {
     const rows = doc.rows;
+    // The mart gives NULL (not 0.0) while a cohort's W+4 / W+12 week has no data yet.
+    const columns = doc.columns.map((c) => ({ key: c, label: c, kind: kindOf(c), missing: c.endsWith("_pct") ? "not yet measurable" : "" }));
+    const measurable = rows.some((r) => !isMissing(r.retention_w4_pct) || !isMissing(r.retention_w12_pct));
+    if (!measurable) {
+      return {
+        empty: "Retention is not yet measurable: no cohort has reached week W+4 yet.",
+        table: (host) => renderTable(host, columns, rows),
+      };
+    }
     return {
       chart: (host) =>
         lineChart(host, {
@@ -497,8 +507,9 @@
             { name: "Retained at W+12", values: rows.map((r) => r.retention_w12_pct) },
           ],
           kind: "pct",
+          note: "Cohorts that have not reached W+4 or W+12 yet are left out of the line (not yet measurable).",
         }),
-      table: (host) => renderTable(host, martColumns(doc), rows),
+      table: (host) => renderTable(host, columns, rows),
     };
   }
 
@@ -624,6 +635,8 @@
     document.getElementById("generated-at").textContent = formatStamp(meta.generated_at);
     document.getElementById("latest-data-date").textContent = meta.latest_data_date || "no data yet";
     document.getElementById("git-sha").textContent = meta.git_sha ? meta.git_sha.slice(0, 7) : "–";
+    const windowStart = document.querySelector('[data-role="q2-window"]');
+    if (windowStart) windowStart.textContent = meta.first_data_date || "an unknown day";
     const simulated = Array.isArray(meta.simulated_sections) ? meta.simulated_sections : [];
     if (simulated.length) {
       setStatus(document.getElementById("page-status"), `Contains simulated data in: ${simulated.join(", ")}.`, false);
