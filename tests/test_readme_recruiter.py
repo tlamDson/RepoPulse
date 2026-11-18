@@ -12,7 +12,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SVG_PATH = ".github/readme/architecture.svg"
-DASHBOARD_URL = "https://tlamdson.github.io/RepoPulse/"
+DASHBOARD_URL = "https://tlamdson.github.io/github-analytics-data-pipeline/"
 SVG_NS = "{http://www.w3.org/2000/svg}"
 
 
@@ -107,7 +107,7 @@ def test_readme_opens_with_title_pitch_badges_and_live_dashboard_before_the_diag
     readme = read_text("README.md")
     head = readme[: readme.index("## What it does")]
 
-    assert head.startswith("# RepoPulse\n")
+    assert head.startswith("# GitHub Analytics Data Pipeline\n")
     assert re.search(r"actions/workflows/ci\.yml/badge\.svg", head), "CI badge missing"
     assert re.search(r"\[!\[[^\]]*[Ll]icen[cs]e[^\]]*\]\([^)]+\)\]\(LICENSE\)", head)
     url = re.escape(DASHBOARD_URL)

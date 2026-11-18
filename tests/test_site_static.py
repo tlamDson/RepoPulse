@@ -1,9 +1,9 @@
 """Static checks on site/ (no browser, no network).
 
 The page is plain HTML + CSS + JS. It may only load files that sit next to it (relative paths,
-because Pages serves it under /RepoPulse/), only fetch the JSON that repopulse/export_site.py
-writes, carry no hand-typed numbers, label GH Archive as real data and spell out the "simulated"
-rule, and give every Q1-Q6 section a chart and a table.
+because Pages serves it under /github-analytics-data-pipeline/), only fetch the JSON that
+repopulse/export_site.py writes, carry no hand-typed numbers, label GH Archive as real data and
+spell out the "simulated" rule, and give every Q1-Q6 section a chart and a table.
 """
 
 from __future__ import annotations
@@ -129,7 +129,8 @@ def test_no_external_or_root_absolute_resources_in_html():
             if tag == "link" and attrs.get("rel") == "icon" and value == "data:,":
                 continue  # the empty inline icon: no request at all
             assert not EXTERNAL.match(value), (tag, name, value)
-            assert not value.startswith("/"), (tag, name, value)  # Pages serves under /RepoPulse/
+            # Pages serves under /github-analytics-data-pipeline/
+            assert not value.startswith("/"), (tag, name, value)
 
 
 def test_no_inline_script_or_style_in_html():

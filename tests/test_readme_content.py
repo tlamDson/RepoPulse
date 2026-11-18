@@ -179,7 +179,7 @@ def test_hand_written_readme_text_quotes_no_decimal_that_runs_csv_lacks():
         assert token in FORMULA_NUMBERS or token in source, f"{token} in README.md has no source"
 
 
-DASHBOARD_URL = "https://tlamdson.github.io/RepoPulse/"
+DASHBOARD_URL = "https://tlamdson.github.io/github-analytics-data-pipeline/"
 
 
 def test_readme_links_the_live_dashboard_near_the_top():
