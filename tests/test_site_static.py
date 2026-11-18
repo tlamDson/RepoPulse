@@ -250,3 +250,31 @@ def test_css_handles_narrow_screens_and_dark_mode():
 
 def test_charts_scale_with_viewbox():
     assert "viewBox" in js_text()
+
+
+# ---------------------------------------------------------------- Q1 partial first/last day
+
+
+def q1_function() -> str:
+    js = js_text()
+    start = js.index("function q1(")
+    return js[start : js.index("function q2(", start)]
+
+
+def test_q1_marks_first_and_last_day_as_partial_in_the_chart():
+    # The run window starts mid-day and ends at now-2h, so both end days hold a fraction of a day.
+    body = q1_function()
+    assert re.search(r"partial\s*:", body), "q1 must pass a partial spec to lineChart"
+    assert "days[0]" in body and "days.length - 1" in body
+
+
+def test_line_chart_draws_partial_segments_dashed_and_says_so():
+    js = js_text()
+    assert re.search(r"mark-line[^\"'`]*partial", js), "partial segments need their own class"
+    assert re.search(r"partial", css_text())
+    assert re.search(r"\.mark-line\.partial\s*\{[^}]*stroke-dasharray", css_text())
+    assert "partial day" in js.lower()  # a visible label, not only a dashed line
+
+
+def test_q1_table_labels_the_partial_days():
+    assert "(partial)" in q1_function()
