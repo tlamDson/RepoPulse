@@ -440,8 +440,8 @@ unit_tests:
     description: >
       org/a: 3 contributors (max, activity 1), 1 of 3 active in 2 weeks, its PR merged, 1 of 2
       items answered and closed, top1 share 0.5. Score = 100 * (0.25 + 0.15 / 3 + 0.15 + 0.20 *
-      0.5 + 0.10 * 0.5 + 0.15 * 0.5) = 67.5. org/b: 1 contributor, one unanswered issue: 100 *
-      0.25 / 3 = 8.33.
+      0.5 + 0.10 * 0.5 + 0.15 * 0.5) = 67.5. org/b: 1 contributor, one unanswered issue, no PR:
+      merge is n/a (NULL), so its weight drops out: 100 * (0.25 / 3) / 0.85 = 9.80.
     model: mart_repo_health_score
     given:
       - input: ref('dim_repo')
@@ -461,5 +461,33 @@ unit_tests:
            retention_score: 0.3333, merge_score: 1.0, response_score: 0.5, close_score: 0.5,
            diversity_score: 0.5, health_score: 67.5}
         - {health_rank: 2, repo_name: org/b, category: bi, activity_score: 0.3333,
-           retention_score: 0.0, merge_score: 0.0, response_score: 0.0, close_score: 0.0,
-           diversity_score: 0.0, health_score: 8.33}
+           retention_score: 0.0, merge_score: null, response_score: 0.0, close_score: 0.0,
+           diversity_score: 0.0, health_score: 9.8}
+
+  - name: repo_health_score_without_follow_up_evidence_is_null_and_renormalised
+    description: >
+      Items opened but no merge, response or close matched anywhere in the loaded window (UX-1):
+      merge, response and close are n/a (NULL), not 0, and the score is renormalised over the
+      available components. org/a: 2 contributors (activity 1), alice in 2 weeks (retention
+      0.5), top1 share 2/3: 100 * (0.25 + 0.075 + 0.05) / 0.55 = 68.18. org/b: activity 0.5:
+      100 * 0.125 / 0.55 = 22.73.
+    model: mart_repo_health_score
+    given:
+      - input: ref('dim_repo')
+        rows:
+          - {repo_key: org/a, repo_name: org/a, category: compute}
+          - {repo_key: org/b, repo_name: org/b, category: bi}
+      - input: ref('int_events_enriched')
+        rows:
+          - {repo_name: org/a, actor_login: alice, is_bot: false, event_type: PullRequestEvent, action: opened, item_number: 1, event_week: "2026-01-05", created_at: "2026-01-05 10:00:00"}
+          - {repo_name: org/a, actor_login: alice, is_bot: false, event_type: IssuesEvent, action: opened, item_number: 2, event_week: "2026-01-12", created_at: "2026-01-12 10:00:00"}
+          - {repo_name: org/a, actor_login: bob, is_bot: false, event_type: IssueCommentEvent, action: created, item_number: 9, event_week: "2026-01-12", created_at: "2026-01-12 11:00:00"}
+          - {repo_name: org/b, actor_login: carol, is_bot: false, event_type: PullRequestEvent, action: opened, item_number: 5, event_week: "2026-01-05", created_at: "2026-01-05 09:00:00"}
+    expect:
+      rows:
+        - {health_rank: 1, repo_name: org/a, category: compute, activity_score: 1.0,
+           retention_score: 0.5, merge_score: null, response_score: null, close_score: null,
+           diversity_score: 0.3333, health_score: 68.18}
+        - {health_rank: 2, repo_name: org/b, category: bi, activity_score: 0.5,
+           retention_score: 0.0, merge_score: null, response_score: null, close_score: null,
+           diversity_score: 0.0, health_score: 22.73}
