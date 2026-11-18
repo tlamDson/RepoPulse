@@ -75,6 +75,6 @@ Local environment variables for the SQL agent (`python -m repopulse.sql_agent`, 
 (each item has three parts: Symptom, Cause with `file:line`, Trigger condition — see `workflow.md`)
 
 - **Spark test hang kills `Unit Tests` at the 30-minute job limit.**
-  - Symptom: PR run 44199475752 (commit 690e332, same Spark code as the green run 44196454284) printed nothing after `[ 76%]` for 23 minutes; the job was cancelled ("exceeded the maximum execution time of 30m0s") with no failing test named. The usual job time is about 10 minutes.
+  - Symptom: PR run 44199475752 (commit 690e332, same Spark code as the green run 44196454284) printed nothing after `[ 76%]` until the job was cancelled ("exceeded the maximum execution time of 30m0s"), with no failing test named.
   - Cause: not located. The stuck test is one of tests 2233-2304 in collection order (`tests/test_spark_app_events.py` through `tests/test_spark_pii.py`), all sharing the session `spark` fixture (`tests/conftest.py:123`); the orphans killed at cleanup were pytest, one `java` and two `python` (PySpark worker) processes. No per-test timeout exists, so the hang has no traceback.
   - Trigger condition: intermittent on the Linux runner; not reproducible locally (Spark tests skip on Windows).
