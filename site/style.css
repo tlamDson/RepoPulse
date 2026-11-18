@@ -122,6 +122,14 @@ h2 {
   max-width: 48rem;
 }
 
+.caveat {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  max-width: 48rem;
+  border-left: 3px solid currentColor;
+  padding-left: 0.75rem;
+}
+
 .toc {
   display: flex;
   flex-wrap: wrap;

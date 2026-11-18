@@ -365,6 +365,58 @@ def test_q6_components_without_follow_up_evidence_are_null_and_weights_renormali
     _same(_rows(result, "q6"), expected)
 
 
+def test_q6_items_opened_without_a_full_follow_up_window_are_not_rated(tmp_path):
+    # Window end = the last contribution event (01-20 10:00). spark's PR (opened 01-05, reviewed,
+    # merged) has a full 7-day follow-up window: merge/response/close 1. duckdb's issue opened at
+    # the window end has none, so duckdb has nothing to rate: n/a, not 0, even though other repos
+    # have follow-ups. spark: 0.25 + 0.15 + 0.20 + 0.10 + 0.15 / 3 = 0.75 -> 75.0.
+    # duckdb: activity 1/2 -> 100 * 0.125 / 0.55 = 22.73.
+    events = [
+        _event(
+            1,
+            "PullRequestEvent",
+            "alice",
+            "apache/spark",
+            {"action": "opened", "number": 1, "pull_request": {"number": 1}},
+            "2026-01-05T09:00:00Z",
+        ),
+        _event(
+            2,
+            "PullRequestReviewEvent",
+            "maint",
+            "apache/spark",
+            {"action": "created", "pull_request": {"number": 1}},
+            "2026-01-05T11:00:00Z",
+        ),
+        _event(
+            3,
+            "PullRequestEvent",
+            "maint",
+            "apache/spark",
+            {"action": "merged", "number": 1, "pull_request": {"number": 1}},
+            "2026-01-05T12:00:00Z",
+        ),
+        _event(
+            4,
+            "IssuesEvent",
+            "bob",
+            "duckdb/duckdb",
+            {"action": "opened", "issue": {"number": 2}},
+            "2026-01-20T10:00:00Z",
+        ),
+    ]
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    with gzip.open(raw / "2026-01-05-0.json.gz", "wt", encoding="utf-8") as out:
+        out.write("\n".join(json.dumps(e) for e in events) + "\n")
+    result = naive_duckdb.run_once(raw, collect=True)
+    expected = [
+        (1, "apache/spark", "compute", 1.0, 0.0, 1.0, 1.0, 1.0, 0.3333, 75.0),
+        (2, "duckdb/duckdb", "warehouse", 0.5, 0.0, None, None, None, 0.0, 22.73),
+    ]
+    _same(_rows(result, "q6"), expected)
+
+
 # ---------------------------------------------------------------- CLI
 
 

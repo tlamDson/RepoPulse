@@ -86,6 +86,8 @@ item_flags AS (
         AND x.item_number = o.item_number
         AND x.created_at >= o.opened_at
     WHERE NOT o.opener_is_bot
+        -- only items with a full 7-day follow-up window before the end of the loaded events
+        AND o.opened_at <= (SELECT max(created_at) FROM ev) - INTERVAL '7' DAY
     GROUP BY o.repo_name, o.item_number, o.item_type
 ),
 items AS (

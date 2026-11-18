@@ -1,6 +1,7 @@
 -- Q6: same components, weights, rounding and ranking as benchmarks/queries/q6.sql:
 -- health_score = 100 * (0.25 activity + 0.15 retention + 0.15 merge + 0.20 response
 --                       + 0.10 close + 0.15 diversity); rank by score desc, then repo_name.
+-- Items are rated only when opened >= 7 days before the last loaded contribution event.
 -- merge / response / close are NULL (n/a) when the repo has no item to rate, or when no repo in
 -- the loaded window has a single matched merge / response / close (the window is too short to
 -- see follow-ups); the score divides by the sum of the weights of the non-NULL components.
@@ -81,6 +82,8 @@ item_flags as (
         and x.item_number = o.item_number
         and x.created_at >= o.opened_at
     where not o.opener_is_bot
+        -- only items with a full 7-day follow-up window before the end of the loaded events
+        and {{ hours_between('o.opened_at', '(select max(created_at) from ev)') }} >= 168
     group by o.repo_name, o.item_number, o.item_type
 ),
 

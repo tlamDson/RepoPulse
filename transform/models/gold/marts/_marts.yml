@@ -455,6 +455,8 @@ unit_tests:
           - {repo_name: org/a, actor_login: u1, is_bot: false, event_type: PullRequestEvent, action: opened, item_number: 2, event_week: "2026-01-12", created_at: "2026-01-12 10:00:00"}
           - {repo_name: org/a, actor_login: m, is_bot: false, event_type: PullRequestEvent, action: closed, pr_merged: true, item_number: 2, event_week: "2026-01-12", created_at: "2026-01-12 12:00:00"}
           - {repo_name: org/b, actor_login: v1, is_bot: false, event_type: IssuesEvent, action: opened, item_number: 5, event_week: "2026-01-05", created_at: "2026-01-05 09:00:00"}
+          # a later bot event moves the window end so every item above has a 7-day follow-up window
+          - {repo_name: org/a, actor_login: "ci[bot]", is_bot: true, event_type: IssueCommentEvent, action: created, item_number: 99, event_week: "2026-02-02", created_at: "2026-02-02 09:00:00"}
     expect:
       rows:
         - {health_rank: 1, repo_name: org/a, category: compute, activity_score: 1.0,
@@ -463,6 +465,33 @@ unit_tests:
         - {health_rank: 2, repo_name: org/b, category: bi, activity_score: 0.3333,
            retention_score: 0.0, merge_score: null, response_score: 0.0, close_score: 0.0,
            diversity_score: 0.0, health_score: 9.8}
+
+  - name: repo_health_score_rates_only_items_with_a_full_follow_up_window
+    description: >
+      Window end = the last event (01-20 10:00). org/a's PR (opened 01-05, reviewed, merged) has
+      a full 7-day follow-up window: merge, response, close 1; 100 * (0.25 + 0.15 + 0.20 + 0.10
+      + 0.15 / 3) = 75.0. org/b's only issue opened at the window end is not rated: merge,
+      response, close n/a although org/a has follow-ups; 100 * 0.125 / 0.55 = 22.73.
+    model: mart_repo_health_score
+    given:
+      - input: ref('dim_repo')
+        rows:
+          - {repo_key: org/a, repo_name: org/a, category: compute}
+          - {repo_key: org/b, repo_name: org/b, category: bi}
+      - input: ref('int_events_enriched')
+        rows:
+          - {repo_name: org/a, actor_login: alice, is_bot: false, event_type: PullRequestEvent, action: opened, item_number: 1, event_week: "2026-01-05", created_at: "2026-01-05 09:00:00"}
+          - {repo_name: org/a, actor_login: maint, is_bot: false, event_type: PullRequestReviewEvent, action: created, item_number: 1, event_week: "2026-01-05", created_at: "2026-01-05 11:00:00"}
+          - {repo_name: org/a, actor_login: maint, is_bot: false, event_type: PullRequestEvent, action: merged, item_number: 1, event_week: "2026-01-05", created_at: "2026-01-05 12:00:00"}
+          - {repo_name: org/b, actor_login: bob, is_bot: false, event_type: IssuesEvent, action: opened, item_number: 2, event_week: "2026-01-19", created_at: "2026-01-20 10:00:00"}
+    expect:
+      rows:
+        - {health_rank: 1, repo_name: org/a, category: compute, activity_score: 1.0,
+           retention_score: 0.0, merge_score: 1.0, response_score: 1.0, close_score: 1.0,
+           diversity_score: 0.3333, health_score: 75.0}
+        - {health_rank: 2, repo_name: org/b, category: bi, activity_score: 0.5,
+           retention_score: 0.0, merge_score: null, response_score: null, close_score: null,
+           diversity_score: 0.0, health_score: 22.73}
 
   - name: repo_health_score_without_follow_up_evidence_is_null_and_renormalised
     description: >
