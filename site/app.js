@@ -596,7 +596,13 @@
   }
 
   function q6(doc) {
-    const top = doc.rows.slice(0, TOP_N);
+    // Repos with too few human contributions have no rank and no score: not enough data.
+    const ranked = doc.rows.filter((r) => !isMissing(r.health_rank));
+    const unranked = doc.rows.length - ranked.length;
+    const top = ranked.slice(0, TOP_N);
+    const notes = [];
+    if (ranked.length > top.length) notes.push(`Top ${top.length} of ${ranked.length} ranked repos.`);
+    if (unranked > 0) notes.push(`${unranked} more repos have not enough data to be ranked (listed in the table).`);
     return {
       chart: (host) =>
         barChart(host, {
@@ -604,7 +610,7 @@
           rows: top.map((r) => ({ label: `${r.health_rank}. ${r.repo_name}`, values: [r.health_score] })),
           series: [{ name: "Health score" }],
           kind: "score",
-          note: doc.rows.length > top.length ? `Top ${top.length} of ${doc.rows.length} repos.` : "",
+          note: notes.join(" "),
         }),
       table: (host) => renderTable(host, martColumns(doc), doc.rows),
     };

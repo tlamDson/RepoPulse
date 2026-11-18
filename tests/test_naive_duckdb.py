@@ -311,10 +311,12 @@ def test_q6_health_score_ranking(result):
     #   -> 0.1875 + 0.05 + 0.15 + 0.10 + 0.05 + 0.09 = 0.6275 -> 62.75
     # trino: activity 1/4; retention 1/1 (carol W1+W5+W13); merge 0/1; response 0/1; close 1/1;
     #   diversity 1 - 1 = 0 -> 0.0625 + 0.15 + 0.10 = 0.3125 -> 31.25
+    # trino has only 4 human contributions (< 5): not enough data, so no rank and no score (UX-6);
+    # its components are still shown, and it is listed after the ranked repos.
     expected = [
         (1, "apache/spark", "compute", 1.0, 0.5, 1.0, 0.6, 0.6, 0.6154, 74.73),
         (2, "duckdb/duckdb", "warehouse", 0.75, 0.3333, 1.0, 0.5, 0.5, 0.6, 62.75),
-        (3, "trinodb/trino", "compute", 0.25, 1.0, 0.0, 0.0, 1.0, 0.0, 31.25),
+        (None, "trinodb/trino", "compute", 0.25, 1.0, 0.0, 0.0, 1.0, 0.0, None),
     ]
     _same(_rows(result, "q6"), expected)
 
@@ -329,6 +331,60 @@ def _event(eid: int, etype: str, login: str, repo: str, payload: dict, at: str) 
         "public": True,
         "created_at": at,
     }
+
+
+def _comments(first_id: int, login: str, repo: str, n: int, item: int, at: str) -> list[dict]:
+    """n comments on an item nobody opened: they count as contributions, rate no item."""
+    return [
+        _event(
+            first_id + i,
+            "IssueCommentEvent",
+            login,
+            repo,
+            {"action": "created", "issue": {"number": item}},
+            at,
+        )
+        for i in range(n)
+    ]
+
+
+def test_q6_repos_below_the_minimum_of_human_contributions_are_not_scored(tmp_path):
+    # UX-6: one human contribution used to rank a repo (8 repos tied) and a bot-only repo got
+    # 0.0. A repo needs >= 5 human contributions to be scored. spark: u1 x3 + u2 x2 = 5, scored:
+    # activity 1, retention 0, diversity 1 - 3/5 = 0.4, no items to rate:
+    # 100 * (0.25 + 0.15 * 0.4) / 0.55 = 56.36. duckdb: 4 human contributions, trino: 6 bot
+    # events and no human: not enough data, so NULL rank and NULL score (listed after the ranked).
+    events = [
+        *_comments(1, "u1", "apache/spark", 3, 1, "2026-01-05T09:00:00Z"),
+        *_comments(10, "u2", "apache/spark", 2, 1, "2026-01-05T10:00:00Z"),
+        *_comments(20, "bob", "duckdb/duckdb", 2, 2, "2026-01-05T09:00:00Z"),
+        *_comments(30, "carol", "duckdb/duckdb", 2, 2, "2026-01-05T10:00:00Z"),
+        *_comments(40, "ci[bot]", "trinodb/trino", 6, 3, "2026-01-05T09:00:00Z"),
+    ]
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    with gzip.open(raw / "2026-01-05-0.json.gz", "wt", encoding="utf-8") as out:
+        out.write("\n".join(json.dumps(e) for e in events) + "\n")
+    result = naive_duckdb.run_once(raw, collect=True)
+    expected = [
+        (1, "apache/spark", "compute", 1.0, 0.0, None, None, None, 0.4, 56.36),
+        (None, "duckdb/duckdb", "warehouse", 1.0, 0.0, None, None, None, 0.5, None),
+        (None, "trinodb/trino", "compute", 0.0, 0.0, None, None, None, 0.0, None),
+    ]
+    _same(_rows(result, "q6"), expected)
+
+
+def test_q6_minimum_is_the_same_5_in_every_engine_and_in_the_dbt_mart():
+    root = Path(__file__).parent.parent
+    for path in (
+        root / "benchmarks" / "queries" / "q6.sql",
+        root / "benchmarks" / "queries_spark" / "q6.sql",
+        root / "benchmarks" / "queries_trino" / "q6.sql",
+    ):
+        sql = path.read_text(encoding="utf-8")
+        assert "5 AS min_human_contributions" in sql, path
+    mart = root / "transform" / "models" / "gold" / "marts" / "mart_repo_health_score.sql"
+    assert "var('q6_min_human_contributions', 5)" in mart.read_text(encoding="utf-8")
 
 
 def test_q6_components_without_follow_up_evidence_are_null_and_weights_renormalise(tmp_path):
@@ -352,6 +408,10 @@ def test_q6_components_without_follow_up_evidence_are_null_and_weights_renormali
             {"action": "opened", "issue": {"number": 2}},
             "2026-01-05T10:00:00Z",
         ),
+        # 4 more comments each (same human, same week, no item opened): reaches the 5-contribution
+        # minimum of a scored repo without changing any component
+        *_comments(10, "alice", "apache/spark", 4, 90, "2026-01-05T09:00:00Z"),
+        *_comments(20, "bob", "duckdb/duckdb", 4, 91, "2026-01-05T10:00:00Z"),
     ]
     raw = tmp_path / "raw"
     raw.mkdir()
@@ -404,6 +464,11 @@ def test_q6_items_opened_without_a_full_follow_up_window_are_not_rated(tmp_path)
             {"action": "opened", "issue": {"number": 2}},
             "2026-01-20T10:00:00Z",
         ),
+        # filler comments on items nobody opened, to reach the 5-contribution minimum while
+        # keeping every component: maint 2 -> 4 and alice 1 -> 2 (top-1 share stays 2/3), bob 1 -> 5
+        *_comments(10, "maint", "apache/spark", 2, 50, "2026-01-05T12:00:00Z"),
+        *_comments(20, "alice", "apache/spark", 1, 51, "2026-01-05T09:00:00Z"),
+        *_comments(30, "bob", "duckdb/duckdb", 4, 60, "2026-01-20T10:00:00Z"),
     ]
     raw = tmp_path / "raw"
     raw.mkdir()

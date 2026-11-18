@@ -5,6 +5,8 @@
 -- merge / response / close are NULL (n/a) when the repo has no item to rate, or when no repo in
 -- the loaded window has a single matched merge / response / close (the window is too short to
 -- see follow-ups); the score divides by the sum of the weights of the non-NULL components.
+-- A repo is scored and ranked only with >= q6_min_human_contributions (default 5) human
+-- contributions; the others stay listed with NULL health_rank and health_score (not enough data).
 with ev as (
     select
         actor_login,
@@ -35,6 +37,7 @@ people as (
         repo_name,
         count(*) as contributors,
         count(case when weeks >= 2 then 1 end) as multi_week,
+        sum(n) as human_contributions,
         cast(max(n) as double) / sum(n) as top1_share
     from per_actor
     group by repo_name
@@ -106,6 +109,7 @@ scored_repos as (
 components as (
     select
         s.repo_name,
+        coalesce(p.human_contributions, 0) as human_contributions,
         coalesce(
             cast(p.contributors as double) / nullif(max(p.contributors) over (), 0), 0
         ) as activity,
@@ -128,6 +132,7 @@ components as (
 scores as (
     select
         *,
+        human_contributions >= {{ var('q6_min_human_contributions', 5) }} as is_scored,
         100 * (
             0.25 * activity + 0.15 * retention + coalesce(0.15 * merge_rate, 0)
             + coalesce(0.20 * response, 0) + coalesce(0.10 * close_rate, 0) + 0.15 * diversity
@@ -140,7 +145,11 @@ scores as (
 )
 
 select
-    cast(row_number() over (order by s.score desc, s.repo_name) as bigint) as health_rank,
+    cast(
+        case when s.is_scored
+            then row_number() over (partition by s.is_scored order by s.score desc, s.repo_name)
+        end as bigint
+    ) as health_rank,
     cast(s.repo_name as string) as repo_name,
     cast(r.category as string) as category,
     cast(round(s.activity, 4) as double) as activity_score,
@@ -149,6 +158,6 @@ select
     cast(round(s.response, 4) as double) as response_score,
     cast(round(s.close_rate, 4) as double) as close_score,
     cast(round(s.diversity, 4) as double) as diversity_score,
-    cast(round(s.score, 2) as double) as health_score
+    cast(case when s.is_scored then round(s.score, 2) end as double) as health_score
 from scores as s
 join {{ ref('dim_repo') }} as r using (repo_name)

@@ -1,7 +1,10 @@
 -- Q6 in Spark SQL (3.5): same definitions and output as benchmarks/queries/q6.sql (DuckDB).
 -- Translation notes: arg_min -> min_by; ->> -> get_json_object; x::DOUBLE -> CAST; USING joins
 -- written as ON; the components `merge` and `close` are quoted with backticks.
-WITH ev AS (
+WITH params AS (
+    SELECT 5 AS min_human_contributions
+),
+ev AS (
     SELECT
         e.actor.login AS actor_login,
         endswith(lower(e.actor.login), '[bot]') OR endswith(lower(e.actor.login), '-bot') AS is_bot,
@@ -36,6 +39,7 @@ people AS (
         repo_name,
         count(*) AS contributors,
         count(*) FILTER (WHERE weeks >= 2) AS multi_week,
+        sum(n) AS human_contributions,
         CAST(max(n) AS DOUBLE) / sum(n) AS top1_share
     FROM per_actor
     GROUP BY repo_name
@@ -101,6 +105,7 @@ scored_repos AS (
 components AS (
     SELECT
         s.repo_name,
+        coalesce(p.human_contributions, 0) AS human_contributions,
         coalesce(
             CAST(p.contributors AS DOUBLE) / nullif(max(p.contributors) OVER (), 0), 0
         ) AS activity,
@@ -122,6 +127,7 @@ components AS (
 scores AS (
     SELECT
         *,
+        human_contributions >= (SELECT min_human_contributions FROM params) AS is_scored,
         100 * (
             0.25 * activity + 0.15 * retention + coalesce(0.15 * `merge`, 0)
             + coalesce(0.20 * response, 0) + coalesce(0.10 * `close`, 0) + 0.15 * diversity
@@ -133,7 +139,9 @@ scores AS (
     FROM components
 )
 SELECT
-    row_number() OVER (ORDER BY s.score DESC, s.repo_name) AS health_rank,
+    CASE WHEN s.is_scored
+        THEN row_number() OVER (PARTITION BY s.is_scored ORDER BY s.score DESC, s.repo_name)
+    END AS health_rank,
     s.repo_name,
     r.category,
     round(s.activity, 4) AS activity_score,
@@ -142,7 +150,7 @@ SELECT
     round(s.response, 4) AS response_score,
     round(s.`close`, 4) AS close_score,
     round(s.diversity, 4) AS diversity_score,
-    round(s.score, 2) AS health_score
+    CASE WHEN s.is_scored THEN round(s.score, 2) END AS health_score
 FROM scores AS s
 JOIN repos AS r ON r.repo_name = s.repo_name
-ORDER BY health_rank
+ORDER BY health_rank NULLS LAST, s.repo_name
