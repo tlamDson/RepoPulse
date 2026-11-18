@@ -77,6 +77,9 @@
       <h2 id="q3-title">Q3 · Contribution funnel</h2>
       <p class="desc">Fork, then pull request opened, then merged, per repo. The chart shows the
         repos with the most pull requests opened; the table lists every repo.</p>
+      <p class="caveat">A merge is only counted when both the pull request opening and its merge
+        fall inside the loaded data. Merges need a follow-up period after the opening, so a short
+        window shows few or no merges: this funnel needs more days of data to be meaningful.</p>
       <p class="status" data-role="status" role="status"></p>
       <div class="chart" data-role="chart"></div>
       <div class="table-wrap" data-role="table"></div>
@@ -87,6 +90,9 @@
       <h2 id="q4-title">Q4 · Responsiveness</h2>
       <p class="desc">Median hours to the first human response on issues and pull requests, per
         repo. The chart shows the repos with the most opened items; the table lists every repo.</p>
+      <p class="caveat">A response or close is only counted when both the opening and the
+        follow-up event fall inside the loaded data, so a short window shows few or none:
+        responsiveness needs more days of data to be meaningful.</p>
       <p class="status" data-role="status" role="status"></p>
       <div class="chart" data-role="chart"></div>
       <div class="table-wrap" data-role="table"></div>
@@ -108,6 +114,10 @@
       <h2 id="q6-title">Q6 · Repo health score</h2>
       <p class="desc">Composite score from the Q1 to Q5 components, ranked. The chart shows the
         top of the ranking; the table lists every repo and component.</p>
+      <p class="caveat">Merge, response and close only rate items opened at least a week before
+        the end of the loaded data (a full follow-up window). They are n/a when a repo has no such
+        item, or when no repo has any matched follow-up; the score then uses only the weights of
+        the other components. These three need more days of data.</p>
       <p class="status" data-role="status" role="status"></p>
       <div class="chart" data-role="chart"></div>
       <div class="table-wrap" data-role="table"></div>

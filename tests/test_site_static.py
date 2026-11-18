@@ -235,6 +235,45 @@ def test_every_section_has_a_chart_a_table_and_a_status_slot(name):
     assert {"chart", "table", "status"} <= roles, (name, roles)
 
 
+class Caveats(HTMLParser):
+    """Text of each ``<p class="caveat">``, keyed by the id of the section around it."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.section = ""
+        self.inside = False
+        self.found: dict[str, str] = {}
+
+    def handle_starttag(self, tag, attrs):
+        a = dict(attrs)
+        if tag == "section":
+            self.section = a.get("id") or ""
+        if tag == "p" and "caveat" in (a.get("class") or "").split():
+            self.inside = True
+            self.found.setdefault(self.section, "")
+
+    def handle_endtag(self, tag):
+        if tag == "p":
+            self.inside = False
+
+    def handle_data(self, data):
+        if self.inside:
+            self.found[self.section] += data
+
+
+@pytest.mark.parametrize("section", ["q3", "q4", "q6"])
+def test_merge_response_close_sections_warn_they_need_more_days_of_data(section):
+    # UX-1: open -> merge / response / close pairs only land when the loaded data spans enough
+    # days; the page says so next to the numbers (n/a in Q6 when not measurable).
+    parser = Caveats()
+    parser.feed(INDEX.read_text(encoding="utf-8"))
+    text = " ".join(parser.found.get(section, "").split()).lower()
+    assert "more days of data" in text, (section, text)
+    assert "follow-up" in text, (section, text)
+    if section == "q6":
+        assert "n/a" in text and "weights" in text, text
+
+
 def test_q2_says_not_yet_measurable_and_states_the_data_window_start():
     assert "not yet measurable" in js_text()
     assert "first_data_date" in js_text()  # the window start comes from meta.json, not hand-typed

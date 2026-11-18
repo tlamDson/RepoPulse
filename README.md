@@ -245,7 +245,7 @@ For each seed repo with at least one contribution in the data, six components in
 | close | issues + PRs closed / opened | Q4 |
 | diversity | 1 − share of human contributions made by the top contributor | Q5 |
 
-`health_score = 100 × (0.25·activity + 0.15·retention + 0.15·merge + 0.20·response + 0.10·close + 0.15·diversity)`, rounded to two decimals; ties are broken by repo name. Bots (logins ending in `[bot]` or `-bot`) are excluded from every component; their share is reported separately in Q5.
+merge, response and close only rate items opened at least 7 days before the last loaded contribution event (a full follow-up window). They are n/a (null, not 0) for a repo with no such item to rate, and for every repo when no scored repo has a single matched merge, response or close in the loaded data (the window is too short to see follow-ups). `health_score = 100 × (0.25·activity + 0.15·retention + 0.15·merge + 0.20·response + 0.10·close + 0.15·diversity) / (sum of the weights of the components that are not n/a)`, rounded to two decimals; ties are broken by repo name. Bots (logins ending in `[bot]` or `-bot`) are excluded from every component; their share is reported separately in Q5.
 
 ## Data sources and licences
 

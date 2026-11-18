@@ -1,6 +1,10 @@
 -- Q6: same components, weights, rounding and ranking as benchmarks/queries/q6.sql:
 -- health_score = 100 * (0.25 activity + 0.15 retention + 0.15 merge + 0.20 response
 --                       + 0.10 close + 0.15 diversity); rank by score desc, then repo_name.
+-- Items are rated only when opened >= 7 days before the last loaded contribution event.
+-- merge / response / close are NULL (n/a) when the repo has no item to rate, or when no repo in
+-- the loaded window has a single matched merge / response / close (the window is too short to
+-- see follow-ups); the score divides by the sum of the weights of the non-NULL components.
 with ev as (
     select
         actor_login,
@@ -78,6 +82,8 @@ item_flags as (
         and x.item_number = o.item_number
         and x.created_at >= o.opened_at
     where not o.opener_is_bot
+        -- only items with a full 7-day follow-up window before the end of the loaded events
+        and {{ hours_between('o.opened_at', '(select max(created_at) from ev)') }} >= 168
     group by o.repo_name, o.item_number, o.item_type
 ),
 
@@ -104,9 +110,15 @@ components as (
             cast(p.contributors as double) / nullif(max(p.contributors) over (), 0), 0
         ) as activity,
         coalesce(cast(p.multi_week as double) / p.contributors, 0) as retention,
-        coalesce(cast(i.prs_merged as double) / nullif(i.prs_opened, 0), 0) as merge_rate,
-        coalesce(cast(i.responded as double) / nullif(i.opened, 0), 0) as response,
-        coalesce(cast(i.closed as double) / nullif(i.opened, 0), 0) as close_rate,
+        case when sum(i.prs_merged) over () > 0
+            then cast(i.prs_merged as double) / nullif(i.prs_opened, 0)
+        end as merge_rate,
+        case when sum(i.responded) over () > 0
+            then cast(i.responded as double) / nullif(i.opened, 0)
+        end as response,
+        case when sum(i.closed) over () > 0
+            then cast(i.closed as double) / nullif(i.opened, 0)
+        end as close_rate,
         coalesce(1 - p.top1_share, 0) as diversity
     from scored_repos as s
     left join people as p using (repo_name)
@@ -117,8 +129,12 @@ scores as (
     select
         *,
         100 * (
-            0.25 * activity + 0.15 * retention + 0.15 * merge_rate + 0.20 * response
-            + 0.10 * close_rate + 0.15 * diversity
+            0.25 * activity + 0.15 * retention + coalesce(0.15 * merge_rate, 0)
+            + coalesce(0.20 * response, 0) + coalesce(0.10 * close_rate, 0) + 0.15 * diversity
+        ) / (
+            0.55 + case when merge_rate is null then 0 else 0.15 end
+            + case when response is null then 0 else 0.20 end
+            + case when close_rate is null then 0 else 0.10 end
         ) as score
     from components
 )
