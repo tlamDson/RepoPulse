@@ -33,6 +33,7 @@ site/             static dashboard (plain HTML/CSS/JS) for GitHub Pages; export_
 scripts/          helper scripts; tasks are run by conductor (D:/Desktop/Conductor)
 dags/             Airflow DAG (repopulse_pipeline.py, built from repopulse/dagspec.py); do not name the directory airflow/ (P2d)
 .github/workflows CI (ci.yml), benchmark (PR B), scheduled pipeline (PR 7), Pages deploy (PR 11), Airflow backfill (P2d)
+.github/readme    architecture.svg, the hand-written diagram at the top of README.md
 .claude/          rules, agents, hooks/log_permission.py, auto-mode.json; state/ and worktrees/ are not committed
 docs/             plan, progress, checklist, harness-check
 logs/             stream-json log per PR, report per run (not committed)

@@ -24,7 +24,8 @@ The detailed rules below always apply, not only when asked:
 - **Simulated data must be clearly labelled as simulated** ("simulated"). GH Archive is real data.
 - **Never read or print secret values** (`DATABRICKS_*`, `MOTHERDUCK_TOKEN`, `SNOWFLAKE_*`, the `.env` file). The repo owner adds secrets themselves.
 - **Update `CLAUDE.md` + `.claude/rules/*`** when a task changes a convention, tooling or process.
-- **Do not create new `.md` files in the root directory** — only `README.md` and `CLAUDE.md`. Other documentation goes in `docs/`.
+- **Do not create new `.md` files in the root directory** — only `README.md`, `CLAUDE.md` and `DEVELOPMENT.md`. Other documentation goes in `docs/`.
+- **README.md is recruiter-first:** title, badges, pitch, live dashboard link, the hand-written SVG `.github/readme/architecture.svg`, then What it does, Results at a glance, What I built, Tech stack, Quick start, and the generated Full results. No Mermaid and no other images. Every number of the glance table is recomputed from `runs.csv` by `tests/test_readme_recruiter.py`; update both together. Longer sections (architecture details, design decisions, Q6 health score, licences) live in `DEVELOPMENT.md`.
 - **Orchestrator rules** (`D:\Desktop\Conductor\docs\authority.md` on the owner's machine): approved work runs through to the end without "continue?" stops; by day report to the owner every 30 minutes, at night only on a blocker. Ask for every permission a task needs once, before starting. Release versions follow SemVer from the commit types (`feat:` minor, only `fix:` patch, breaking change major, minor while 0.x); before a release, run the pipeline and dashboard as a real user 2-3 times on real data and file each problem as its own PR.
 
 ## Common commands

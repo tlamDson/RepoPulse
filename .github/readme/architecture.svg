@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="440" viewBox="0 0 880 440" role="img" aria-label="RepoPulse architecture: GH Archive hourly ingest, PySpark and Delta Lake bronze and silver, dbt gold marts, GitHub Pages dashboard, data quality checks, CI gates and the DuckDB vs Spark benchmark path">
+  <rect x="0" y="0" width="880" height="440" rx="16" fill="#ffffff" stroke="#d0d7de"/>
+  <title>RepoPulse architecture</title>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#57606a"/>
+    </marker>
+  </defs>
+  <g font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1f2328">
+    <!-- Scheduled pipeline -->
+    <text x="16" y="44" font-size="13" font-weight="bold" fill="#57606a">Scheduled pipeline: GitHub Actions, hourly incremental batch</text>
+
+    <rect x="16" y="60" width="128" height="104" rx="10" fill="#eaf2ff" stroke="#4a6fa5"/>
+    <text x="80" y="86" font-size="14" font-weight="bold" text-anchor="middle">GH Archive</text>
+    <text x="80" y="108" font-size="12" text-anchor="middle">GitHub events</text>
+    <text x="80" y="126" font-size="12" text-anchor="middle">hourly files</text>
+    <text x="80" y="144" font-size="12" text-anchor="middle">real public data</text>
+
+    <rect x="165" y="60" width="124" height="104" rx="10" fill="#eaf2ff" stroke="#4a6fa5"/>
+    <text x="227" y="86" font-size="14" font-weight="bold" text-anchor="middle">Ingest</text>
+    <text x="227" y="108" font-size="12" text-anchor="middle">hourly batch</text>
+    <text x="227" y="126" font-size="12" text-anchor="middle">filter event types</text>
+    <text x="227" y="144" font-size="12" text-anchor="middle">idempotent</text>
+
+    <rect x="310" y="60" width="196" height="104" rx="10" fill="#eaf2ff" stroke="#4a6fa5"/>
+    <text x="408" y="86" font-size="14" font-weight="bold" text-anchor="middle">PySpark + Delta Lake</text>
+    <text x="408" y="108" font-size="12" text-anchor="middle">bronze → silver</text>
+    <text x="408" y="126" font-size="12" text-anchor="middle">typed, deduplicated</text>
+    <text x="408" y="144" font-size="12" text-anchor="middle">PII hashed, quarantine</text>
+
+    <rect x="527" y="60" width="176" height="104" rx="10" fill="#eaf2ff" stroke="#4a6fa5"/>
+    <text x="615" y="86" font-size="14" font-weight="bold" text-anchor="middle">dbt on MotherDuck</text>
+    <text x="615" y="108" font-size="12" text-anchor="middle">gold: star schema</text>
+    <text x="615" y="126" font-size="12" text-anchor="middle">marts Q1–Q6</text>
+    <text x="615" y="144" font-size="12" text-anchor="middle">contracts + tests</text>
+
+    <rect x="724" y="60" width="140" height="104" rx="10" fill="#eaf2ff" stroke="#4a6fa5"/>
+    <text x="794" y="86" font-size="14" font-weight="bold" text-anchor="middle">Dashboard</text>
+    <text x="794" y="108" font-size="12" text-anchor="middle">GitHub Pages</text>
+    <text x="794" y="126" font-size="12" text-anchor="middle">public schema only</text>
+    <text x="794" y="144" font-size="12" text-anchor="middle">+ Tableau CSV</text>
+
+    <g stroke="#57606a" stroke-width="2">
+      <line x1="145" y1="112" x2="163" y2="112" marker-end="url(#arrow)"/>
+      <line x1="290" y1="112" x2="308" y2="112" marker-end="url(#arrow)"/>
+      <line x1="507" y1="112" x2="525" y2="112" marker-end="url(#arrow)"/>
+      <line x1="704" y1="112" x2="722" y2="112" marker-end="url(#arrow)"/>
+      <line x1="615" y1="165" x2="615" y2="194" marker-end="url(#arrow)"/>
+    </g>
+
+    <!-- CI gates -->
+    <rect x="16" y="196" width="294" height="96" rx="10" fill="#eefbea" stroke="#3f8f4f"/>
+    <text x="163" y="222" font-size="14" font-weight="bold" text-anchor="middle">CI gates on every pull request</text>
+    <text x="163" y="244" font-size="12" text-anchor="middle">Lint · Unit Tests · dbt build (DuckDB)</text>
+    <text x="163" y="262" font-size="12" text-anchor="middle">same dbt project on a seed fixture</text>
+    <text x="163" y="280" font-size="12" text-anchor="middle">+ independent code review → merge</text>
+
+    <!-- Data quality -->
+    <rect x="330" y="196" width="534" height="96" rx="10" fill="#fff4e5" stroke="#b7791f"/>
+    <text x="597" y="222" font-size="14" font-weight="bold" text-anchor="middle">Data quality checks</text>
+    <text x="597" y="244" font-size="12" text-anchor="middle">volume + freshness of gold → GitHub Issue alert</text>
+    <text x="597" y="262" font-size="12" text-anchor="middle">known faults injected into simulated app events, run through the Spark job</text>
+    <text x="597" y="280" font-size="12" text-anchor="middle">PII scan: no raw email in gold or public</text>
+
+    <!-- Benchmark path -->
+    <text x="16" y="314" font-size="13" font-weight="bold" fill="#57606a">Benchmark path: the same questions on every engine</text>
+
+    <rect x="16" y="324" width="200" height="96" rx="10" fill="#f3eefe" stroke="#7a5bb5"/>
+    <text x="116" y="350" font-size="14" font-weight="bold" text-anchor="middle">Questions Q1–Q6</text>
+    <text x="116" y="372" font-size="12" text-anchor="middle">one SQL set for the marts</text>
+    <text x="116" y="390" font-size="12" text-anchor="middle">and every benchmark</text>
+
+    <rect x="240" y="324" width="230" height="96" rx="10" fill="#f3eefe" stroke="#7a5bb5"/>
+    <text x="355" y="350" font-size="14" font-weight="bold" text-anchor="middle">DuckDB vs Spark</text>
+    <text x="355" y="372" font-size="12" text-anchor="middle">same data, one day to one month</text>
+    <text x="355" y="390" font-size="12" text-anchor="middle">+ Trino, Iceberg, Kafka,</text>
+    <text x="355" y="408" font-size="12" text-anchor="middle">Databricks, MotherDuck</text>
+
+    <rect x="494" y="324" width="170" height="96" rx="10" fill="#f3eefe" stroke="#7a5bb5"/>
+    <text x="579" y="350" font-size="14" font-weight="bold" text-anchor="middle">runs.csv</text>
+    <text x="579" y="372" font-size="12" text-anchor="middle">one row per measured run</text>
+    <text x="579" y="390" font-size="12" text-anchor="middle">schema-checked</text>
+
+    <rect x="688" y="324" width="176" height="96" rx="10" fill="#f3eefe" stroke="#7a5bb5"/>
+    <text x="776" y="350" font-size="14" font-weight="bold" text-anchor="middle">README results</text>
+    <text x="776" y="372" font-size="12" text-anchor="middle">generated from runs.csv</text>
+    <text x="776" y="390" font-size="12" text-anchor="middle">checked by a test</text>
+
+    <g stroke="#57606a" stroke-width="2">
+      <line x1="217" y1="372" x2="238" y2="372" marker-end="url(#arrow)"/>
+      <line x1="471" y1="372" x2="492" y2="372" marker-end="url(#arrow)"/>
+      <line x1="665" y1="372" x2="686" y2="372" marker-end="url(#arrow)"/>
+    </g>
+  </g>
+</svg>
