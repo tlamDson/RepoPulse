@@ -1223,6 +1223,41 @@ def test_cli_api_error_exits_1_without_leaking_secrets(tmp_path, capsys):
     assert_no_secret(captured.out + captured.err, "stdout/stderr")
 
 
+def test_cli_feature_disabled_on_submit_exits_with_the_skip_code_and_writes_no_row(
+    tmp_path, capsys
+):
+    from repopulse.databricks_gate import EXIT_FEATURE_DISABLED
+
+    message = f"Triggering new runs for organization 1 is currently disabled ({HOST} {TOKEN})"
+    fake = FakeDatabricks(fail={("POST", SUBMIT): [err(404, "FEATURE_DISABLED", message)]})
+
+    code = run_cli(tmp_path, fake)
+
+    captured = capsys.readouterr()
+    assert code == EXIT_FEATURE_DISABLED
+    assert "FEATURE_DISABLED" in captured.err
+    assert fake.count("POST", SUBMIT) == 1, "a refusal is not retried"
+    assert not (tmp_path / "out" / "databricks-row.csv").exists()
+    assert not (tmp_path / "out" / "summary.json").exists()
+    assert_no_secret(captured.out + captured.err, "stdout/stderr")
+
+
+def test_cli_other_submit_errors_still_exit_1(tmp_path, capsys):
+    fake = FakeDatabricks(fail={("POST", SUBMIT): [err(403, "PERMISSION_DENIED", "no")]})
+
+    code = run_cli(tmp_path, fake)
+
+    assert code == 1
+    assert "403" in capsys.readouterr().err
+    assert not (tmp_path / "out" / "databricks-row.csv").exists()
+
+
+def test_cli_feature_disabled_outside_submit_still_exits_1(tmp_path):
+    fake = FakeDatabricks(fail={("POST", SCHEMAS): [err(404, "FEATURE_DISABLED", "x")]})
+
+    assert run_cli(tmp_path, fake) == 1
+
+
 def test_cli_network_down_exits_1_after_retries_without_leaking(tmp_path, capsys):
     fake = FakeDatabricks(down=urllib.error.URLError(f"cannot reach {NETLOC} with {TOKEN}"))
 

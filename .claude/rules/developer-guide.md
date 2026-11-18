@@ -7,7 +7,7 @@
 
 `develop ← <type>/<description>` (PR, **squash**), `main ← develop` (release PR, **merge commit**). No direct push to `develop` or `main`.
 
-- **`main` is the default branch** on GitHub. Scheduled workflows (`schedule`) only run on `main`, and `workflow_dispatch` only sees workflow files that exist on `main`. So the pipeline/cron only starts running after a release; the release milestones are in `scripts/prs.toml` (`release_after`): after PR B (baseline), PR 7 (cron), PR 11 (Pages), PR 14.
+- **`main` is the default branch** on GitHub. Scheduled workflows (`schedule`) only run on `main`, and `workflow_dispatch` only sees workflow files that exist on `main`. So the pipeline/cron only starts running after a release; the release milestones are the `release_after` tasks in conductor's `projects/repopulse/tasks.toml`; the past ones were: after PR B (baseline), PR 7 (cron), PR 11 (Pages), PR 14.
 - **Feature branches branch off the latest `origin/develop`** and are deleted after merge.
 - **Branch types:** `feature/`, `fix/`, `test/`, `docs/`, `chore/`. Lowercase, separated by `-`, with a description that names the scope specifically (`feature/ingest-gharchive`, not `feature/update`).
 
@@ -15,9 +15,9 @@
 
 Each piece of code work has its own worktree under `.claude/worktrees/`. Reason: when several sessions run in parallel in the same directory, one session's `git checkout`/`git reset` silently deletes the other's uncommitted changes.
 
-- **Headless:** `scripts/orchestrate.py` creates `.claude/worktrees/pr-<id>` from `origin/develop` and runs the PR session in it. The session and its subagents do not create child worktrees.
+- **Headless:** conductor (D:/Desktop/Conductor) creates `.claude/worktrees/cd-<id>` from `origin/develop` and runs the task session in it. The session and its subagents do not create child worktrees.
 - **Manual session:** `git worktree add .claude/worktrees/<name> -b <type>/<description> origin/develop`. Do not use `EnterWorktree` (it branches from the default branch `main`, which is the wrong base).
-- **Cleanup:** `python scripts/orchestrate.py clean` (or `/wt-clean`) removes worktrees whose PR is merged, tree is clean, and have no session running in them. Never `rm -rf` a worktree yourself.
+- **Cleanup:** `python -m conductor clean repopulse` in D:/Desktop/Conductor (or `/wt-clean`) removes worktrees whose PR is merged, tree is clean, and have no session running in them. Never `rm -rf` a worktree yourself.
 - A new worktree has no Python environment of its own: it shares the already installed `pip install -e ".[dev,dbt]"`. Do not copy `.env` into a worktree.
 - Windows pitfall: open the terminal with `cd D:\Desktop\RepoPulse` (uppercase `D:`). The paths `d:` and `D:` differ, which makes Claude Code treat them as two different projects (memory, settings).
 
@@ -40,8 +40,8 @@ Do not commit: `.env`/credentials/tokens, `.venv/`, `transform/target/`, `*.duck
 Each PR does exactly **one** task, so that each can be reviewed, reverted and measured on its own.
 
 - **What counts as one task:**
-  - A task in `scripts/prs.toml` is always **one** task, exactly the scope of its title and its section in `docs/plan.md`, even when the title contains "and" (for example PR 7). The task scope is set by the repo owner; the reviewer does not split tasks.
-  - Work outside `prs.toml` (harness improvements, bug fixes, docs): the title and the first sentence of `## Summary` describe the whole PR without needing "and", "+", or a list of several independent items.
+  - A task in conductor's `projects/repopulse/tasks.toml` is always **one** task, exactly the scope of its title and its section in `docs/plan.md`, even when the title contains "and" (for example PR 7). The task scope is set by the repo owner; the reviewer does not split tasks.
+  - Work outside `tasks.toml` (harness improvements, bug fixes, docs): the title and the first sentence of `## Summary` describe the whole PR without needing "and", "+", or a list of several independent items.
 - **Belongs to the same task** (allowed in the same PR):
   - the tests for that task;
   - updates to `CLAUDE.md`, `.claude/rules/*`, `docs/` that the task itself makes necessary;

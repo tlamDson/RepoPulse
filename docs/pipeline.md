@@ -35,7 +35,9 @@ share one concurrency group (`pipeline-motherduck`, queued, not cancelled): only
 Each PR has its own group.
 
 Each run takes 3 hours even though the cron runs hourly: an hour that GH Archive publishes late (still `missing` at run time)
-is picked up by the next run. An hour already loaded is skipped by staging via `event_id`, so overlapping runs do not create
+is picked up by the next run. The step `Check every requested hour was ingested`
+(`python -m repopulse.dagspec check-ingest`) fails the run before Spark when a requested hour is `missing`, so Spark never
+runs on empty input; the hour has no manifest and stays eligible for the next run. An hour already loaded is skipped by staging via `event_id`, so overlapping runs do not create
 duplicates. The hourly cron of `ingest.yml` was removed (it now only has `workflow_dispatch` and `pull_request`), so
 the same data is not downloaded twice an hour.
 

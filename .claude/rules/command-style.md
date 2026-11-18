@@ -30,7 +30,7 @@
 ## Do not
 
 - Do not use shell variables for paths (`S=...; ... "$S/x"`), and no `$(...)` containing a write command.
-- No `rm -rf`, no deleting directories. Worktrees are cleaned by `scripts/orchestrate.py clean`.
+- No `rm -rf`, no deleting directories. Worktrees are cleaned by conductor (`python -m conductor clean repopulse` in D:/Desktop/Conductor).
 - No `git stash` (shared across all worktrees), no `git reset --hard`, no `git clean`,
   no rebase, no force push.
 - Do not push to `develop` or `main`; only push the branch of the task at hand.

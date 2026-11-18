@@ -1,14 +1,17 @@
 """Static checks on site/ (no browser, no network).
 
 The page is plain HTML + CSS + JS. It may only load files that sit next to it (relative paths,
-because Pages serves it under /RepoPulse/), only fetch the JSON that repopulse/export_site.py
-writes, carry no hand-typed numbers, label GH Archive as real data and spell out the "simulated"
-rule, and give every Q1-Q6 section a chart and a table.
+because Pages serves it under /github-analytics-data-pipeline/), only fetch the JSON that
+repopulse/export_site.py writes, carry no hand-typed numbers, label GH Archive as real data and
+spell out the "simulated" rule, and give every Q1-Q6 section a chart and a table.
 """
 
 from __future__ import annotations
 
+import json
 import re
+import shutil
+import subprocess
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -126,7 +129,8 @@ def test_no_external_or_root_absolute_resources_in_html():
             if tag == "link" and attrs.get("rel") == "icon" and value == "data:,":
                 continue  # the empty inline icon: no request at all
             assert not EXTERNAL.match(value), (tag, name, value)
-            assert not value.startswith("/"), (tag, name, value)  # Pages serves under /RepoPulse/
+            # Pages serves under /github-analytics-data-pipeline/
+            assert not value.startswith("/"), (tag, name, value)
 
 
 def test_no_inline_script_or_style_in_html():
@@ -232,6 +236,66 @@ def test_every_section_has_a_chart_a_table_and_a_status_slot(name):
     assert {"chart", "table", "status"} <= roles, (name, roles)
 
 
+class Caveats(HTMLParser):
+    """Text of each ``<p class="caveat">``, keyed by the id of the section around it."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.section = ""
+        self.inside = False
+        self.found: dict[str, str] = {}
+
+    def handle_starttag(self, tag, attrs):
+        a = dict(attrs)
+        if tag == "section":
+            self.section = a.get("id") or ""
+        if tag == "p" and "caveat" in (a.get("class") or "").split():
+            self.inside = True
+            self.found.setdefault(self.section, "")
+
+    def handle_endtag(self, tag):
+        if tag == "p":
+            self.inside = False
+
+    def handle_data(self, data):
+        if self.inside:
+            self.found[self.section] += data
+
+
+@pytest.mark.parametrize("section", ["q3", "q4", "q6"])
+def test_merge_response_close_sections_warn_they_need_more_days_of_data(section):
+    # UX-1: open -> merge / response / close pairs only land when the loaded data spans enough
+    # days; the page says so next to the numbers (n/a in Q6 when not measurable).
+    parser = Caveats()
+    parser.feed(INDEX.read_text(encoding="utf-8"))
+    text = " ".join(parser.found.get(section, "").split()).lower()
+    assert "more days of data" in text, (section, text)
+    assert "follow-up" in text, (section, text)
+    if section == "q6":
+        assert "n/a" in text and "weights" in text, text
+
+
+def test_q6_says_repos_with_too_few_human_contributions_are_not_enough_data():
+    # UX-6: a repo needs >= 5 human contributions to be ranked; the page lists the others as
+    # "not enough data" instead of ranking them, and the chart only draws the ranked ones.
+    # The number is spelled out: the page may not carry hand-typed digits.
+    parser = Caveats()
+    parser.feed(INDEX.read_text(encoding="utf-8"))
+    text = " ".join(parser.found.get("q6", "").split()).lower()
+    assert "not enough data" in text and "five human contributions" in text, text
+    js = js_text()
+    assert "health_rank" in js and "not enough data" in js.lower()
+
+
+def test_q2_says_not_yet_measurable_and_states_the_data_window_start():
+    assert "not yet measurable" in js_text()
+    assert "first_data_date" in js_text()  # the window start comes from meta.json, not hand-typed
+    q2 = [a for t, a, _ in page().tags if t == "section" and a.get("id") == "q2"]
+    inside = [a for _, a, anc in page().tags if any(x.get("id") == "q2" for x in anc)]
+    assert len(q2) == 1
+    assert "q2-window" in {a.get("data-role") for a in inside}
+
+
 @pytest.mark.parametrize("q", ["Q1", "Q2", "Q3", "Q4", "Q5", "Q6"])
 def test_sections_are_labelled_q1_to_q6(q):
     assert q in visible_text()
@@ -250,3 +314,90 @@ def test_css_handles_narrow_screens_and_dark_mode():
 
 def test_charts_scale_with_viewbox():
     assert "viewBox" in js_text()
+
+
+# ---------------------------------------------------------------- Q1 partial first/last day
+
+
+def q1_function() -> str:
+    js = js_text()
+    start = js.index("function q1(")
+    return js[start : js.index("function q2(", start)]
+
+
+def test_q1_marks_first_and_last_day_as_partial_in_the_chart():
+    # The run window starts mid-day and ends at now-2h, so both end days hold a fraction of a day.
+    body = q1_function()
+    assert re.search(r"partial\s*:", body), "q1 must pass a partial spec to lineChart"
+    assert "days[0]" in body and "days.length - 1" in body
+
+
+def test_line_chart_draws_partial_segments_dashed_and_says_so():
+    js = js_text()
+    assert re.search(r"mark-line[^\"'`]*partial", js), "partial segments need their own class"
+    assert re.search(r"partial", css_text())
+    assert re.search(r"\.mark-line\.partial\s*\{[^}]*stroke-dasharray", css_text())
+    assert "partial day" in js.lower()  # a visible label, not only a dashed line
+
+
+def test_q1_table_labels_the_partial_days():
+    assert "(partial)" in q1_function()
+
+
+# ---- Q1 partial days, behaviour: app.js runs in node against a fake DOM (tests/fixtures)
+
+HARNESS = ROOT / "tests" / "fixtures" / "site_q1_harness.js"
+needs_node = pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+
+
+def draw_q1(values_by_day: dict[str, int]) -> dict:
+    rows = [
+        {
+            "period": "day",
+            "scope": "category",
+            "scope_key": "cat",
+            "period_start": day,
+            "active_contributors": n,
+        }
+        for day, n in values_by_day.items()
+    ]
+    done = subprocess.run(
+        ["node", str(HARNESS), str(SITE / "app.js"), json.dumps(rows)],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=True,
+    )
+    return json.loads(done.stdout)
+
+
+def points(d: str) -> list[str]:
+    return re.findall(r"[ML]([-\d.e]+,[-\d.e]+)", d)
+
+
+@needs_node
+def test_q1_solid_path_starts_at_the_first_complete_day_and_partial_ends_are_dashed():
+    out = draw_q1({"2026-11-11": 7, "2026-11-12": 5, "2026-11-13": 6, "2026-11-14": 1})
+    paths = [n["attrs"] for n in out["chart"] if n["tag"] == "path"]
+    solid = [a["d"] for a in paths if a["class"] == "mark-line s1"]
+    dashed = [a["d"] for a in paths if a["class"] == "mark-line partial s1"]
+    assert len(dashed) == 1
+    p0, p1, p2, p3 = points(dashed[0])  # day0->day1 and day2->day3
+    assert solid == [f"M{p1}L{p2}"]  # day1->day2 only; day 1 is not skipped
+    hollow = [n for n in out["chart"] if n["attrs"].get("class") == "mark-dot partial s1"]
+    assert len(hollow) == 2  # the first and the last day, nothing else
+    assert "partial day" in " ".join(n["text"] for n in out["chart"]).lower()
+
+
+@needs_node
+def test_q1_table_marks_exactly_the_first_and_last_day_partial():
+    out = draw_q1({"2026-11-11": 7, "2026-11-12": 5, "2026-11-13": 6, "2026-11-14": 1})
+    days = [n["text"] for n in out["table"] if n["tag"] == "td" and n["text"].startswith("2026-")]
+    assert days == ["2026-11-11 (partial)", "2026-11-12", "2026-11-13", "2026-11-14 (partial)"]
+
+
+@needs_node
+def test_q1_with_two_days_has_no_solid_path():
+    out = draw_q1({"2026-11-11": 7, "2026-11-12": 1})
+    classes = [n["attrs"].get("class") for n in out["chart"] if n["tag"] == "path"]
+    assert classes == ["mark-line partial s1"]

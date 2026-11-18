@@ -52,7 +52,7 @@ from dbt_helpers import output as _output  # noqa: E402
 from dbt_helpers import q as _q  # noqa: E402
 from dbt_helpers import require_ok as _require_ok  # noqa: E402
 
-PARQUET_ONLY_IDS = ("9000000050", "9000000051", "9000000052")
+PARQUET_ONLY_IDS = ("9000000050", "9000000051", "9000000052", "9000000053")
 EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 
 
@@ -88,7 +88,7 @@ def test_dbt_build_succeeds_on_silver_fixture(built):
 
 def test_baseline_input_has_no_duplicate_ids(lake):
     ids = [json.loads(line)["id"] for line in dedup_lines()]
-    assert len(ids) == len(set(ids)) == 39  # 34 + 3 + 3 lines, minus the duplicate of 9000000002
+    assert len(ids) == len(set(ids)) == 40  # 34 + 3 + 4 lines, minus the duplicate of 9000000002
     seed_ids = {json.loads(line)["id"] for line in dedup_lines(SEED_FIXTURE_DIRS)}
     assert len(seed_ids) == 36
     assert set(ids) - seed_ids == set(PARQUET_ONLY_IDS)
@@ -132,7 +132,7 @@ def test_staging_reads_the_parquet_var_not_the_seed(connect_gold, lake):
     finally:
         con.close()
     staged = gold.execute("SELECT count(*) FROM main_staging.stg_gharchive_events").fetchone()[0]
-    assert staged == parquet_rows == 39  # the seed has 36
+    assert staged == parquet_rows == 40  # the seed has 36
     in_fct = gold.execute(
         f"SELECT event_id FROM {GOLD_SCHEMA}.fct_events WHERE event_id IN "
         f"({', '.join(_q(i) for i in PARQUET_ONLY_IDS)}) ORDER BY event_id"
@@ -153,8 +153,12 @@ def test_mart_matches_baseline_query(q, connect_gold, baseline):
     assert expected, f"{q} baseline is empty on the fixture: comparison would be vacuous"
     assert len(actual) == len(expected), (actual, expected)
     for a_row, e_row in zip(actual, expected, strict=True):
-        for a, e in zip(a_row, e_row, strict=True):
-            if isinstance(e, float):
+        for col, a, e in zip(expected_cols, a_row, e_row, strict=True):
+            if q == "q2" and col.endswith("_pct") and a is None:
+                # The only difference from q2.sql: the mart says NULL ("not yet measurable") where
+                # the retention week is after the latest loaded day; the baseline reports 0.0.
+                assert e == 0.0, (a_row, e_row)
+            elif isinstance(e, float):
                 assert a == pytest.approx(e, abs=1e-9), (a_row, e_row)
             else:
                 assert a == e, (a_row, e_row)
@@ -179,8 +183,8 @@ def test_fct_events_keeps_each_seed_repo_event_once(connect_gold, lake):
         f"SELECT count(*), count(DISTINCT event_id) FROM {GOLD_SCHEMA}.fct_events"
     ).fetchone()
     assert total == distinct == expected
-    # 2 of the 39 fixture events are on alice/toy (not in the seed)
-    assert total == 37
+    # 2 of the 40 fixture events are on alice/toy (not in the seed)
+    assert total == 38
 
 
 def test_dim_repo_matches_seed_case_insensitively(connect_gold):
@@ -210,6 +214,16 @@ def test_dim_user_scd2_versions_for_renamed_actor(connect_gold):
         ("dave", 1, datetime(2026, 1, 5, 8), datetime(2026, 2, 12, 10), False, False),
         ("dave2", 2, datetime(2026, 2, 12, 10), None, True, False),
     ]
+
+
+def test_dim_user_first_event_with_null_login_starts_version_one(connect_gold):
+    gold = connect_gold()
+    rows = gold.execute(
+        "SELECT user_key, actor_login, version_number, valid_to, is_current, is_bot "
+        f"FROM {GOLD_SCHEMA}.dim_user WHERE actor_id = 1011 ORDER BY version_number"
+    ).fetchall()
+    # the first event of actor 1011 has actor.login = null: still version 1, not 0
+    assert rows == [("1011-1", None, 1, None, True, False)]
 
 
 def test_dim_user_flags_bots_by_login_rule(connect_gold):

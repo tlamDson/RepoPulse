@@ -50,12 +50,10 @@ def test_readme_has_one_results_marker_pair_in_order():
     assert readme.index(START) < readme.index(END)
 
 
-def test_readme_has_an_architecture_diagram():
-    assert "```mermaid" in read_text("README.md")
-
-
-def test_readme_has_design_decisions_heading():
-    assert re.search(r"^#{2,3} Design decisions\s*$", read_text("README.md"), re.MULTILINE)
+def test_development_guide_has_design_decisions_heading():
+    # The architecture diagram is an SVG now (tests/test_readme_recruiter.py) and the design
+    # decisions moved from README.md to DEVELOPMENT.md.
+    assert re.search(r"^#{2,3} Design decisions\s*$", read_text("DEVELOPMENT.md"), re.MULTILINE)
 
 
 def test_readme_no_longer_says_it_is_bootstrapping():
@@ -103,7 +101,9 @@ def test_readme_labels_simulated_data_and_names_the_batch_style():
 
 
 def test_readme_links_the_method_page_of_every_v2_measurement():
-    text = hand_written(read_text("README.md"))
+    # Anywhere in the README: most method links sit next to their generated results table.
+    # Pages with no results table (the semantic layer) are reached through docs/developer-guide.md.
+    text = read_text("README.md")
 
     for page in (
         "path-comparison",
@@ -114,7 +114,6 @@ def test_readme_links_the_method_page_of_every_v2_measurement():
         "airflow",
         "dbt-databricks",
         "databricks-job",
-        "semantic-layer",
         "sql-agent",
         "engine-matrix",
     ):
@@ -178,3 +177,17 @@ def test_hand_written_readme_text_quotes_no_decimal_that_runs_csv_lacks():
 
     for token in re.findall(r"\d+\.\d+", outside):
         assert token in FORMULA_NUMBERS or token in source, f"{token} in README.md has no source"
+
+
+DASHBOARD_URL = "https://tlamdson.github.io/github-analytics-data-pipeline/"
+
+
+def test_readme_links_the_live_dashboard_near_the_top():
+    readme = read_text("README.md")
+    head = readme[: readme.index("## What it does")]
+
+    url = re.escape(DASHBOARD_URL)
+    # A clickable text link: an autolink <URL> or [text](URL) that is not an image.
+    text_link = re.search(rf"<{url}>|(?<!!)\[[^\]\n]+\]\({url}\)", head)
+
+    assert text_link, "the first section needs a clickable text link to the live dashboard"

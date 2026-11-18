@@ -71,8 +71,8 @@ The seed `fixture_silver_gharchive_events` is a **CI fixture, not a measurement*
 columns of `silver/gharchive_events` (`docs/spark-jobs.md`). Regenerate it from JSON with
 `silver_select_sql` in `tests/dbt_helpers.py`; the test
 `test_ci_seed_equals_silver_built_from_fixture_json` asserts the seed equals exactly that data (every
-`event_id`, every column). The parquet pytest creates additionally includes `tests/fixtures/gharchive_parquet_only` (3
-events not in the seed, including a same-second login-change case), so tests can tell the parquet read path
+`event_id`, every column). The parquet pytest creates additionally includes `tests/fixtures/gharchive_parquet_only` (4
+events not in the seed, including a same-second login-change case and a first event with a null `actor_login`), so tests can tell the parquet read path
 from the seed read path; the baseline runs on the same raw rows as the parquet.
 
 The scheduled pipeline does not let dbt read the Delta directory: `python -m repopulse.spark.export` reads the
@@ -160,14 +160,17 @@ match the baseline even when an actor is renamed.
 | Mart | Query | Question |
 |---|---|---|
 | `mart_daily_active_contributors` | `q1.sql` | Active contributors per day/week, by repo and category, new vs returning |
-| `mart_cohort_retention` | `q2.sql` | Cohort retention at exactly W+4, W+12 |
+| `mart_cohort_retention` | `q2.sql` | Cohort retention at exactly W+4, W+12; `retention_w4_pct` / `retention_w12_pct` are NULL while cohort_week + 28 / 84 days is after the latest loaded day (q2.sql reports 0.0 there) |
 | `mart_contribution_funnel` | `q3.sql` | Fork → PR → merge funnel, hours to merge p50/p90 |
 | `mart_responsiveness` | `q4.sql` | First response time p50/p90, close rate |
 | `mart_repo_concentration` | `q5.sql` | Bus factor (top-N share) and bot share |
 | `mart_repo_health_score` | `q6.sql` | Composite health score and ranking |
 
 The health score formula (components, weights, rounding, ranking order) is written at the top of
-`benchmarks/queries/q6.sql`; `mart_repo_health_score` uses that formula verbatim.
+`benchmarks/queries/q6.sql`; `mart_repo_health_score` uses that formula verbatim. A repo is scored
+and ranked only with at least 5 human contributions (dbt var `q6_min_human_contributions`, default 5;
+`params.min_human_contributions` in the `q6.sql` variants). The others stay in the mart with NULL
+`health_rank` and `health_score` (not enough data), after the ranked repos.
 
 Semantic layer (MetricFlow): each public mart has one semantic model and each numeric column a metric of the same
 name, declared in `transform/models/public/_semantic.yml`; grain, non-additive metrics, the time spine

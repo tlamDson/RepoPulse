@@ -2,7 +2,10 @@
 -- Translation notes: arg_min -> min_by; ->> '$.x' -> json_extract_scalar(payload, '$.x');
 -- ends_with -> LIKE; x::DOUBLE -> CAST(x AS DOUBLE); USING joins written as ON; GROUP BY repeats
 -- the item_type expression (Trino does not group by a select alias). Weights: see q6.sql.
-WITH ev AS (
+WITH params AS (
+    SELECT 5 AS min_human_contributions
+),
+ev AS (
     SELECT
         e.actor.login AS actor_login,
         lower(e.actor.login) LIKE '%[bot]' OR lower(e.actor.login) LIKE '%-bot' AS is_bot,
@@ -38,6 +41,7 @@ people AS (
         repo_name,
         count(*) AS contributors,
         count(*) FILTER (WHERE weeks >= 2) AS multi_week,
+        sum(n) AS human_contributions,
         CAST(max(n) AS DOUBLE) / sum(n) AS top1_share
     FROM per_actor
     GROUP BY repo_name
@@ -86,6 +90,8 @@ item_flags AS (
         AND x.item_number = o.item_number
         AND x.created_at >= o.opened_at
     WHERE NOT o.opener_is_bot
+        -- only items with a full 7-day follow-up window before the end of the loaded events
+        AND o.opened_at <= (SELECT max(created_at) FROM ev) - INTERVAL '7' DAY
     GROUP BY o.repo_name, o.item_number, o.item_type
 ),
 items AS (
@@ -105,13 +111,20 @@ scored_repos AS (
 components AS (
     SELECT
         s.repo_name,
+        coalesce(p.human_contributions, 0) AS human_contributions,
         coalesce(
             CAST(p.contributors AS DOUBLE) / nullif(max(p.contributors) OVER (), 0), 0
         ) AS activity,
         coalesce(CAST(p.multi_week AS DOUBLE) / p.contributors, 0) AS retention,
-        coalesce(CAST(i.prs_merged AS DOUBLE) / nullif(i.prs_opened, 0), 0) AS merge,
-        coalesce(CAST(i.responded AS DOUBLE) / nullif(i.opened, 0), 0) AS response,
-        coalesce(CAST(i.closed AS DOUBLE) / nullif(i.opened, 0), 0) AS close,
+        CASE WHEN sum(i.prs_merged) OVER () > 0
+            THEN CAST(i.prs_merged AS DOUBLE) / nullif(i.prs_opened, 0)
+        END AS merge,
+        CASE WHEN sum(i.responded) OVER () > 0
+            THEN CAST(i.responded AS DOUBLE) / nullif(i.opened, 0)
+        END AS response,
+        CASE WHEN sum(i.closed) OVER () > 0
+            THEN CAST(i.closed AS DOUBLE) / nullif(i.opened, 0)
+        END AS close,
         coalesce(1 - p.top1_share, 0) AS diversity
     FROM scored_repos AS s
     LEFT JOIN people AS p ON p.repo_name = s.repo_name
@@ -120,14 +133,21 @@ components AS (
 scores AS (
     SELECT
         *,
+        human_contributions >= (SELECT min_human_contributions FROM params) AS is_scored,
         100 * (
-            0.25 * activity + 0.15 * retention + 0.15 * merge + 0.20 * response
-            + 0.10 * close + 0.15 * diversity
+            0.25 * activity + 0.15 * retention + coalesce(0.15 * merge, 0)
+            + coalesce(0.20 * response, 0) + coalesce(0.10 * close, 0) + 0.15 * diversity
+        ) / (
+            0.55 + CASE WHEN merge IS NULL THEN 0 ELSE 0.15 END
+            + CASE WHEN response IS NULL THEN 0 ELSE 0.20 END
+            + CASE WHEN close IS NULL THEN 0 ELSE 0.10 END
         ) AS score
     FROM components
 )
 SELECT
-    row_number() OVER (ORDER BY s.score DESC, s.repo_name) AS health_rank,
+    CASE WHEN s.is_scored
+        THEN row_number() OVER (PARTITION BY s.is_scored ORDER BY s.score DESC, s.repo_name)
+    END AS health_rank,
     s.repo_name,
     r.category,
     round(s.activity, 4) AS activity_score,
@@ -136,7 +156,7 @@ SELECT
     round(s.response, 4) AS response_score,
     round(s.close, 4) AS close_score,
     round(s.diversity, 4) AS diversity_score,
-    round(s.score, 2) AS health_score
+    CASE WHEN s.is_scored THEN round(s.score, 2) END AS health_score
 FROM scores AS s
 JOIN repos AS r ON r.repo_name = s.repo_name
-ORDER BY health_rank
+ORDER BY health_rank NULLS LAST, s.repo_name

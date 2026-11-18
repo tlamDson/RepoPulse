@@ -1,4 +1,4 @@
-# RepoPulse · Result of probe step 1 (cloud probe) and the primary-path selection rule
+# GitHub Analytics Data Pipeline · Result of probe step 1 (cloud probe) and the primary-path selection rule
 
 The probe step in [`plan.md`](plan.md) (the "probe step" row of the PR list): can Databricks Free Edition be controlled from GitHub Actions, or do we use the fallback path (PySpark + Delta on the runner, gold on MotherDuck). Plan v2 adds a primary-path selection rule, fixed before measuring, applied to the measurements of [`path-comparison.md`](path-comparison.md) (D3); this file records both.
 
@@ -66,6 +66,20 @@ Every path run by trigger. Rows whose trigger is not `schedule` are not used by 
 
 To turn off the `path-comparison.yml` cron once there are enough runs: see [`path-comparison.md`](path-comparison.md), section "Turning off the cron once D4 has enough runs".
 
+## When Databricks refuses new runs
+
+The Free Edition can switch off new job runs for the whole organization: `runs/submit` answers `HTTP 404 FEATURE_DISABLED` ("Triggering new runs for organization ... is currently disabled temporarily"). This is a platform state, not a pipeline bug, so `path-comparison.yml` on `develop` has a circuit breaker so that it does not go red every hour.
+
+**Status: on `develop` only, not yet active for the cron.** The circuit breaker came in with #80 (`22891f9`), which is on `develop` but not on `main`. Scheduled workflows only run from `main`, so until the next `develop` → `main` release the hourly cron still runs the old workflow. Each hour Databricks refuses runs, that cron run is red. The release is the repo owner's decision. After it, the cron behaves as below.
+
+What the circuit breaker does once `main` has it:
+
+- `python -m repopulse.databricks_job run` exits 3 on `FEATURE_DISABLED` at `runs/submit` (`repopulse/databricks_gate.py`).
+- The `databricks` step of path B turns that into a `::notice::`, skips the remaining B steps (warehouse, dbt, queries, row) and the workflow stays green. **No `path-b-databricks` row is written**, so `runs.csv` never holds a failed B row caused by the platform state.
+- Any other Databricks error, including `FEATURE_DISABLED` outside `runs/submit`, still fails the job.
+
+Effect on the rule: an hour skipped this way adds no B run, so a full UTC day on which Databricks refused runs has fewer than 24 B runs and rule 1 drops B for that window. That is intended: a path that cannot run the full 24 times/day is not eligible. The cron does not need pausing; B rows come back by themselves once Databricks re-enables job runs. Workflow details: [`path-comparison.md`](path-comparison.md).
+
 ## Probe runs
 
 The probe's path-selection rule (`repopulse.probe.decide_path`): `primary` when all four Databricks checks (auth, Volume, serverless job, SQL warehouse) pass and `dbt debug --target databricks` does not fail; otherwise `fallback` when MotherDuck connects and `dbt debug --target motherduck` does not fail; otherwise `blocked`. The probe report only has pass/fail/skipped and no measurements (measurements come only from `runs.csv`). The probe only answers "can it be controlled from outside"; which path to run is decided by the Plan v2 rule above.
@@ -76,7 +90,7 @@ The probe's path-selection rule (`repopulse.probe.decide_path`): `primary` when 
 |---|---|
 | Date | 2026-11-11 |
 | Workflow | `Cloud probe` (`.github/workflows/probe.yml`), `workflow_dispatch` on `main` |
-| Run | <https://github.com/tlamDson/RepoPulse/actions/runs/43104609971> |
+| Run | <https://github.com/tlamDson/github-analytics-data-pipeline/actions/runs/43104609971> |
 | Commit | `2cc978d` on `main` |
 | Artifact | `probe-result` (`probe-result.json`, `probe-result.md`) |
 
@@ -100,7 +114,7 @@ The table below is copied from the `probe-result.md` of that run.
 |---|---|
 | Date | 2026-11-11 |
 | Workflow | `Cloud probe` (`.github/workflows/probe.yml`), runner `ubuntu-latest` |
-| Run | <https://github.com/tlamDson/RepoPulse/actions/runs/42980750248> |
+| Run | <https://github.com/tlamDson/github-analytics-data-pipeline/actions/runs/42980750248> |
 | Commit | `2d1df17` on the branch `docs/probe-result` |
 | Artifact | `probe-result` (`probe-result.json`, `probe-result.md`) |
 
@@ -136,7 +150,7 @@ The Free Edition daily quota (when exceeded, compute is off until the end of the
 
 ## Pitfalls found
 
-- **MotherDuck rejects a DuckDB client that is too new.** The first run (<https://github.com/tlamDson/RepoPulse/actions/runs/42980241119>) installed the latest DuckDB and MotherDuck reported: `Your DuckDB version (v2.0.0) is not yet supported by MotherDuck. The latest supported version is v1.5.6.` After pinning `duckdb==1.5.6` in the workflow it passed. Every workflow connecting to MotherDuck must pin the DuckDB version to the one MotherDuck currently supports; CI on local DuckDB is not affected.
+- **MotherDuck rejects a DuckDB client that is too new.** The first run (<https://github.com/tlamDson/github-analytics-data-pipeline/actions/runs/42980241119>) installed the latest DuckDB and MotherDuck reported: `Your DuckDB version (v2.0.0) is not yet supported by MotherDuck. The latest supported version is v1.5.6.` After pinning `duckdb==1.5.6` in the workflow it passed. Every workflow connecting to MotherDuck must pin the DuckDB version to the one MotherDuck currently supports; CI on local DuckDB is not affected.
 - **GitHub masks only the exact verbatim value of a secret.** `dbt debug` prints the hostname without `https://`, so the workflow additionally registers `::add-mask::` for the bare hostname, user, http path and warehouse id before running `dbt debug`. The log of the public repo was checked: `host` and `http_path` show `***`.
 - **`workflow_dispatch` only sees workflows already on `main`.** Attempt 1 ran thanks to a `push` trigger limited to the branch `docs/probe-result`; attempt 2 ran by `workflow_dispatch` after release. For the same reason, the cron of `path-comparison.yml` only starts after release.
 

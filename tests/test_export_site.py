@@ -394,6 +394,27 @@ def test_nulls_and_floats_serialise_cleanly(inputs, tmp_path, site_dir):
     assert "NaN" not in (out / "data" / "mart_repo_health_score.json").read_text(encoding="utf-8")
 
 
+def test_q6_repos_without_a_rank_come_last_ordered_by_name(tmp_path, site_dir):
+    # UX-6: repos with too few human contributions have NULL rank and score (not enough data).
+    db = make_db(
+        tmp_path / "unranked.duckdb",
+        extra_sql=(
+            "INSERT INTO main_public.mart_repo_health_score VALUES "
+            "(NULL, 'org/z', 'bi', 1.0, 0.0, NULL, NULL, NULL, 0.0, NULL), "
+            "(NULL, 'org/y', 'bi', 0.5, 0.0, NULL, NULL, NULL, 0.0, NULL)",
+        ),
+    )
+    out = tmp_path / "out"
+    assert run_main({"db": db, "runs": write_runs(tmp_path / "runs.csv")}, out, site_dir) == 0
+    q6 = load_json(out / "data" / "mart_repo_health_score.json")["rows"]
+    assert [(r["health_rank"], r["repo_name"], r["health_score"]) for r in q6] == [
+        (1, "org/a", 0.875),
+        (2, "org/b", 0.25),
+        (None, "org/y", None),
+        (None, "org/z", None),
+    ]
+
+
 def test_decimal_and_nan_values_become_json_numbers_and_null(tmp_path, site_dir):
     extra = (
         "ALTER TABLE main_public.mart_responsiveness ALTER close_rate_pct TYPE DECIMAL(6, 2)",
@@ -440,6 +461,7 @@ def test_meta_comes_from_the_data_not_from_hand_typed_values(inputs, tmp_path, s
     assert meta["git_sha"] == "abc1234"
     assert meta["schema"] == "main_public"
     assert meta["latest_data_date"] == "2026-01-06"  # max day of Q1, not the week row
+    assert meta["first_data_date"] == "2026-01-05"  # min day of Q1, the start of the data window
     assert meta["source"]["name"] == "GH Archive"
     assert meta["source"]["real_data"] is True
     assert meta["simulated_sections"] == []
@@ -474,6 +496,7 @@ def test_empty_mart_exports_zero_rows_and_null_latest_date(tmp_path, site_dir):
     assert load_json(out / "data" / "mart_daily_active_contributors.json")["rows"] == []
     meta = load_json(out / "data" / "meta.json")
     assert meta["latest_data_date"] is None
+    assert meta["first_data_date"] is None
     assert meta["marts"]["mart_daily_active_contributors"]["rows"] == 0
 
 

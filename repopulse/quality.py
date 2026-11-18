@@ -119,6 +119,11 @@ def _hours(v: object) -> bool:
     return True
 
 
+def _hours_or_empty(v: object) -> bool:
+    """a list (possibly empty) of YYYY-MM-DDTHH hours"""
+    return v == [] or _hours(v)
+
+
 _SCHEMA: dict[str, dict[str, Callable[[object], bool]]] = {
     "faults": {
         "late_threshold_seconds": _positive_number,
@@ -132,9 +137,11 @@ _SCHEMA: dict[str, dict[str, Callable[[object], bool]]] = {
         "min_history": _int(1),
         "min_ratio": _ratio,
         "evaluate_hours": _int(1),
+        "ingest_lag_hours": _int(0),
         "type_min_median": _int(1),
     },
     "volume.reference": {"history": _hours, "evaluate": _hours},
+    "volume.known_gaps": {"hours": _hours_or_empty},
     "freshness": {"table": _identifier, "column": _identifier, "max_lag_hours": _positive_number},
     "alert": {"label": _text, "template": _text},
 }
@@ -149,6 +156,11 @@ def load_config(path: str | Path | None = None) -> dict:
         raise ConfigError(f"cannot read config {path}: {exc}") from None
     except tomllib.TOMLDecodeError as exc:
         raise ConfigError(f"config {path} is not valid TOML: {exc}") from None
+    volume = data.get("volume")
+    if isinstance(volume, dict):  # optional table: configs written before it existed still load
+        gaps = volume.setdefault("known_gaps", {})
+        if isinstance(gaps, dict):
+            gaps.setdefault("hours", [])
     out: dict = {}
     for section, keys in _SCHEMA.items():
         node: object = data
@@ -586,8 +598,13 @@ def compare_hour(
 
 
 def _evaluate_volume(
-    hourly_counts: Mapping[datetime, Mapping[str, int]], cfg: Mapping, table: str | None
+    hourly_counts: Mapping[datetime, Mapping[str, int]],
+    cfg: Mapping,
+    table: str | None,
+    now: datetime | None = None,
 ) -> tuple[list[Alert], list[dict]]:
+    if now is not None and (now.tzinfo is None or now.utcoffset() is None):
+        raise ValueError("now must be timezone-aware")
     if not hourly_counts:
         return [], []
     vol = cfg["volume"]
@@ -596,15 +613,31 @@ def _evaluate_volume(
     for moment, counts in hourly_counts.items():
         series[_floor_hour(_utc(moment))] = counts
     first, last = min(series), max(series)
+    if now is not None:  # the newest hour that should have landed: missing hours count as 0
+        last = max(last, _floor_hour(_utc(now)) - timedelta(hours=vol["ingest_lag_hours"]))
     hours = []
     cursor = first
     while cursor <= last:  # continuous: an hour without rows counts as 0
         hours.append(cursor)
         cursor += timedelta(hours=1)
+    gaps = {parse_hour(h) for h in vol["known_gaps"]["hours"]}  # upstream source gaps (allowlist)
     alerts: list[Alert] = []
     statuses: list[dict] = []
     for i in range(max(0, len(hours) - vol["evaluate_hours"]), len(hours)):
-        history = [series.get(h, {}) for h in hours[max(0, i - vol["window_hours"]) : i]]
+        if hours[i] in gaps:  # the source lost data here: no alert, and not a baseline either
+            total = sum(series.get(hours[i], {}).values())
+            statuses.append(
+                {
+                    "hour": hour_label(hours[i]),
+                    "total": total,
+                    "history_hours": 0,
+                    "median_total": None,
+                    "status": "known_gap",
+                }
+            )
+            continue
+        window = hours[max(0, i - vol["window_hours"]) : i]
+        history = [series.get(h, {}) for h in window if h not in gaps]
         found, status = compare_hour(history, series.get(hours[i], {}), hours[i], cfg, table=table)
         alerts += found
         statuses.append(status)
@@ -612,17 +645,29 @@ def _evaluate_volume(
 
 
 def check_volume(
-    hourly_counts: Mapping[datetime, Mapping[str, int]], cfg: Mapping, *, table: str | None = None
+    hourly_counts: Mapping[datetime, Mapping[str, int]],
+    cfg: Mapping,
+    *,
+    table: str | None = None,
+    now: datetime | None = None,
 ) -> list[Alert]:
-    """Volume alerts of the ``evaluate_hours`` newest hours of ``{hour: {event_type: count}}``."""
-    return _evaluate_volume(hourly_counts, cfg, table)[0]
+    """Volume alerts of the ``evaluate_hours`` newest hours of ``{hour: {event_type: count}}``.
+
+    With an aware ``now`` the newest hour is ``now - ingest_lag_hours`` (floored), so an outage
+    after the last populated hour is evaluated as 0 events; without it, the last populated hour.
+    """
+    return _evaluate_volume(hourly_counts, cfg, table, now)[0]
 
 
 def volume_status(
-    hourly_counts: Mapping[datetime, Mapping[str, int]], cfg: Mapping, *, table: str | None = None
+    hourly_counts: Mapping[datetime, Mapping[str, int]],
+    cfg: Mapping,
+    *,
+    table: str | None = None,
+    now: datetime | None = None,
 ) -> list[dict]:
     """Status line (ok / alert / insufficient_history) of every evaluated hour."""
-    return _evaluate_volume(hourly_counts, cfg, table)[1]
+    return _evaluate_volume(hourly_counts, cfg, table, now)[1]
 
 
 def check_freshness(latest_event_at: object, now: datetime, cfg: Mapping) -> list[Alert]:
@@ -1259,7 +1304,7 @@ def _cmd_check(args: argparse.Namespace, cfg: dict) -> int:
         raise QualityError(f"cannot read {cfg['volume']['table']}: {exc}") from None
     finally:
         con.close()
-    volume_alerts, statuses = _evaluate_volume(counts, cfg, None)
+    volume_alerts, statuses = _evaluate_volume(counts, cfg, None, now)
     freshness_alerts = check_freshness(latest, now, cfg)
     alerts = volume_alerts + freshness_alerts
     report = {

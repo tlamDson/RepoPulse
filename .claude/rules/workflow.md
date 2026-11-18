@@ -11,25 +11,24 @@
 
 1. **Every change goes through a PR.** Feature → `develop` (squash). Release `develop` → `main` (merge commit). No direct push to `develop`/`main`, no force push, no `--admin`.
 2. **Merge a feature into `develop` when two conditions hold:** CI is green on all 3 jobs (`Lint`, `Unit Tests`, `dbt build (DuckDB)`) and `code-reviewer` concludes PASS. When both hold, merge immediately without asking.
-3. **Release `develop` → `main`** is done by `scripts/orchestrate.py` (or `release-manager`) at the milestones in `scripts/prs.toml` (`release_after`), once the release PR's CI is green. A real merge commit, no squash.
+3. **Release `develop` → `main`** is done by conductor (or `release-manager`) at the milestones marked `release_after` in conductor's `projects/repopulse/tasks.toml`, once the release PR's CI is green. A real merge commit, no squash.
 4. **A PR that changes `.claude/settings.json`, `.claude/auto-mode.json` or a hook** is reviewed and merged by the repo owner.
 5. **TDD is mandatory**, the first commit contains only tests, seen red for real. Details: `.claude/rules/tdd.md`.
 6. **Measurements come only from `runs.csv`; simulated data is clearly labelled "simulated".**
 7. **Update `CLAUDE.md` + `.claude/rules/*`** when a task changes a convention, tooling or process.
-8. **One PR, one task.** One task in `scripts/prs.toml`, or one improvement/bug fix; other things found along the way are split out (headless: record under Technical debt or `## Assumptions`). Details: the "One PR, one task" section of `.claude/rules/developer-guide.md`.
+8. **One PR, one task.** One task in conductor's `projects/repopulse/tasks.toml`, or one improvement/bug fix; other things found along the way are split out (headless: record under Technical debt or `## Assumptions`). Details: the "One PR, one task" section of `.claude/rules/developer-guide.md`.
 
-## Running headless (`scripts/orchestrate.py`)
+## Running headless (conductor)
 
-Each PR is a `claude -p --permission-mode auto --permission-prompts none` session running in its own worktree `.claude/worktrees/pr-<id>`, created by the script from `origin/develop`. There is no human to ask:
+Headless sessions are started by conductor (D:/Desktop/Conductor), one per task, each in its own worktree `.claude/worktrees/cd-<id>` created from `origin/develop`. Conductor's prompt for the session is the authority on how it ends; in short:
 
-1. **Do not ask.** `AskUserQuestion` is removed; record every small decision as one line in the `## Assumptions` section of the PR description.
-2. **Do not create child worktrees.** The PR session and every subagent work right in the PR's worktree; no `isolation: "worktree"`, no `EnterWorktree`.
-3. **Delegate to the specialist agent** named in the `agent` column of `scripts/prs.toml`, pasting `.claude/rules/command-style.md` verbatim into the brief.
-4. **Wait for CI** with `gh pr checks <number> --watch --interval 30` in the foreground, timeout 600000, looping until it finishes. If CI is red, fix and push again.
-5. **Independent review, no self-review.** The PR session stops when CI is green (`RESULT: ready <number>`), does not call `code-reviewer`, and does not merge. The script runs a fresh `claude -p --agent code-reviewer` session (Opus, medium, not seeing the writing session's context); that session posts a comment and ends with `REVIEW: PASS` | `REVIEW: FAIL <finding>`. PASS: the script itself checks the 3 required checks, then runs `gh pr merge --squash`. FAIL: the PR session reruns with the review verdict; at most 2 review rounds, then it stops.
-6. **If permission is denied**, follow the "If a command is refused" section of `command-style.md`.
-7. **Do not edit `docs/progress.md`** in a feature PR (parallel runs would conflict); the script regenerates the progress itself.
-8. **The last line** of a PR session is always `RESULT: ready <PR number>` | `RESULT: failed <reason>` | `RESULT: blocked <what the repo owner must do>`. The script reads this line to continue (`RESULT: merged` is only still understood for old sessions).
+1. **Do not ask.** Record every small decision as one line in the `## Assumptions` section of the PR description.
+2. **Do not create child worktrees.** Work right in the task's worktree; no `isolation: "worktree"`, no `EnterWorktree`.
+3. **Write the tests and the code yourself**, TDD first (`.claude/rules/tdd.md`), following `.claude/rules/command-style.md`.
+4. **Push, open the PR against `develop`, then stop.** Do not wait for CI, do not review your own work, do not merge: conductor waits for the 3 required checks, runs an independent review (Codex or `code-reviewer`), sends the session back with the failing log or the review finding, and squash-merges on PASS.
+5. **If permission is denied**, follow the "If a command is refused" section of `command-style.md`.
+6. **Do not edit `docs/progress.md`** in a feature PR.
+7. **The last line** is exactly the one conductor's prompt asks for (`RESULT: pushed <PR>` | `RESULT: failed <reason>` | `RESULT: blocked <what the repo owner must do>`).
 
 Every time a command is asked about or denied, the hook `log_permission.py` writes it to `.claude/state/permission-log.jsonl`; the nightly report is `logs/run-<date>.md`.
 

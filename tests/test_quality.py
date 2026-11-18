@@ -575,6 +575,138 @@ def test_min_ratio_comes_from_the_config_file(tmp_path, cfg):
     assert [a.check for a in q.check_volume(counts, stricter)] == ["volume_drop"]
 
 
+# ---- known upstream gap hours (issue #77): an allowlist in quality.toml
+
+
+def gap_cfg(cfg, hours, **overrides) -> dict:
+    out = vol_cfg(cfg, **overrides)
+    out["volume"]["known_gaps"] = {"hours": list(hours)}
+    return out
+
+
+def test_default_config_lists_the_issue_77_gap_hours(cfg):
+    hours = cfg["volume"]["known_gaps"]["hours"]
+    for label in (
+        "2026-11-15T16",
+        "2026-11-15T21",
+        "2026-11-16T06",
+        "2026-11-17T03",
+        "2026-11-17T13",
+    ):
+        assert label in hours  # each counted with 0 PushEvent in the raw GH Archive file
+    for label in ("2026-11-16T08", "2026-11-16T15", "2026-11-17T14"):
+        assert label not in hours  # healthy (or unverified) hours are not allowlisted
+
+
+def test_config_without_known_gaps_table_still_loads(tmp_path):
+    data = tomllib.loads(CONFIG.read_text(encoding="utf-8"))
+    del data["volume"]["known_gaps"]  # a custom config written before the table existed
+    path = tmp_path / "quality.toml"
+    path.write_text(_to_toml(data), encoding="utf-8")
+    assert q.load_config(path)["volume"]["known_gaps"] == {"hours": []}
+
+
+def test_known_gap_hours_must_be_valid_hours(tmp_path):
+    data = tomllib.loads(CONFIG.read_text(encoding="utf-8"))
+    data["volume"].setdefault("known_gaps", {})["hours"] = ["2026-11-15 16:00"]
+    path = tmp_path / "quality.toml"
+    path.write_text(_to_toml(data), encoding="utf-8")
+    with pytest.raises(q.ConfigError, match=r"volume\.known_gaps\.hours"):
+        q.load_config(path)
+
+
+def test_known_gap_hour_raises_no_alert_and_is_reported(cfg):
+    counts = series([1000] * 30)
+    counts[hour(29)] = {"WatchEvent": 200}  # PushEvent gone and the total collapsed
+    assert {a.check for a in q.check_volume(counts, cfg)} == {"volume_drop", "volume_type_missing"}
+    allowed = gap_cfg(cfg, ["2026-11-02T05"])
+    assert q.check_volume(counts, allowed) == []
+    assert q.volume_status(counts, allowed)[-1]["status"] == "known_gap"
+
+
+def test_an_hour_next_to_a_known_gap_still_alerts(cfg):
+    counts = series([1000] * 30)
+    counts[hour(29)] = {"WatchEvent": 1000}
+    other = gap_cfg(cfg, ["2026-11-02T04"])
+    assert [a.check for a in q.check_volume(counts, other)] == ["volume_type_missing"]
+
+
+def test_known_gap_hours_are_left_out_of_the_history(cfg):
+    counts = series([1000] * 29)
+    for n in range(23, 28):  # 5 gap hours without PushEvent: they would drag the median to 0
+        counts[hour(n)] = {"WatchEvent": 400}
+    counts[hour(28)] = {"WatchEvent": 400}  # not allowlisted, no PushEvent
+    gaps = [hour(n).strftime("%Y-%m-%dT%H") for n in range(23, 28)]
+    small = vol_cfg(cfg, window_hours=8, evaluate_hours=1)
+    assert q.check_volume(counts, small) == []  # the gap hours hide the loss: the bug
+    guarded = gap_cfg(cfg, gaps, window_hours=8, evaluate_hours=1)
+    alerts = q.check_volume(counts, guarded)
+    assert [(a.check, a.details["event_type"]) for a in alerts] == [
+        ("volume_type_missing", "PushEvent")
+    ]
+    assert q.volume_status(counts, guarded)[-1]["history_hours"] == 3
+
+
+NOW_OUTAGE = hour(17) + timedelta(minutes=30)  # data stops after hour(11), 6 h ago
+
+
+def drop_hours(alerts) -> list[str]:
+    return sorted(a.data_hour for a in alerts if a.check == "volume_drop")
+
+
+def test_ingest_lag_is_a_validated_config_value(tmp_path, cfg):
+    assert cfg["volume"]["ingest_lag_hours"] == 2
+    assert (
+        q.load_config(write_config(tmp_path, volume__ingest_lag_hours=0))["volume"][
+            "ingest_lag_hours"
+        ]
+        == 0
+    )
+    with pytest.raises(q.ConfigError, match=r"volume\.ingest_lag_hours"):
+        q.load_config(write_config(tmp_path, volume__ingest_lag_hours=-1))
+
+
+def test_full_ingestion_outage_raises_volume_alerts(cfg):
+    counts = series([1000] * 12)  # 1000 events/hour through hour(11), then nothing
+    assert q.check_volume(counts, cfg) == []  # without `now` the window ends at the last data
+    alerts = q.check_volume(counts, cfg, now=NOW_OUTAGE)
+    # expected latest ingestion hour = 17:00 - 2 h lag = 15:00; evaluate_hours=3 -> 13, 14, 15
+    assert drop_hours(alerts) == ["2026-11-01T13", "2026-11-01T14", "2026-11-01T15"]
+
+
+def test_outage_hours_are_reported_with_zero_totals(cfg):
+    statuses = q.volume_status(series([1000] * 12), cfg, now=NOW_OUTAGE)
+    assert [(s["hour"], s["total"], s["status"]) for s in statuses] == [
+        ("2026-11-01T13", 0, "alert"),
+        ("2026-11-01T14", 0, "alert"),
+        ("2026-11-01T15", 0, "alert"),
+    ]
+
+
+def test_hours_still_inside_the_ingest_lag_are_not_expected_yet(cfg):
+    counts = series([1000] * 12)  # last data hour(11)
+    now = hour(13) + timedelta(minutes=10)  # expected latest hour = 11:00, which is present
+    assert q.check_volume(counts, cfg, now=now) == []
+
+
+def test_ingest_lag_comes_from_the_config_file(tmp_path, cfg):
+    counts = series([1000] * 12)
+    lagged = q.load_config(write_config(tmp_path, volume__ingest_lag_hours=6))
+    assert q.check_volume(counts, lagged, now=NOW_OUTAGE) == []  # expected latest = 11:00
+    assert drop_hours(q.check_volume(counts, cfg, now=NOW_OUTAGE)) != []
+
+
+def test_now_must_have_a_time_zone_for_volume(cfg):
+    with pytest.raises(ValueError, match="timezone-aware"):
+        q.check_volume(series([1000] * 12), cfg, now=datetime(2026, 11, 1, 17))
+
+
+def test_late_data_beyond_the_expected_hour_is_still_evaluated(cfg):
+    counts = series([1000] * 29 + [10])  # drop at hour(29), `now` is behind it
+    alerts = q.check_volume(counts, cfg, now=hour(20))
+    assert "2026-11-02T05" in drop_hours(alerts)
+
+
 def test_compare_hour_against_an_explicit_reference(cfg):
     history = [{"PushEvent": 600, "WatchEvent": 400}] * 3
     alerts, status = q.compare_hour(
@@ -1038,7 +1170,44 @@ def test_cli_check_writes_report_and_exits_zero_with_alerts(tmp_path, capsys):
     report = json.loads(report_path.read_text(encoding="utf-8"))
     assert [a["check"] for a in report["alerts"]] == ["freshness_stale"]
     assert report["freshness"]["latest_event_at"].startswith("2026-11-01T12:30:00")
-    assert report["volume"]["hours"][-1]["status"] == "insufficient_history"
+    # the volume window now runs to now - lag (10:00 on 2026-11-11): 0-event hours, history all 0
+    assert report["volume"]["hours"][-1]["hour"] == "2026-11-11T10"
+    assert report["volume"]["hours"][-1]["total"] == 0
+
+
+def test_cli_check_reports_a_full_ingestion_outage(tmp_path):
+    db = tmp_path / "staging.duckdb"
+    rows = [
+        (
+            f"{h}-{i}",
+            "PushEvent" if i < 6 else "WatchEvent",
+            f"2026-11-01 {h:02d}:10:00",
+            "2026-11-01",
+            h,
+        )
+        for h in range(12)
+        for i in range(10)
+    ]
+    make_staging(db, rows)
+    report_path = tmp_path / "dq-report.json"
+    code = q.main(
+        [
+            "check",
+            "--database",
+            str(db),
+            "--now",
+            "2026-11-01T17:30:00+00:00",
+            "--report",
+            str(report_path),
+        ]
+    )
+    assert code == 0
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert sorted(a["data_hour"] for a in report["alerts"] if a["check"] == "volume_drop") == [
+        "2026-11-01T13",
+        "2026-11-01T14",
+        "2026-11-01T15",
+    ]
 
 
 def test_cli_check_missing_database_exits_one(tmp_path, capsys):

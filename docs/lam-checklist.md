@@ -1,4 +1,4 @@
-# RepoPulse · Tasks for the repo owner
+# GitHub Analytics Data Pipeline · Tasks for the repo owner
 
 Agents cannot do the tasks below on your behalf. Do not paste tokens or passwords into chat or into files in the repo.
 

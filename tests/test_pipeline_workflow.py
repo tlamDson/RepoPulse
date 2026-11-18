@@ -178,6 +178,23 @@ def test_steps_run_in_pipeline_order():
     assert len(set(order)) == 5
 
 
+def test_missing_ingest_hours_fail_the_run_before_spark():
+    # repopulse.ingest exits 0 for an hour GH Archive has not published ("missing"); without this
+    # check Spark would run on empty input and the hour would be silently lost once it leaves the
+    # 3-hour retry window. The failed run leaves the hour without a manifest, so it stays eligible.
+    data = load()
+    check = step_index(data, "python -m repopulse.dagspec check-ingest")
+    assert "--summary out/ingest-summary.json" in steps(data)[check]["run"]
+    assert step_index(data, "python -m repopulse.ingest") < check
+    assert check < step_index(data, "python -m repopulse.spark.job --source gharchive")
+    step = steps(data)[check]
+    assert "if" not in step  # runs on schedule, dispatch and pull request alike
+    # The check only protects the run if its failure fails the job.
+    assert not step.get("continue-on-error"), "continue-on-error would swallow the failure"
+    assert "||" not in step["run"], "`|| true` would swallow the failure"
+    assert ";" not in step["run"], "a trailing command would hide the exit code"
+
+
 def test_spark_job_uses_the_window_of_the_ingest_summary():
     text = runs(load())
     assert "python -m repopulse.pipeline window --ingest-summary out/ingest-summary.json" in text

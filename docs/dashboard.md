@@ -1,6 +1,6 @@
 # Dashboard: static GitHub Pages site + CSVs for Tableau
 
-The public site `https://tlamdson.github.io/RepoPulse/` shows the 6 marts Q1–Q6 and `runs.csv`. The site
+The public site `https://tlamdson.github.io/github-analytics-data-pipeline/` shows the 6 marts Q1–Q6 and `runs.csv`. The site
 is plain HTML + CSS + JS in `site/` (no build tool, no npm, no CDN, no external fonts/analytics).
 The data is GH Archive (real data); the site currently has **no** simulated data; any part that later
 comes from the simulated app event stream must be labeled "simulated" (and recorded in
@@ -26,7 +26,7 @@ in the table are not exported).
 | `index.html`, `style.css`, `app.js` | copies of `site/` |
 | `data/<mart>.json` | `{mart, query, columns, rows}`; rows sorted by the mart's key, NaN → `null`, ISO dates |
 | `data/runs.json` | `{columns, rows}`; values keep the strings of `runs.csv`, empty cells → `null` |
-| `data/meta.json` | `generated_at` (UTC), `git_sha`, `schema`, `source` (GH Archive, `real_data: true`), `simulated_sections` (empty), `latest_data_date` (the largest date of Q1 `period = 'day'`), row count of each mart |
+| `data/meta.json` | `generated_at` (UTC), `git_sha`, `schema`, `source` (GH Archive, `real_data: true`), `simulated_sections` (empty), `first_data_date` / `latest_data_date` (the smallest / largest date of Q1 `period = 'day'`), row count of each mart |
 | `tableau/<mart>.csv`, `tableau/runs.csv` | CSVs for Tableau Public; `runs.csv` is copied byte for byte |
 
 Every number on the page comes from these files; the HTML contains no hand-written numbers (tested). JS builds the DOM with
@@ -37,7 +37,7 @@ Each Q1–Q6 section has an SVG chart + a number table + a CSV link:
 | Section | Chart |
 |---|---|
 | Q1 | line: active contributors per day by category (table = same values; per-repo/week rows are in the CSV) |
-| Q2 | line: W+4 and W+12 retention rate by cohort |
+| Q2 | line: W+4 and W+12 retention rate by cohort; a cohort whose W+4 / W+12 week is after the latest loaded day shows "not yet measurable" (NULL in the mart), and the section text states the data window start (`first_data_date`) |
 | Q3 | grouped horizontal bars: PRs opened / PRs merged, the repos with the most opened PRs |
 | Q4 | grouped horizontal bars: first response hours (median) for issues / PRs |
 | Q5 | horizontal bars: share of the top contributor (bus factor) |
@@ -97,7 +97,7 @@ environment itself; the exporter does not read or print the token.
 - Permissions: default `contents: read`; only `pages-deploy` has `pages: write` + `id-token: write`, environment
   `github-pages`. Deploys queue in the `pages-deploy` group and do not cancel the running one.
 - DuckDB is pinned to the same version as `pipeline.yml` (MotherDuck rejects newer clients).
-- Paths in the site are all relative (Pages serves under `/RepoPulse/`).
+- Paths in the site are all relative (Pages serves under `/github-analytics-data-pipeline/`).
 
 The `runs.csv` on the site is the version committed on `main`: pipeline rows sit in the artifact and only reach the
 site after being merged with `benchmarks/record_run.py` and merged into the repo (`docs/pipeline.md`).

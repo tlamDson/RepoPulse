@@ -241,7 +241,9 @@ models:
   - name: mart_repo_health_score
     description: >
       Q6 (q6.sql). Health score per repo from Q1-Q5 components; the formula is documented in
-      benchmarks/queries/q6.sql and docs/dbt-models.md.
+      benchmarks/queries/q6.sql and docs/dbt-models.md. health_rank and health_score are NULL
+      (not enough data) for a repo with fewer than q6_min_human_contributions (5) human
+      contributions.
     config:
       contract:
         enforced: true
@@ -249,8 +251,6 @@ models:
       - name: health_rank
         config: {meta: {pii: none}}
         data_type: bigint
-        constraints:
-          - type: not_null
         data_tests:
           - unique
       - name: repo_name
@@ -313,6 +313,31 @@ unit_tests:
            retention_w4_pct: 50.0, retention_w12_pct: 50.0}
         - {cohort_week: "2026-01-12", cohort_size: 1, retained_w4: 0, retained_w12: 0,
            retention_w4_pct: 0.0, retention_w12_pct: 0.0}
+
+  - name: retention_is_null_until_the_w4_w12_week_has_started
+    description: >
+      Latest loaded day is 2026-02-10. A retention pct is NULL while cohort_week + 28 (or 84)
+      days is later than that day (the window has no data yet), never 0.0; the retained counts stay
+      plain counts. 2026-01-05: W+4 week 2026-02-02 started (50.0), W+12 not (NULL).
+      2026-01-12: W+4 week 2026-02-09 started (0.0, nobody active), W+12 NULL.
+      2026-02-02: both windows are in the future (NULL, NULL).
+    model: mart_cohort_retention
+    given:
+      - input: ref('int_events_enriched')
+        rows:
+          - {actor_login: alice, is_bot: false, event_type: PullRequestEvent, action: opened, event_week: "2026-01-05", event_date: "2026-01-05"}
+          - {actor_login: alice, is_bot: false, event_type: IssueCommentEvent, action: created, event_week: "2026-02-02", event_date: "2026-02-03"}
+          - {actor_login: bob, is_bot: false, event_type: PullRequestEvent, action: opened, event_week: "2026-01-05", event_date: "2026-01-06"}
+          - {actor_login: carol, is_bot: false, event_type: PullRequestEvent, action: opened, event_week: "2026-01-12", event_date: "2026-01-13"}
+          - {actor_login: dave, is_bot: false, event_type: PullRequestEvent, action: opened, event_week: "2026-02-02", event_date: "2026-02-10"}
+    expect:
+      rows:
+        - {cohort_week: "2026-01-05", cohort_size: 2, retained_w4: 1, retained_w12: 0,
+           retention_w4_pct: 50.0, retention_w12_pct: null}
+        - {cohort_week: "2026-01-12", cohort_size: 1, retained_w4: 0, retained_w12: 0,
+           retention_w4_pct: 0.0, retention_w12_pct: null}
+        - {cohort_week: "2026-02-02", cohort_size: 1, retained_w4: 0, retained_w12: 0,
+           retention_w4_pct: null, retention_w12_pct: null}
 
   - name: funnel_counts_forkers_prs_and_merge_hours
     description: >
@@ -440,9 +465,11 @@ unit_tests:
     description: >
       org/a: 3 contributors (max, activity 1), 1 of 3 active in 2 weeks, its PR merged, 1 of 2
       items answered and closed, top1 share 0.5. Score = 100 * (0.25 + 0.15 / 3 + 0.15 + 0.20 *
-      0.5 + 0.10 * 0.5 + 0.15 * 0.5) = 67.5. org/b: 1 contributor, one unanswered issue: 100 *
-      0.25 / 3 = 8.33.
+      0.5 + 0.10 * 0.5 + 0.15 * 0.5) = 67.5. org/b: 1 contributor, one unanswered issue, no PR:
+      merge is n/a (NULL), so its weight drops out: 100 * (0.25 / 3) / 0.85 = 9.80.
     model: mart_repo_health_score
+    overrides:
+      vars: {q6_min_human_contributions: 1}
     given:
       - input: ref('dim_repo')
         rows:
@@ -455,11 +482,109 @@ unit_tests:
           - {repo_name: org/a, actor_login: u1, is_bot: false, event_type: PullRequestEvent, action: opened, item_number: 2, event_week: "2026-01-12", created_at: "2026-01-12 10:00:00"}
           - {repo_name: org/a, actor_login: m, is_bot: false, event_type: PullRequestEvent, action: closed, pr_merged: true, item_number: 2, event_week: "2026-01-12", created_at: "2026-01-12 12:00:00"}
           - {repo_name: org/b, actor_login: v1, is_bot: false, event_type: IssuesEvent, action: opened, item_number: 5, event_week: "2026-01-05", created_at: "2026-01-05 09:00:00"}
+          # a later bot event moves the window end so every item above has a 7-day follow-up window
+          - {repo_name: org/a, actor_login: "ci[bot]", is_bot: true, event_type: IssueCommentEvent, action: created, item_number: 99, event_week: "2026-02-02", created_at: "2026-02-02 09:00:00"}
     expect:
       rows:
         - {health_rank: 1, repo_name: org/a, category: compute, activity_score: 1.0,
            retention_score: 0.3333, merge_score: 1.0, response_score: 0.5, close_score: 0.5,
            diversity_score: 0.5, health_score: 67.5}
         - {health_rank: 2, repo_name: org/b, category: bi, activity_score: 0.3333,
-           retention_score: 0.0, merge_score: 0.0, response_score: 0.0, close_score: 0.0,
-           diversity_score: 0.0, health_score: 8.33}
+           retention_score: 0.0, merge_score: null, response_score: 0.0, close_score: 0.0,
+           diversity_score: 0.0, health_score: 9.8}
+
+  - name: repo_health_score_rates_only_items_with_a_full_follow_up_window
+    description: >
+      Window end = the last event (01-20 10:00). org/a's PR (opened 01-05, reviewed, merged) has
+      a full 7-day follow-up window: merge, response, close 1; 100 * (0.25 + 0.15 + 0.20 + 0.10
+      + 0.15 / 3) = 75.0. org/b's only issue opened at the window end is not rated: merge,
+      response, close n/a although org/a has follow-ups; 100 * 0.125 / 0.55 = 22.73.
+    model: mart_repo_health_score
+    overrides:
+      vars: {q6_min_human_contributions: 1}
+    given:
+      - input: ref('dim_repo')
+        rows:
+          - {repo_key: org/a, repo_name: org/a, category: compute}
+          - {repo_key: org/b, repo_name: org/b, category: bi}
+      - input: ref('int_events_enriched')
+        rows:
+          - {repo_name: org/a, actor_login: alice, is_bot: false, event_type: PullRequestEvent, action: opened, item_number: 1, event_week: "2026-01-05", created_at: "2026-01-05 09:00:00"}
+          - {repo_name: org/a, actor_login: maint, is_bot: false, event_type: PullRequestReviewEvent, action: created, item_number: 1, event_week: "2026-01-05", created_at: "2026-01-05 11:00:00"}
+          - {repo_name: org/a, actor_login: maint, is_bot: false, event_type: PullRequestEvent, action: merged, item_number: 1, event_week: "2026-01-05", created_at: "2026-01-05 12:00:00"}
+          - {repo_name: org/b, actor_login: bob, is_bot: false, event_type: IssuesEvent, action: opened, item_number: 2, event_week: "2026-01-19", created_at: "2026-01-20 10:00:00"}
+    expect:
+      rows:
+        - {health_rank: 1, repo_name: org/a, category: compute, activity_score: 1.0,
+           retention_score: 0.0, merge_score: 1.0, response_score: 1.0, close_score: 1.0,
+           diversity_score: 0.3333, health_score: 75.0}
+        - {health_rank: 2, repo_name: org/b, category: bi, activity_score: 0.5,
+           retention_score: 0.0, merge_score: null, response_score: null, close_score: null,
+           diversity_score: 0.0, health_score: 22.73}
+
+  - name: repo_health_score_without_follow_up_evidence_is_null_and_renormalised
+    description: >
+      Items opened but no merge, response or close matched anywhere in the loaded window (UX-1):
+      merge, response and close are n/a (NULL), not 0, and the score is renormalised over the
+      available components. org/a: 2 contributors (activity 1), alice in 2 weeks (retention
+      0.5), top1 share 2/3: 100 * (0.25 + 0.075 + 0.05) / 0.55 = 68.18. org/b: activity 0.5:
+      100 * 0.125 / 0.55 = 22.73.
+    model: mart_repo_health_score
+    overrides:
+      vars: {q6_min_human_contributions: 1}
+    given:
+      - input: ref('dim_repo')
+        rows:
+          - {repo_key: org/a, repo_name: org/a, category: compute}
+          - {repo_key: org/b, repo_name: org/b, category: bi}
+      - input: ref('int_events_enriched')
+        rows:
+          - {repo_name: org/a, actor_login: alice, is_bot: false, event_type: PullRequestEvent, action: opened, item_number: 1, event_week: "2026-01-05", created_at: "2026-01-05 10:00:00"}
+          - {repo_name: org/a, actor_login: alice, is_bot: false, event_type: IssuesEvent, action: opened, item_number: 2, event_week: "2026-01-12", created_at: "2026-01-12 10:00:00"}
+          - {repo_name: org/a, actor_login: bob, is_bot: false, event_type: IssueCommentEvent, action: created, item_number: 9, event_week: "2026-01-12", created_at: "2026-01-12 11:00:00"}
+          - {repo_name: org/b, actor_login: carol, is_bot: false, event_type: PullRequestEvent, action: opened, item_number: 5, event_week: "2026-01-05", created_at: "2026-01-05 09:00:00"}
+    expect:
+      rows:
+        - {health_rank: 1, repo_name: org/a, category: compute, activity_score: 1.0,
+           retention_score: 0.5, merge_score: null, response_score: null, close_score: null,
+           diversity_score: 0.3333, health_score: 68.18}
+        - {health_rank: 2, repo_name: org/b, category: bi, activity_score: 0.5,
+           retention_score: 0.0, merge_score: null, response_score: null, close_score: null,
+           diversity_score: 0.0, health_score: 22.73}
+
+  - name: repo_health_score_needs_five_human_contributions_else_not_enough_data
+    description: >
+      UX-6, default minimum (q6_min_human_contributions = 5). org/a: 5 human contributions (u1 x3,
+      u2 x2): scored, 100 * (0.25 + 0.15 * 0.4) / 0.55 = 56.36 (merge, response, close n/a, no
+      item to rate). org/b: 4 human contributions and org/c: only bot events (no human): not
+      enough data, so NULL rank and NULL score; the components stay visible.
+    model: mart_repo_health_score
+    given:
+      - input: ref('dim_repo')
+        rows:
+          - {repo_key: org/a, repo_name: org/a, category: compute}
+          - {repo_key: org/b, repo_name: org/b, category: bi}
+          - {repo_key: org/c, repo_name: org/c, category: orchestration}
+      - input: ref('int_events_enriched')
+        rows:
+          - {repo_name: org/a, actor_login: u1, is_bot: false, event_type: IssueCommentEvent, action: created, item_number: 1, event_week: "2026-01-05", created_at: "2026-01-05 09:00:00"}
+          - {repo_name: org/a, actor_login: u1, is_bot: false, event_type: IssueCommentEvent, action: created, item_number: 1, event_week: "2026-01-05", created_at: "2026-01-05 09:01:00"}
+          - {repo_name: org/a, actor_login: u1, is_bot: false, event_type: IssueCommentEvent, action: created, item_number: 1, event_week: "2026-01-05", created_at: "2026-01-05 09:02:00"}
+          - {repo_name: org/a, actor_login: u2, is_bot: false, event_type: IssueCommentEvent, action: created, item_number: 1, event_week: "2026-01-05", created_at: "2026-01-05 09:03:00"}
+          - {repo_name: org/a, actor_login: u2, is_bot: false, event_type: IssueCommentEvent, action: created, item_number: 1, event_week: "2026-01-05", created_at: "2026-01-05 09:04:00"}
+          - {repo_name: org/b, actor_login: u3, is_bot: false, event_type: IssueCommentEvent, action: created, item_number: 2, event_week: "2026-01-05", created_at: "2026-01-05 09:00:00"}
+          - {repo_name: org/b, actor_login: u3, is_bot: false, event_type: IssueCommentEvent, action: created, item_number: 2, event_week: "2026-01-05", created_at: "2026-01-05 09:01:00"}
+          - {repo_name: org/b, actor_login: u4, is_bot: false, event_type: IssueCommentEvent, action: created, item_number: 2, event_week: "2026-01-05", created_at: "2026-01-05 09:02:00"}
+          - {repo_name: org/b, actor_login: u4, is_bot: false, event_type: IssueCommentEvent, action: created, item_number: 2, event_week: "2026-01-05", created_at: "2026-01-05 09:03:00"}
+          - {repo_name: org/c, actor_login: "ci[bot]", is_bot: true, event_type: IssueCommentEvent, action: created, item_number: 3, event_week: "2026-01-05", created_at: "2026-01-05 09:00:00"}
+    expect:
+      rows:
+        - {health_rank: 1, repo_name: org/a, category: compute, activity_score: 1.0,
+           retention_score: 0.0, merge_score: null, response_score: null, close_score: null,
+           diversity_score: 0.4, health_score: 56.36}
+        - {health_rank: null, repo_name: org/b, category: bi, activity_score: 1.0,
+           retention_score: 0.0, merge_score: null, response_score: null, close_score: null,
+           diversity_score: 0.5, health_score: null}
+        - {health_rank: null, repo_name: org/c, category: orchestration, activity_score: 0.0,
+           retention_score: 0.0, merge_score: null, response_score: null, close_score: null,
+           diversity_score: 0.0, health_score: null}
