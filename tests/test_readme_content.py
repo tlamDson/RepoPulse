@@ -50,12 +50,10 @@ def test_readme_has_one_results_marker_pair_in_order():
     assert readme.index(START) < readme.index(END)
 
 
-def test_readme_has_an_architecture_diagram():
-    assert "```mermaid" in read_text("README.md")
-
-
-def test_readme_has_design_decisions_heading():
-    assert re.search(r"^#{2,3} Design decisions\s*$", read_text("README.md"), re.MULTILINE)
+def test_development_guide_has_design_decisions_heading():
+    # The architecture diagram is an SVG now (tests/test_readme_recruiter.py) and the design
+    # decisions moved from README.md to DEVELOPMENT.md.
+    assert re.search(r"^#{2,3} Design decisions\s*$", read_text("DEVELOPMENT.md"), re.MULTILINE)
 
 
 def test_readme_no_longer_says_it_is_bootstrapping():
@@ -182,7 +180,6 @@ def test_hand_written_readme_text_quotes_no_decimal_that_runs_csv_lacks():
 
 
 DASHBOARD_URL = "https://tlamdson.github.io/RepoPulse/"
-SCREENSHOT = "docs/images/dashboard.png"
 
 
 def test_readme_links_the_live_dashboard_near_the_top():
@@ -194,15 +191,3 @@ def test_readme_links_the_live_dashboard_near_the_top():
     text_link = re.search(rf"<{url}>|(?<!!)\[[^\]\n]+\]\({url}\)", head)
 
     assert text_link, "the first section needs a clickable text link to the live dashboard"
-
-
-def test_readme_shows_a_dashboard_screenshot_that_links_to_the_dashboard():
-    readme = read_text("README.md")
-    head = readme[: readme.index("## What it does")]
-    url = re.escape(DASHBOARD_URL)
-    image = r"!\[[^\]\n]+\]\(" + re.escape(SCREENSHOT) + r"\)"
-
-    assert re.search(rf"\[{image}\]\({url}\)", head), (
-        "the screenshot must be a link to the dashboard"
-    )
-    assert (ROOT / SCREENSHOT).is_file()
