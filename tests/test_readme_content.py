@@ -189,12 +189,20 @@ def test_readme_links_the_live_dashboard_near_the_top():
     readme = read_text("README.md")
     head = readme[: readme.index("## What it does")]
 
-    assert DASHBOARD_URL in head
+    url = re.escape(DASHBOARD_URL)
+    # A clickable text link: an autolink <URL> or [text](URL) that is not an image.
+    text_link = re.search(rf"<{url}>|(?<!!)\[[^\]\n]+\]\({url}\)", head)
+
+    assert text_link, "the first section needs a clickable text link to the live dashboard"
 
 
-def test_readme_shows_a_dashboard_screenshot_near_the_top():
+def test_readme_shows_a_dashboard_screenshot_that_links_to_the_dashboard():
     readme = read_text("README.md")
     head = readme[: readme.index("## What it does")]
+    url = re.escape(DASHBOARD_URL)
+    image = r"!\[[^\]\n]+\]\(" + re.escape(SCREENSHOT) + r"\)"
 
-    assert re.search(r"!\[[^\]]+\]\(" + re.escape(SCREENSHOT) + r"\)", head)
+    assert re.search(rf"\[{image}\]\({url}\)", head), (
+        "the screenshot must be a link to the dashboard"
+    )
     assert (ROOT / SCREENSHOT).is_file()
